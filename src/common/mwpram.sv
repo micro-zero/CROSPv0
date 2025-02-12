@@ -17,10 +17,11 @@ module mwpram #(parameter width = 64, parameter depth = 64,
     /* the basic idea is to use duplicate RAM controlled by
        fewer bits of selection, so that LUT and FF resources
        are reduced from `width` to selection width */
-    logic [$clog2(wports)-1:0] sel[depth-1:0]; // the selections
+    localparam selwd = wports == 1 ? 1 : $clog2(wports);
+    logic [selwd-1:0] sel[depth-1:0]; // the selections
     always_ff @(posedge clk)
         /* selection is set to related bank of RAM */
-        for (int i = 0; i < wports; i++) if (wena[i]) sel[waddr[i]] <= $clog2(wports)'(i);
+        for (int i = 0; i < wports; i++) if (wena[i]) sel[waddr[i]] <= (selwd)'(i);
     for (genvar i = 0; i < wports; i++) begin : dupregs
         logic [width-1:0] regs[depth-1:0]; // the duplicated registers (RAM)
         always_ff @(posedge clk)

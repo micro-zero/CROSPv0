@@ -38,10 +38,11 @@ module commit #(
     /* exception return signals */
     output logic  [2:0] eret,      // exception return bits (MSB is valid bit)
     /* ID control */
-    output logic  [7:0] nextlsid,  // next operation ID to commit
+    output logic  [7:0] nextldid,  // next load ID to commit
+    output logic  [7:0] nextstid,  // next store ID to commit
     /* fences */
-    output logic fencei, // fence.i committed
-    output logic sfence  // sfence.vma committed
+    output logic fencei,           // fence.i committed
+    output logic sfence            // sfence.vma committed
 );
     /* pipeline redirect and rollback */
     logic redir, rollback, rollback_last;
@@ -70,7 +71,8 @@ module commit #(
         dec_waddr [i]      = $clog2(usz)'(dec_bundle[i].opid);
         dec_wena  [i]      = dec_bundle[i].opid[15];
         dec_wvalue[i].brid = dec_bundle[i].brid;
-        dec_wvalue[i].lsid = dec_bundle[i].lsid;
+        dec_wvalue[i].ldid = dec_bundle[i].ldid;
+        dec_wvalue[i].stid = dec_bundle[i].stid;
         dec_wvalue[i].pc   = dec_bundle[i].pc;
         dec_wvalue[i].pat  = dec_bundle[i].pat;
         dec_wvalue[i].ir   = dec_bundle[i].ir;
@@ -173,12 +175,10 @@ module commit #(
     rob_ren_t ren_last;        // renaming part of last commited entry
     logic [cwd-1:0] com_redir; // redirection of `cwd` instructions to commit
     always_comb begin
-        nextlsid = dec_rvalue[0].lsid;
-        for (int i = 1; i < cwd; i++)
-            if (~com_redir[i] & com_bundle[i - 1].opid[15])
-                nextlsid = dec_rvalue[i].lsid;
-        if (com_bundle[cwd - 1].opid[15])
-            nextlsid = 0;
+        {nextldid, nextstid} = {dec_rvalue[0].ldid, dec_rvalue[0].stid};
+        for (int i = 1; i < cwd; i++) if (~com_redir[i] & com_bundle[i - 1].opid[15])
+             {nextldid, nextstid} = {dec_rvalue[i].ldid, dec_rvalue[i].stid};
+        if (com_bundle[cwd - 1].opid[15]) {nextldid, nextstid} = 0;
     end
     always_comb begin
         com_redir = 0;
@@ -199,6 +199,8 @@ module commit #(
         for (int i = 0; i < cwd; i++) begin
             com_bundle[i].opid     = {1'b1, 15'(rob_raddr[i])};
             com_bundle[i].brid     = dec_rvalue[i].brid;
+            com_bundle[i].ldid     = dec_rvalue[i].ldid;
+            com_bundle[i].stid     = dec_rvalue[i].stid;
             com_bundle[i].pc       = dec_rvalue[i].pc;
             com_bundle[i].call     = dec_rvalue[i].call;
             com_bundle[i].ret      = dec_rvalue[i].ret;
@@ -222,6 +224,8 @@ module commit #(
             com_bundle = 0;
             com_bundle[0].redir = 1;
             com_bundle[0].brid = exception ? 0 : dec_last.brid;
+            com_bundle[0].ldid = dec_last.ldid;
+            com_bundle[0].stid = dec_last.stid;
             com_bundle[0].pc = dec_last.pc;
             com_bundle[0].pat = dec_last.pat;
             com_bundle[0].comp = ~&dec_last.ir[1:0];

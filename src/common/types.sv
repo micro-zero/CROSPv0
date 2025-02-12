@@ -29,7 +29,8 @@ typedef struct packed {
 typedef struct packed {
     /* common identification */
     logic [15:0] opid;       // instruction operation ID (MSB is valid bit)
-    logic  [7:0] brid, lsid; // branch ID and LSU ID (MSB is valid bit)
+    logic  [7:0] brid;       // branch ID (MSB is valid bit)
+    logic  [7:0] ldid, stid; // load ID and store ID (MSB is valid bit)
     logic [1:0] pf;          // instruction page fault (per 16-bit)
     logic call, ret;         // call/return instruction
     logic [63:0] pc;         // program counter
@@ -38,7 +39,6 @@ typedef struct packed {
     logic [2:0] delta;       // PC delta
     /* micro-operation */
     logic [4:0] fu;          // function unit mask, [4]div/[3]mul/[2]fpu/[1]lsu/[0]alu
-
     logic [63:0] funct;      // functional code
     /* oprands */
     logic [64:0] base;       // branch and jump address base (MSB means reading from register)
@@ -58,7 +58,7 @@ typedef struct packed {
 typedef struct packed {
     /* propagation of decoder bundle */
     logic [15:0] opid;
-    logic  [7:0] lsid;
+    logic [7:0] ldid, stid;
     logic [31:0] ir;
     logic [2:0] delta;
     logic [4:0] fu;
@@ -74,7 +74,7 @@ typedef struct packed {
 typedef struct packed {
     /* propagation of decoder bundle */
     logic [15:0] opid;
-    logic  [7:0] lsid;
+    logic [7:0] ldid, stid;
     logic [31:0] ir;
     logic [2:0] delta;
     logic [4:0] fu;
@@ -89,7 +89,7 @@ typedef struct packed {
 typedef struct packed {
     /* propagation of issue bundle */
     logic [15:0] opid;
-    logic  [7:0] lsid;
+    logic [7:0] ldid, stid;
     logic [2:0] delta;
     logic [31:0] ir;
     logic [4:0] fu;
@@ -102,33 +102,34 @@ typedef struct packed {
 } reg_bundle_t;
 
 typedef struct packed {
-    logic [15:0] opid;  // operation ID
-    logic  [7:0] lsid;  // LSU ID
-    logic [63:0] npc;   // next PC
-    logic [15:0] prda;  // physical destination register number
-    logic [63:0] prdv;  // physical destination register value
-    logic [7:0]  cause; // exception cause, MSB is exception bit, the next is interrupt bit
-    logic [2:0]  ret;   // exception return, MSB is valid bit
-    logic [63:0] tval;  // exception trap value
-    logic mem, csr;     // memory/CSR change (redundant) (for testing)
-    logic flush;        // force pipeline flush
+    logic [15:0] opid;       // operation ID
+    logic [7:0] ldid, stid;  // load and store ID
+    logic [63:0] npc;        // next PC
+    logic [15:0] prda;       // physical destination register number
+    logic [63:0] prdv;       // physical destination register value
+    logic  [7:0] cause;      // exception cause, MSB is exception bit, the next is interrupt bit
+    logic  [2:0] ret;        // exception return, MSB is valid bit
+    logic [63:0] tval;       // exception trap value
+    logic mem, csr;          // memory/CSR change (redundant) (for testing)
+    logic flush;             // force pipeline flush
 } exe_bundle_t;
 
 typedef struct packed {
-    logic [15:0] opid;       // operation ID
-    logic  [7:0] brid;       // branch ID
-    logic comp;              // compressed instruction
-    logic call, ret;         // call/ret instruction
-    logic [1:0] pat;         // branch pattern
-    logic redir;             // redirect (use `brid` to reinforce)
-    logic [63:0] pc, npc;    // PC and next PC
-    logic rollback;          // rollback signal
-    logic       [6:0] lrda;  // rollback logical register number
-    logic [1:0][15:0] prda;  // old and new physical register number
+    logic [15:0] opid;      // operation ID
+    logic [7:0] brid;       // branch ID
+    logic [7:0] ldid, stid; // load/store ID
+    logic comp;             // compressed instruction
+    logic call, ret;        // call/ret instruction
+    logic [1:0] pat;        // branch pattern
+    logic redir;            // redirect (use `brid` to reinforce)
+    logic [63:0] pc, npc;   // PC and next PC
+    logic rollback;         // rollback signal
+    logic       [6:0] lrda; // rollback logical register number
+    logic [1:0][15:0] prda; // old and new physical register number
 } com_bundle_t;
 
 typedef struct packed {
-    logic [7:0] brid, lsid;
+    logic [7:0] brid, ldid, stid;
     logic [63:0] pc;
     logic [31:0] ir;
     logic [1:0] pat;

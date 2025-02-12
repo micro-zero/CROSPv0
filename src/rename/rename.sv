@@ -150,7 +150,8 @@ module rename #(
     /* assign rename queue input and output */
     always_comb for (int i = 0; i < rwd; i++) begin
         rq_wvalue[i].opid    = dec_bundle[i].opid;
-        rq_wvalue[i].lsid    = dec_bundle[i].lsid;
+        rq_wvalue[i].ldid    = dec_bundle[i].ldid;
+        rq_wvalue[i].stid    = dec_bundle[i].stid;
         rq_wvalue[i].ir      = dec_bundle[i].ir;
         rq_wvalue[i].delta   = dec_bundle[i].delta;
         rq_wvalue[i].fu      = dec_bundle[i].fu;

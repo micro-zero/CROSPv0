@@ -7,9 +7,6 @@
 #ifndef PWD
 #define PWD 4
 #endif
-#ifndef MWD
-#define MWD 2
-#endif
 #ifndef INITRD
 #define INITRD 0xfe60fe00
 #endif

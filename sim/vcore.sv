@@ -20,7 +20,6 @@ typedef struct packed {
 
 module vcore #(
     parameter pwd    = 4,
-    parameter mwd    = 2,
     parameter prnum  = 96,
     parameter rst_pc = 64'hc0000000,
     parameter tohost = 64'd0,
@@ -108,9 +107,9 @@ module vcore #(
     output logic        del_csrw,        // CSR writing signal
     output logic [11:0] del_csra,        // CSR writing address
     output logic [63:0] del_csrv,        // CSR writing value
-    output logic  [7:0] del_memw [1:0],  // memory change signals
-    output logic [63:0] del_mema [1:0],  // memory change address
-    output logic [63:0] del_memv [1:0],  // memory change value
+    output logic  [7:0] del_memw,        // memory change signals
+    output logic [63:0] del_mema,        // memory change address
+    output logic [63:0] del_memv,        // memory change value
     /* stats */
     output logic [63:0] stallpc, // commit stalling position
     output logic [63:0] bmisp,   // back-end misprediction
@@ -128,7 +127,7 @@ module vcore #(
 );
     /* instantiate core with direct memory interface */
     logic [63:0] dp0, dp1, dp2;
-    crosplite #(.pwd(pwd), .mwd(mwd), .rst_pc(rst_pc), .dcbase(dcbase),
+    crosplite #(.pwd(pwd), .rst_pc(rst_pc), .dcbase(dcbase),
         .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
         clk, rst, sync_rqst, sync_invl, sync_done, mip_ext, mtime, dp0, dp1, dp2,
         m_axi_awid, m_axi_awaddr, m_axi_awlen, m_axi_awsize, m_axi_awburst,
@@ -163,6 +162,9 @@ module vcore #(
 
     /* architectural states change */
     rob_csr_t rob_csr[127:0];
+    logic [7:0][63:0] st_addr, st_data;
+    logic [7:0] [7:0] st_size;
+    logic [5:0] st_offset;
     always_comb begin
         for (int i = 0; i < pwd; i++) begin
             cmt      [i] = inst.com_bundle[i].opid[15] & ~inst.com_bundle[i].redir &
@@ -210,17 +212,19 @@ module vcore #(
             del_csra = del_csra + 12'h200; // sstatus, sip, sie
         if (del_csra >= 12'hc00 && del_csra <= 12'hc02)
             del_csra = del_csra - 12'h100; // cycle, time, instret
-        del_memw[0] = 0;
-        del_mema[0] = inst.l1_inst.dset_padd;
-        del_memv[0] = inst.l1_inst.dset_wdat[63:0];
-        if (~inst.l1_inst.axi_dcw & ~inst.l1_inst.axi_dcr & inst.l1_inst.dset_rqst[7] &
-            inst.l1_inst.dset_hitpos[3] & inst.l1_inst.dset_wdat[64])
-            del_memw[0] = 8'(1 << inst.l1_inst.dset_bits[1:0]);
-        del_memw[1] = 0;
-        del_mema[1] = inst.l1_inst.m_axi_awaddr;
-        del_memv[1] = inst.l1_inst.m_axi_wdata;
-        if (inst.l1_inst.axi_stt == 35 & inst.l1_inst.m_axi_bvalid)
-            del_memw[1] = $countones(inst.l1_inst.m_axi_wstrb);
+        del_memw = &inst.dc_resp[7:5] & ~&inst.dc_miss[7:5] ? st_size[3'(inst.dc_resp)] : 0;
+        del_mema = st_addr[3'(inst.dc_resp)];
+        del_memv = st_data[3'(inst.dc_resp)];
+    end
+    /* address and write data stored with request */
+    always_comb begin
+        st_offset = 0;
+        for (int i = 63; i >= 0; i--) if (inst.dc_strb[i]) st_offset = 6'(i);
+    end
+    always_ff @(posedge clk) if (inst.dc_rqst[7:5] == 3'b111) begin
+        st_addr[3'(inst.dc_rqst)] <= inst.dc_addr;
+        st_data[3'(inst.dc_rqst)] <= inst.dc_wdat >> 8 * st_offset;
+        st_size[3'(inst.dc_rqst)] <= $countones(inst.dc_strb);
     end
     /* extract CSR info after decode stage */
     always_ff @(posedge clk) for (int i = 0; i < pwd; i++) if (inst.dec_inst.decode[i]) begin
@@ -261,20 +265,20 @@ module vcore #(
             if (inst.com_inst.dec_last.jal)    jmisp  <= jmisp + 1;
             if (inst.com_inst.dec_last.jalr)   jrmisp <= jrmisp + 1;
         end else if (|inst.fe_inst.redir)  fmisp  <= fmisp + 1;
-    always_ff @(posedge clk) if (rst) loads <= 0; else loads <= loads +
-        (inst.s_dcache_rqst[0][7] & ~inst.s_dcache_wena[0] ? 1 : 0) +
-        (inst.s_dcache_rqst[1][7] & ~inst.s_dcache_wena[1] ? 1 : 0);
-    always_ff @(posedge clk) if (rst) stores <= 0; else stores <= stores +
-        (inst.s_dcache_rqst[0][7] & inst.s_dcache_wena[0] ? 1 : 0) +
-        (inst.s_dcache_rqst[1][7] & inst.s_dcache_wena[1] ? 1 : 0);
-    always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (|inst.l1_inst.axi_done)  dcmiss <= dcmiss + 1;
-    always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.l1_inst.dc_done[9]) icmiss <= icmiss + 1;
-    always_ff @(posedge clk) if (rst) stmiss <= 0;
-        else if (inst.l1_inst.ptw_done & ~|inst.l1_inst.stlb_done) stmiss <= stmiss + 1;
-    always_ff @(posedge clk) if (rst) itmiss <= 0;
-        else if (inst.l1_inst.stlb_done[0] & ~inst.l1_inst.itlb_done[7]) itmiss <= itmiss + 1;
-    always_ff @(posedge clk) if (rst) dtmiss <= 0;
-        else if (inst.l1_inst.stlb_done[1] & ~inst.l1_inst.dtlb_done[7]) dtmiss <= dtmiss + 1;
+    // always_ff @(posedge clk) if (rst) loads <= 0; else loads <= loads +
+    //     (inst.dc_rqst[0][7] & ~|inst.dc_strb[0] ? 1 : 0) +
+    //     (inst.dc_rqst[1][7] & ~|inst.dc_strb[1] ? 1 : 0);
+    // always_ff @(posedge clk) if (rst) stores <= 0; else stores <= stores +
+    //     (inst.dc_rqst[0][7] & |inst.dc_strb[0] ? 1 : 0) +
+    //     (inst.dc_rqst[1][7] & |inst.dc_strb[1] ? 1 : 0);
+    // always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (|inst.mmu_inst.axi_done)  dcmiss <= dcmiss + 1;
+    // always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.dc_done[9]) icmiss <= icmiss + 1;
+    // always_ff @(posedge clk) if (rst) stmiss <= 0;
+    //     else if (inst.mmu_inst.ptw_done & ~|inst.mmu_inst.stlb_done) stmiss <= stmiss + 1;
+    // always_ff @(posedge clk) if (rst) itmiss <= 0;
+    //     else if (inst.mmu_inst.stlb_done[0] & ~inst.mmu_inst.itlb_done[7]) itmiss <= itmiss + 1;
+    // always_ff @(posedge clk) if (rst) dtmiss <= 0;
+    //     else if (inst.mmu_inst.stlb_done[1] & ~inst.mmu_inst.dtlb_done[7]) dtmiss <= dtmiss + 1;
 
     /* assertion */
     always_comb assert(inst.dec_inst.opnum <= inst.dec_inst.opsz);

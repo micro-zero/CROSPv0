@@ -1,7 +1,7 @@
 /**
  * frontend.sv:
  *   This file includes top module of frontend, which generate
- *   PC, connects I-cache and devide data into instructions.
+ *   PC, connects ICACHE and devide data into instructions.
  */
 
 `include "types.sv"
@@ -25,13 +25,18 @@ module frontend #(
     input  com_bundle_t [cwd-1:0] com_bundle, // frontend update information
     input  logic        [fwd-1:0] fetch,      // fetch/ready signal
     output fet_bundle_t [fwd-1:0] fet_bundle, // frontend output bundle
-    /* I-cache signals */
-    output logic         [7:0] icache_rqst, // I-cache request ID, MSB is valid bit
-    output logic        [63:0] icache_addr, // I-cache address
-    output logic               icache_flsh, // I-cache flush signal
-    input  logic         [7:0] icache_done, // I-cache response signal
-    input  logic               icache_pgft, // I-cache page fault
-    input  logic [16*fnum-1:0] icache_data  // I-cache reading data
+    /* ITLB interface */
+    output logic  [7:0] it_rqst, // ITLB request ID
+    output logic [63:0] it_vadd, // ITLB virtual address
+    input  logic  [7:0] it_resp, // ITLB response ID
+    input  logic  [7:0] it_perm, // ITLB access permission
+    input  logic [63:0] it_padd, // ITLB physical address
+    /* ICACHE interface */
+    output logic               ic_flsh, // instruction cache flush signal
+    output logic         [7:0] ic_rqst, // instruction cache request ID
+    output logic        [63:0] ic_addr, // instruction cache physical address
+    input  logic         [7:0] ic_resp, // instruction cache response ID
+    input  logic [16*fnum-1:0] ic_rdat  // instruction cache read data
 );
     /* pipeline redirect and reinforcement */
     logic reinf;            // reinforcement signal
@@ -114,20 +119,21 @@ module frontend #(
     end
 
     /* PC generation */
-    logic        pcg_ready;  // ready to get PC and send to I-cache
+    logic        pcg_ready;  // ready to get PC and send to ICACHE
     pcg_bundle_t pcg_bundle; // PC information from PC generation module
     pcgen #(.init(init), .rst_pc(rst_pc), .fnum(fnum), .cbsz(cbsz), .phtsz(phtsz), .btbsz(btbsz))
         pcg_inst(.clk(clk), .rst(rst), .redir(redir[0]), .reinf(reinf),
             .upc(upc), .unpc(unpc), .upat(upat), .ready(pcg_ready), .out(pcg_bundle));
 
     /* fetch target queue */
-    logic [$clog2(ftqsz)-1:0] ftq_front;       // fetch target queue front index
-    logic [$clog2(ftqsz):0] ftq_num;           // fetch target queue size (0 ~ ftqsz + 1)
-    logic          [63:0] ftq_pc  [ftqsz-1:0]; // address of each fetch
+    logic [$clog2(ftqsz)-1:0] ftq_front;       // fetch target queue front index]
+    logic [$clog2(ftqsz):0] ftq_num;           // fetch target queue size (0 ~ ftqsz)
+    logic [$clog2(ftqsz):0] ftq_trn, ftq_acc;  // translated and accessed numbers (0 ~ ftqsz)
+    logic          [63:0] ftq_vpc [ftqsz-1:0]; // virtual address of each fetch
+    logic          [63:0] ftq_ppc [ftqsz-1:0]; // physical address of each fetch
     logic           [7:0] ftq_br  [ftqsz-1:0]; // branch signal
     logic [fnum-1:0][1:0] ftq_pat [ftqsz-1:0]; // branch pattern
     logic           [7:0] ftq_size[ftqsz-1:0]; // size of fetched data in half-words (0 ~ 8)
-    logic                 ftq_done[ftqsz-1:0]; // whether a line is returned from I-cache
     logic   [16*fnum-1:0] ftq_data[ftqsz-1:0]; // the data fetched
     logic                 ftq_pgft[ftqsz-1:0]; // whether encountering page fault
     logic ftq_push, ftq_pop;                   // push or pop signals of FTQ
@@ -141,49 +147,54 @@ module frontend #(
     always_comb ftq_pop = ftq_num > 0 & f0done & ftq_next >= ftq_size[ftq_front];
     always_ff @(posedge clk) if (rst | redir[0]) ftq_front <= 0;
         else ftq_front <= ftq_front + (ftq_pop ? 1 : 0);
-    always_ff @(posedge clk) if (rst | redir[0]) ftq_num <= 0;
+    always_ff @(posedge clk) if (rst | redir[0]) ftq_num   <= 0;
         else ftq_num <= ftq_num - (ftq_pop ? 1 : 0) + (ftq_push ? 1 : 0);
-    always_ff @(posedge clk) if (rst | redir[0]) ftq_cur <= 0;
+    always_ff @(posedge clk) if (rst | redir[0]) ftq_trn   <= 0;
+        else ftq_trn <= ftq_trn - (ftq_pop ? 1 : 0) + (|it_resp ? 1 : 0);
+    always_ff @(posedge clk) if (rst | redir[0]) ftq_acc   <= 0;
+        else ftq_acc <= ftq_acc - (ftq_pop ? 1 : 0) + (|ic_resp ? 1 : 0);
+    always_ff @(posedge clk)
+        if (rst | redir[0]) ftq_cur <= 0;
         else if (ftq_next < ftq_size[ftq_front]) ftq_cur <= ftq_next;
         else ftq_cur <= ftq_next - ftq_size[ftq_front];
+
+    /* forwarding ICACHE response */
+    logic [$clog2(ftqsz)-1:0] pos_0, pos_1;
+    always_comb pos_0 = ftq_front;
+    always_comb pos_1 = ftq_front + 1;
     always_comb begin
-        /* forwarding I-cache response */
-        f0done = ftq_done[ftq_front];
-        f0data = ftq_data[ftq_front];
-        f0pgft = ftq_pgft[ftq_front];
-        f1done = ftq_done[ftq_front + $clog2(ftqsz)'(1)];
-        f1data = ftq_data[ftq_front + $clog2(ftqsz)'(1)];
-        f1pgft = ftq_pgft[ftq_front + $clog2(ftqsz)'(1)];
-        if (icache_done[7])
-            if ($clog2(ftqsz)'(icache_done) == ftq_front) begin
-                f0done = 1;
-                f0data = icache_data;
-                f0pgft = icache_pgft;
-            end else if ($clog2(ftqsz)'(icache_done) == ftq_front + 1) begin
-                f1done = 1;
-                f1data = icache_data;
-                f1pgft = icache_pgft;
-            end
+        f0done = ftq_acc + (|ic_resp ? 1 : 0) > 0;
+        f1done = ftq_acc + (|ic_resp ? 1 : 0) > 1;
+        f0data = ftq_acc > 0 ? ftq_data[pos_0] : ic_rdat;
+        f1data = ftq_acc > 1 ? ftq_data[pos_1] : ic_rdat;
+        f0pgft = ftq_trn > 0 ? ftq_pgft[pos_0] : ~it_perm[3];
+        f1pgft = ftq_trn > 1 ? ftq_pgft[pos_1] : ~it_perm[3];
     end
 
-    /* handling I-cache request using fields of FTQ */
-    always_comb icache_rqst = ftq_num < ftqsz & pcg_bundle.id[7] ? pcg_bundle.id : 0;
-    always_comb icache_addr = pcg_bundle.pc;
-    always_comb icache_flsh = redir[0];
+    /* handling ITLB/ICACHE request using fields of FTQ */
+    logic [$clog2(ftqsz)-1:0] pos_trn, pos_acc, next_trn, next_acc;
+    always_comb pos_trn = ftq_front + $clog2(ftqsz)'(ftq_trn);
+    always_comb pos_acc = ftq_front + $clog2(ftqsz)'(ftq_acc);
+    always_comb next_trn = pos_trn + (|it_resp ? 1 : 0);
+    always_comb next_acc = pos_acc + (|ic_resp ? 1 : 0);
+    always_comb it_rqst = ftq_trn + (|it_resp ? 1 : 0) < ftq_num + (ftq_push ? 1 : 0) ? 8'b0000_0001 : 0;
+    always_comb it_vadd = ftq_trn + (|it_resp ? 1 : 0) < ftq_num ? ftq_vpc[next_trn] : pcg_bundle.pc;
+    always_comb ic_flsh = redir[0];
+    always_comb ic_rqst = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn + (|it_resp ? 1 : 0) ? 8'b1000_0000 : 0;
+    always_comb ic_addr = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn ? ftq_ppc[next_acc] : it_padd;
     always_ff @(posedge clk) begin
         if (ftq_num < ftqsz & pcg_bundle.id[7]) begin // PC generated and to start translation
-            ftq_pc  [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pc;
+            ftq_vpc [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pc;
             ftq_br  [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.br;
             ftq_pat [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pat[fnum-1:0];
             ftq_size[$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.num;
         end
-        if (icache_done[7]) begin // I-cache request done
-            ftq_done[$clog2(ftqsz)'(icache_done)] <= 1;
-            ftq_data[$clog2(ftqsz)'(icache_done)] <= icache_data;
-            ftq_pgft[$clog2(ftqsz)'(icache_done)] <= icache_pgft;
+        if (|it_resp) begin // ITLB request done
+            ftq_ppc [pos_trn] <= it_padd;
+            ftq_pgft[pos_trn] <= ~it_perm[3]; // X permission required
         end
-        if (ftq_pop) ftq_done[ftq_front] <= 0; // release entry
-        if (rst | redir[0]) for (int i = 0; i < ftqsz; i++) ftq_done[i] <= 0;
+        if (|ic_resp) // ICACHE request done
+            ftq_data[pos_acc] <= ic_rdat;
     end
 
     /* get data in front of queue */
@@ -229,19 +240,19 @@ module frontend #(
             result[i].pf[0] = fet_pos[i]     < f0size ? (f0done ? f0pgft : 0) : (f1done ? f1pgft : 0);
             result[i].pf[1] = fet_pos[i] + 1 < f0size ? (f0done ? f0pgft : 0) : (f1done ? f1pgft : 0);
             result[i].pc = fet_pos[i] < f0size ?
-                ftq_pc[ftq_front]                     + 64'({fet_pos[i], 1'b0}) + 64'({ftq_cur, 1'b0}) :
-                ftq_pc[ftq_front + $clog2(ftqsz)'(1)] + 64'({fet_pos[i], 1'b0}) - 64'({f0size, 1'b0});
+                ftq_vpc[ftq_front]                     + 64'({fet_pos[i], 1'b0}) + 64'({ftq_cur, 1'b0}) :
+                ftq_vpc[ftq_front + $clog2(ftqsz)'(1)] + 64'({fet_pos[i], 1'b0}) - 64'({f0size, 1'b0});
             result[i].pat = fet_pos[i + 1] <= f0size ?
                 ftq_pat[ftq_front]                    [fet_pos[i + 1] + ftq_cur - 1] :
                 ftq_pat[ftq_front + $clog2(ftqsz)'(1)][fet_pos[i + 1] - f0size - 1];
             if (fet_pos[i + 1] == f0size)                    br[i] = ftq_br[ftq_front];
             if (fet_pos[i + 1] == f0size + f1size & |f1size) br[i] = ftq_br[ftq_front + $clog2(ftqsz)'(1)];
             if (fet_pos[i] == f0size - 1 & &fdata[f0size - 1][1:0] &
-                ftq_pc[ftq_front] + 64'({ftq_size[ftq_front], 1'b0}) != ftq_pc[ftq_front + $clog2(ftqsz)'(1)])
+                ftq_vpc[ftq_front] + 64'({ftq_size[ftq_front], 1'b0}) != ftq_vpc[ftq_front + $clog2(ftqsz)'(1)])
                 /* breaking into two lines and discontinuous address */
                 incomp[i] = 1;
         end
-        ipc = ftq_pc[ftq_front] + 64'({ftq_size[ftq_front] - 8'd1, 1'b0});
+        ipc = ftq_vpc[ftq_front] + 64'({ftq_size[ftq_front] - 8'd1, 1'b0});
     end
 
     /* return address stack */

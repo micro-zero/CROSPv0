@@ -130,9 +130,8 @@ verifcore &verifcore::operator>>(dels_t &dels)
     for (int i = 0; i < PWD; i++)
         if (dut.del_gprw[i])
             dels.gprs.push({.w = 1, .a = dut.del_gpra[i], .v = dut.del_gprv[i]});
-    for (int i = 0; i < MWD; i++)
-        if (dut.del_memw[i])
-            dels.mems.push({.w = dut.del_memw[i], .a = dut.del_mema[i], .v = dut.del_memv[i]});
+    if (dut.del_memw)
+        dels.mems.push({.w = dut.del_memw, .a = dut.del_mema, .v = dut.del_memv});
     if (dut.del_csrw)
         dels.csrs.push({.w = 1, .a = dut.del_csra, .v = dut.del_csrv});
     return *this;

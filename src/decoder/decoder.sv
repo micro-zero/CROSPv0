@@ -37,13 +37,13 @@ module decoder #(
     parameter dqsz = 8,  // decoder queue size
     parameter opsz = 64, // operation max size (ROB size)
     parameter brsz = 16, // branch max size (snapshot size)
-    parameter lssz = 4   // load/store size (EQ size in LSU)
+    parameter ldsz = 8,  // load queue size
+    parameter stsz = 8   // store queue size
 )(
     input logic clk,
     input logic rst,
     input logic [6:0] interrupt,
     input logic [63:0] mstatus,
-    input  exe_bundle_t [ewd-1:0] exe_bundle,
     input  com_bundle_t [cwd-1:0] com_bundle,
     output logic        [fwd-1:0] ready,
     input  fet_bundle_t [fwd-1:0] fet_bundle,
@@ -52,10 +52,11 @@ module decoder #(
 );
     /* decoder queue */
     localparam dwdin = dwd < 3 ? 3 : dwd;
-    logic [$clog2(dqsz)-1:0] dq_front;                              // front index of decoder queue
-    logic [$clog2(dqsz):0] dq_num, dq_in, dq_out, dq_brin, dq_lsin; // several numbers of decoder queue
-    logic          [dwd-1:0][$clog2(dqsz)-1:0] dq_raddr;            // decode queue operation signals
-    logic        [dwdin-1:0][$clog2(dqsz)-1:0] dq_waddr;            // decode queue operation signals
+    logic [$clog2(dqsz)-1:0] dq_front;                   // front index of decoder queue
+    logic [$clog2(dqsz):0] dq_num, dq_in, dq_out;        // numbers of decoder queue
+    logic [$clog2(dqsz):0] dq_brin, dq_ldin, dq_stin;    // numbers of specific instructions
+    logic          [dwd-1:0][$clog2(dqsz)-1:0] dq_raddr; // decode queue operation signals
+    logic        [dwdin-1:0][$clog2(dqsz)-1:0] dq_waddr; // decode queue operation signals
     logic        [dwdin-1:0]                   dq_wena;
     dec_bundle_t   [dwd-1:0]                   dq_rvalue;
     dec_bundle_t [dwdin-1:0]                   dq_wvalue;
@@ -71,7 +72,8 @@ module decoder #(
     dec_bundle_t [fwd-1:0][2:0]            result;       // decoding results
     logic        [fwd-1:0][$clog2(dqsz):0] result_num;   // number of results
     logic        [fwd-1:0][$clog2(dqsz):0] result_brnum; // number of branch results
-    logic        [fwd-1:0][$clog2(dqsz):0] result_lsnum; // number of memory results
+    logic        [fwd-1:0][$clog2(dqsz):0] result_ldnum; // number of load results
+    logic        [fwd-1:0][$clog2(dqsz):0] result_stnum; // number of store results
     for (genvar g = 0; g < fwd; g++) begin : decoder_unit
         alu_funct_t [2:0] alu_funct; // functional codes
         lsu_funct_t [2:0] lsu_funct;
@@ -373,9 +375,11 @@ module decoder #(
         end
         always_comb begin
             result_num  [g] = 0;
-            result_lsnum[g] = 0;
+            result_ldnum[g] = 0;
+            result_stnum[g] = 0;
             for (int i = 0; i < 3; i++) if (|result[g][i].fu) result_num  [g]++;
-            for (int i = 0; i < 3; i++) if (|lsu_funct[i])    result_lsnum[g]++;
+            for (int i = 0; i < 3; i++) if (|lsu_funct[i])
+                if (lsu_funct[i].load) result_ldnum[g]++; else result_stnum[g]++;
             /* some instructions that may cause redirection require snapshots of renaming states */
             /* other redirection should use rollback */
             result_brnum[g] = |alu_funct[0].bmask | alu_funct[0].j ? 1 : 0;
@@ -387,45 +391,44 @@ module decoder #(
     always_comb redir = com_bundle[0].redir | com_bundle[0].rollback;
 
     /* assign operation ID */
-    logic [$clog2(opsz)-1:0] opid;         // operation ID
-    logic [$clog2(brsz)-1:0] brid;         // branch ID
-    logic [15:0] opnum, opcom;             // numbers of operation IDs
-    logic [15:0] brnum, brcom;             // numbers of branch operation IDs
-    logic [15:0] lsnum, lsexe;             // numbers of memory operation IDs
-    logic [lssz-1:0] lsocc, lsfree;        // LSU ID occupation
-    logic [dwd-1:0][$clog2(lssz):0] lspos; // LSU ID free positions
-    firstk #(.width(lssz), .k(dwd)) lspos_inst(.bits(lsfree), .pos(lspos));
+    logic [$clog2(opsz)-1:0] opid; // operation ID
+    logic [$clog2(brsz)-1:0] brid; // branch ID
+    logic [$clog2(ldsz)-1:0] ldid; // load ID
+    logic [$clog2(stsz)-1:0] stid; // store ID
+    logic [15:0] opnum, opcom;     // numbers of operation IDs
+    logic [15:0] brnum, brcom;     // numbers of branch operation IDs
+    logic [15:0] ldnum, ldcom;     // numbers of load operation IDs
+    logic [15:0] stnum, stcom;     // numbers of store operation IDs
     always_comb begin
-        opcom = 0; brcom = 0; lsexe = 0;
+        opcom = 0; brcom = 0; ldcom = 0; stcom = 0;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) opcom++;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].brid[7]) brcom++;
-        for (int i = 0; i < ewd; i++) if (exe_bundle[i].opid[15] & exe_bundle[i].lsid[7]) lsexe++;
-    end
-    always_comb begin
-        lsfree = ~lsocc;
-        for (int i = 0; i < ewd; i++) if (exe_bundle[i].opid[15] & exe_bundle[i].lsid[7])
-            lsfree[$clog2(lssz)'(exe_bundle[i].lsid)] = 1;
+        for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) ldcom++;
+        for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].stid[7]) stcom++;
     end
     always_ff @(posedge clk) if (rst | redir) opid <= 0; else opid <= opid + $clog2(opsz)'(dq_in);
     always_ff @(posedge clk) if (rst | redir) brid <= 0; else brid <= brid + $clog2(brsz)'(dq_brin);
-    always_ff @(posedge clk) if (rst | redir) lsocc <= 0; else begin
-        lsocc <= ~lsfree;
-        for (int i = 0; i < dwd; i++) if (i < dq_lsin) lsocc[$clog2(lssz)'(lspos[i])] <= 1;
-    end
+    always_ff @(posedge clk) if (rst | redir) ldid <= 0; else ldid <= ldid + $clog2(ldsz)'(dq_ldin);
+    always_ff @(posedge clk) if (rst | redir) ldid <= 0; else stid <= stid + $clog2(stsz)'(dq_stin);
     always_ff @(posedge clk) if (rst | redir) opnum <= 0; else opnum <= opnum - opcom + 16'(dq_in);
     always_ff @(posedge clk) if (rst | redir) brnum <= 0; else brnum <= brnum - brcom + 16'(dq_brin);
-    always_ff @(posedge clk) if (rst | redir) lsnum <= 0; else lsnum <= lsnum - lsexe + 16'(dq_lsin);
+    always_ff @(posedge clk) if (rst | redir) ldnum <= 0; else ldnum <= ldnum - ldcom + 16'(dq_ldin);
+    always_ff @(posedge clk) if (rst | redir) stnum <= 0; else stnum <= stnum - stcom + 16'(dq_stin);
 
     /* flatten results */
+    lsu_funct_t [dwd-1:0][2:0] f;
+    always_comb for (int i = 0; i < dwd; i++)
+        for (int j = 0; j < 3; j++) f[i][j] = $bits(lsu_funct_t)'(result[i][j].funct);
     always_comb begin
         ready = 0; dq_wvalue = 0; // `dq_wvalue` is the flattened result array
-        dq_in = 0; dq_brin = 0; dq_lsin = 0;
+        dq_in = 0; dq_brin = 0; dq_ldin = 0; dq_stin = 0;
         for (int i = 0; i < fwd; i++) begin
             if (32'(dq_in) + 32'(result_num[i]) > dqsz - 32'(dq_num) |
                 32'(dq_in) + 32'(result_num[i]) > 32'(dwdin) |
                 16'(dq_in)   + 16'(result_num[i])   > opsz - opnum + opcom |
                 16'(dq_brin) + 16'(result_brnum[i]) > brsz - brnum + brcom |
-                16'(dq_lsin) + 16'(result_lsnum[i]) > lssz - lsnum + lsexe) break;
+                16'(dq_ldin) + 16'(result_ldnum[i]) > ldsz - ldnum + ldcom |
+                16'(dq_stin) + 16'(result_stnum[i]) > stsz - stnum + stcom) break;
             for (int j = 0; j < 3; j++)
                 if (result[i][j].opid[15]) begin
                     dq_wvalue[32'(dq_in)] = result[i][j];
@@ -436,11 +439,18 @@ module decoder #(
                         dq_wvalue[32'(dq_in)].brid[$clog2(brsz)-1:0] = brid + $clog2(brsz)'(dq_brin);
                         dq_brin++;
                     end
-                    if (result[i][j].fu[1]) begin
-                        dq_wvalue[32'(dq_in)].lsid[7] = 1;
-                        dq_wvalue[32'(dq_in)].lsid[$clog2(lssz)-1:0] = $clog2(lssz)'(lspos[dq_lsin]);
-                        dq_lsin++;
-                    end
+                    if (result[i][j].fu[1])
+                        if (f[i][j].load) begin
+                            dq_wvalue[32'(dq_in)].ldid[7] = 1;
+                            dq_wvalue[32'(dq_in)].stid[7] = 1; // to mark relative store position
+                            dq_wvalue[32'(dq_in)].ldid[$clog2(ldsz)-1:0] = ldid + $clog2(ldsz)'(dq_ldin);
+                            dq_wvalue[32'(dq_in)].stid[$clog2(stsz)-1:0] = stid + $clog2(stsz)'(dq_stin);
+                            dq_ldin++;
+                        end else begin
+                            dq_wvalue[32'(dq_in)].stid[7] = 1;
+                            dq_wvalue[32'(dq_in)].stid[$clog2(stsz)-1:0] = stid + $clog2(stsz)'(dq_stin);
+                            dq_stin++;
+                        end
                     dq_in++;
                 end
             ready[i] = 1;
