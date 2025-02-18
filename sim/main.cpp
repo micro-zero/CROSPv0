@@ -215,8 +215,6 @@ int main(int argc, char *argv[])
         }
         vrcr.mtime = intc.int_time; // VCORE -- INTC
         vrcr.mip_ext = intc.int_pend;
-        vrcr.read_mtime = intc.read_mtime;
-        vrcr.read_mtimeval = intc.read_mtimeval;
         vrcr.sync_rqst = 0; // other signals synchronized by host
         vrcr.sync_invl = syncdone;
         syncdone = vrcr.sync_done;

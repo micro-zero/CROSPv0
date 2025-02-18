@@ -404,12 +404,13 @@ module decoder #(
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) opcom++;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].brid[7]) brcom++;
         for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) ldcom++;
-        for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].stid[7]) stcom++;
+        for (int i = 0; i < ewd; i++)
+            if (com_bundle[i].opid[15] & ~com_bundle[i].ldid[7] & com_bundle[i].stid[7]) stcom++;
     end
     always_ff @(posedge clk) if (rst | redir) opid <= 0; else opid <= opid + $clog2(opsz)'(dq_in);
     always_ff @(posedge clk) if (rst | redir) brid <= 0; else brid <= brid + $clog2(brsz)'(dq_brin);
     always_ff @(posedge clk) if (rst | redir) ldid <= 0; else ldid <= ldid + $clog2(ldsz)'(dq_ldin);
-    always_ff @(posedge clk) if (rst | redir) ldid <= 0; else stid <= stid + $clog2(stsz)'(dq_stin);
+    always_ff @(posedge clk) if (rst | redir) stid <= 0; else stid <= stid + $clog2(stsz)'(dq_stin);
     always_ff @(posedge clk) if (rst | redir) opnum <= 0; else opnum <= opnum - opcom + 16'(dq_in);
     always_ff @(posedge clk) if (rst | redir) brnum <= 0; else brnum <= brnum - brcom + 16'(dq_brin);
     always_ff @(posedge clk) if (rst | redir) ldnum <= 0; else ldnum <= ldnum - ldcom + 16'(dq_ldin);
@@ -428,7 +429,7 @@ module decoder #(
                 16'(dq_in)   + 16'(result_num[i])   > opsz - opnum + opcom |
                 16'(dq_brin) + 16'(result_brnum[i]) > brsz - brnum + brcom |
                 16'(dq_ldin) + 16'(result_ldnum[i]) > ldsz - ldnum + ldcom |
-                16'(dq_stin) + 16'(result_stnum[i]) > stsz - stnum + stcom) break;
+                16'(dq_stin) + 16'(result_stnum[i]) > stsz - stnum + stcom - 1) break;
             for (int j = 0; j < 3; j++)
                 if (result[i][j].opid[15]) begin
                     dq_wvalue[32'(dq_in)] = result[i][j];

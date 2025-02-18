@@ -85,8 +85,6 @@ public:
     uint8_t &sync_invl = dut.sync_invl;
     uint64_t &mtime = dut.mtime;
     uint64_t &mip_ext = dut.mip_ext;
-    uint8_t &read_mtime = dut.read_mtime;
-    uint64_t &read_mtimeval = dut.read_mtimeval;
     verifcore(const char *fnvcd = 0, const char *fnsave = 0);
     ~verifcore();
     operator axiport_t() const;
@@ -118,8 +116,6 @@ private:
 public:
     uint64_t &int_pend = dut.int_pend;
     uint64_t &int_time = dut.int_time;
-    uint8_t read_mtime; // additional ports
-    uint64_t read_mtimeval;
     intctl(const char *fnvcd = 0, const char *fnsave = 0);
     ~intctl();
     operator axiport_t() const;

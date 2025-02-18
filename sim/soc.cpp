@@ -306,9 +306,6 @@ void intctl::posedge()
     }
     if (dut.s_axi_arvalid && dut.s_axi_arready)
         raddr = dut.s_axi_araddr;
-    read_mtime = 0;
-    if (dut.s_axi_rvalid && dut.s_axi_rready && raddr == CLINT + 0xbff8)
-        read_mtime = 1, read_mtimeval = dut.s_axi_rdata;
     dut.clk = 1, dut.eval(), st++, cycle++;
 }
 

@@ -4,7 +4,12 @@
  *   of connection of sub-modules and a page table walker.
  */
 
-module mmu (
+module mmu #(
+    parameter mwd    = 1,           // memory width
+    parameter tohost = 64'h0,       // bypassed tohost address
+    parameter frhost = 64'h0,       // bypassed fromhost address
+    parameter dcbase = 64'h80000000 // base address of cacheable memory
+)(
     input  logic clk,
     input  logic rst,
     input  logic fnci, // fence.i committed
@@ -125,12 +130,12 @@ module mmu (
     );
 
     /* STLB */
-    logic [1:0] [7:0] st_rqst_s; logic  [7:0] st_rqst_m;
-    logic [1:0][63:0] st_vadd_s; logic [63:0] st_vadd_m;
-    logic [1:0][63:0] st_satp_s; logic [63:0] st_satp_m;
-    logic [1:0] [7:0] st_resp_s; logic  [7:0] st_resp_m;
-    logic [1:0] [7:0] st_perm_s; logic  [7:0] st_perm_m;
-    logic [1:0][63:0] st_padd_s; logic [63:0] st_padd_m;
+    logic  [7:0] st_rqst_m;
+    logic [63:0] st_vadd_m;
+    logic [63:0] st_satp_m;
+    logic  [7:0] st_resp_m;
+    logic  [7:0] st_perm_m;
+    logic [63:0] st_padd_m;
     logic             st_ready;
     logic       [7:0] st_rqst_b, st_rqst_f;
     logic      [63:0] st_vadd_b, st_vadd_f;
@@ -161,11 +166,12 @@ module mmu (
     logic       [7:0] dc_rqst_b, dc_rqst_f; logic       [7:0] ic_rqst_b, ic_rqst_f;
     logic      [63:0] dc_addr_b, dc_addr_f; logic      [63:0] ic_addr_b, ic_addr_f;
     logic      [63:0] dc_strb_b, dc_strb_f;
-    logic [63:0][7:0] dc_wdat_b, dc_wdat_f; logic       [5:0] ic_offset;
+    logic [63:0][7:0] dc_wdat_b, dc_wdat_f;
+    logic                        dc_byps_f; logic       [5:0] ic_offset;
 
     /* instruction cache */
     cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
-        .clk(clk), .rst(rst), .flush(s_ic_flsh),
+        .clk(clk), .rst(rst | fnci), .flush(s_ic_flsh),
         .s_rqst(ic_rqst_s), .m_rqst(ic_rqst_m),
         .s_strb(ic_strb_s), .m_strb(ic_strb_m),
         .s_addr(ic_addr_s), .m_addr(ic_addr_m),
@@ -185,7 +191,7 @@ module mmu (
     always_comb ic_addr_f = ic_ready ? ic_addr_m : ic_addr_b;
     always_comb ic_resp_m = dc_resp_s[7:6] == 2'b10 ? dc_resp_s : 0;
     always_comb ic_miss_m = dc_miss_s;
-    always_comb ic_rdat_m = dc_rdat_m;
+    always_comb ic_rdat_m = dc_rdat_s;
     always_ff @(posedge clk) ic_rqst_b <= rst | s_ic_flsh ? 0 : ic_rqst_f;
     always_ff @(posedge clk) ic_addr_b <= ic_addr_f;
     always_ff @(posedge clk) ic_offset <= ic_addr_s[5:0];
@@ -201,7 +207,8 @@ module mmu (
         .s_miss(dc_miss_s), .m_miss(dc_miss_m),
         .s_rdat(dc_rdat_s), .m_rdat(dc_rdat_m)
     );
-    always_comb if (|dc_rqst_f) begin // DCACHE request arbiter
+    always_comb dc_byps_f = dc_addr_f < dcbase | dc_addr_f == tohost | dc_addr_f == frhost;
+    always_comb if (|dc_rqst_f & ~dc_byps_f) begin // DCACHE request arbiter
         dc_rqst_s = dc_rqst_f; dc_strb_s = dc_strb_f;
         dc_addr_s = dc_addr_f; dc_wdat_s = dc_wdat_f;
     end else if (|ic_rqst_f) begin
@@ -214,9 +221,6 @@ module mmu (
         dc_rqst_s = 0; dc_strb_s = 0;
         dc_addr_s = 0; dc_wdat_s = 0;
     end
-    always_comb s_dc_resp = dc_resp_s[7:6] == 2'b11 ? dc_resp_s : 0;
-    always_comb s_dc_miss = dc_miss_s;
-    always_comb s_dc_rdat = dc_rdat_s[6'(dc_addr_b)+7-:8];
     always_comb dc_ready = ~|dc_rqst_b | dc_rqst_b == s_dc_resp;
     always_comb dc_rqst_f = dc_ready ? s_dc_rqst : dc_rqst_b;
     always_comb dc_addr_f = dc_ready ? s_dc_addr : dc_addr_b;
@@ -270,14 +274,11 @@ module mmu (
                 ptw_ppn <= ptw_pte[53:10];
                 ptw_stt <= ptw_num == 0 ? 3 : 0;
                 if (ptw_pte[1] | ptw_pte[3]) begin // leaf node
+                    ptw_prm <= ptw_pte[7:0];
                     ptw_stt <= 4;
                     for (int i = 0; i < 4 & i < ptw_num; i++)
                         if (~|ptw_pte[i*9+18-:9]) ptw_ppn[i*9+8-:9] <= ptw_vpn[i]; // super page
                         else {ptw_prm, ptw_stt} <= 4;                              // misaligned super page
-                    if (~ptw_pte[6]) {ptw_prm, ptw_stt} <= 4;                      // access unaccessed page
-                    if (~ptw_pte[7] & st_perm_m[2]) {ptw_prm, ptw_stt} <= 4;       // write to clean page
-                    if ((ptw_pte[3:0] | st_perm_m[3:0]) != ptw_pte[3:0])           // permission violation
-                        {ptw_prm, ptw_stt} <= 4;
                 end
                 if (~ptw_pte[0]) {ptw_prm, ptw_stt} <= 4; // invalid bit
                 ptw_num <= ptw_num - 1;
@@ -288,7 +289,7 @@ module mmu (
     /* AXI state machine */
     logic             axi_fls, axi_ccl; // flush and cancel signal
     logic       [7:0] axi_stt, axi_cnt; // AXI state and counter
-    logic       [7:0] axi_req;          // AXI request ID
+    logic       [7:0] axi_req, axi_thr; // AXI request and through ID
     logic [63:0][7:0] axi_buf;          // buffer of cache line
     logic      [63:0] axi_str;          // write strobe
     always_comb axi_fls = 0;
@@ -309,12 +310,23 @@ module mmu (
                 axi_stt       <= 1;
                 axi_cnt       <= 0;
                 axi_req       <= dc_rqst_m;
+                axi_thr       <= 0;
                 axi_str       <= dc_strb_m;
                 axi_buf       <= dc_wdat_m;
                 m_axi_arvalid <= 1;
-                m_axi_araddr  <= dc_addr_m;
+                m_axi_araddr  <= dc_addr_m & ~64'h3f;
                 if (dc_rqst_m    == 3) m_axi_arlen <= 0; // STLB
                 if (dc_rqst_m[7] == 1) m_axi_arlen <= 7; // CACHE
+            end else if (|dc_rqst_f & dc_byps_f) begin
+                axi_stt       <= 1;
+                axi_cnt       <= 0;
+                axi_req       <= 0;
+                axi_thr       <= dc_rqst_f;
+                axi_str       <= dc_strb_f;
+                axi_buf       <= dc_wdat_f;
+                m_axi_arvalid <= 1;
+                m_axi_araddr  <= dc_addr_f;
+                m_axi_arlen   <= 0;
             end
         1: // AXI port request detected, waiting for read address handshake
             if (m_axi_arready) begin
@@ -362,8 +374,10 @@ module mmu (
             end
         5: // waiting for B handshake
             if (m_axi_bvalid) {m_axi_bready, axi_stt} <= 6;
-        6: // transaction done, ready for response
+        6: begin // transaction done, ready for response
             axi_stt <= 0;
+            if (|axi_thr & axi_thr != s_dc_resp) axi_stt <= 6;
+        end
     endcase
     always_comb m_axi_arid    = 0;
     always_comb m_axi_arburst = 'b01;  // INCR burst
@@ -379,4 +393,14 @@ module mmu (
     always_comb m_axi_awcache = 0;
     always_comb m_axi_awprot  = 0;
     always_comb m_axi_awqos   = 0;
+    /* assemble data cache response */
+    always_comb if (dc_resp_s[7:6] == 2'b11) begin
+        s_dc_resp = dc_resp_s;
+        s_dc_miss = dc_miss_s;
+        s_dc_rdat = dc_rdat_s[6'(dc_addr_b)+7-:8];
+    end else if (axi_stt == 6 & |axi_thr) begin
+        s_dc_resp = axi_thr;
+        s_dc_miss = 0;
+        s_dc_rdat = dc_rdat_m[7:0];
+    end else {s_dc_resp, s_dc_miss, s_dc_rdat} = 0;
 endmodule

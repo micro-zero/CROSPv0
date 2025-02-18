@@ -25,7 +25,8 @@ module vcore #(
     parameter tohost = 64'd0,
     parameter frhost = 64'd0,
     parameter dcbase = 64'h80000000,
-    parameter uart   = 64'h10000000
+    parameter uart   = 64'h10000000,
+    parameter clint  = 64'h2000000
 )(
     input  logic        clk,
     input  logic        rst,
@@ -72,9 +73,6 @@ module vcore #(
     input  logic        m_axi_rlast,
     input  logic        m_axi_rvalid,
     output logic        m_axi_rready,
-    /* debug interface */
-    input  logic        read_mtime,      // mark the `mtime` memory response
-    input  logic [63:0] read_mtimeval,   // value of `mtime` memory response
     /* commit info */
     output logic        cmt       [3:0], // committing signals
     output logic  [1:0] cmt_level [3:0], // privilege level
@@ -212,7 +210,7 @@ module vcore #(
             del_csra = del_csra + 12'h200; // sstatus, sip, sie
         if (del_csra >= 12'hc00 && del_csra <= 12'hc02)
             del_csra = del_csra - 12'h100; // cycle, time, instret
-        del_memw = &inst.dc_resp[7:5] & ~&inst.dc_miss[7:5] ? st_size[3'(inst.dc_resp)] : 0;
+        del_memw = inst.dc_resp[7:5] == 3'b111 & inst.dc_miss[7:6] != 2'b11 ? st_size[3'(inst.dc_resp)] : 0;
         del_mema = st_addr[3'(inst.dc_resp)];
         del_memv = st_data[3'(inst.dc_resp)];
     end
@@ -240,9 +238,10 @@ module vcore #(
         rob_csr[7'(inst.dec_bundle[i].opid)].stval <= inst.csr_inst.stval;
         rob_csr[7'(inst.dec_bundle[i].opid)].mip <= inst.csr_inst.mip;
     end
-    /* between execution and commit, `mcycle` and `minstret`
-       will change, so the state extraction will hold values
-       after execution for testbench checking */
+    /* between decoding and execution, `mcycle`, `minstret`
+       and `mtime` will change, so the state extraction will
+       hold values after execution for testbench checking */
+    logic read_mtime;
     always_ff @(posedge clk) if (rst) cmt_mcycle <= 0;
         else if (inst.csr_inst.rqst & (inst.csr_inst.addr == 12'hb00 | inst.csr_inst.addr == 12'hc00))
             cmt_mcycle   <= inst.csr_inst.eout ? inst.csr_inst.mcycle   : inst.csr_inst.wres;
@@ -252,7 +251,10 @@ module vcore #(
     always_ff @(posedge clk) if (rst) cmt_mtime <= 0;
         else if (inst.csr_inst.rqst & inst.csr_inst.addr == 12'hc01)
             cmt_mtime <= inst.csr_inst.eout ? cmt_mtime : inst.csr_inst.wres;
-        else if (read_mtime) cmt_mtime <= read_mtimeval;
+        else if (read_mtime & inst.m_axi_rvalid & inst.m_axi_rready) cmt_mtime <= inst.m_axi_rdata;
+    always_ff @(posedge clk) if (rst) read_mtime <= 0;
+        else if (inst.m_axi_arvalid & inst.m_axi_arready & inst.m_axi_araddr == clint + 64'hbff8) read_mtime <= 1;
+        else if (inst.m_axi_rvalid & inst.m_axi_rready) read_mtime <= 0;
 
     /* other stats */
     always_comb begin stallpc = 0; for (int i = pwd - 1; i >= 0; i--)

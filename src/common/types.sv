@@ -102,16 +102,17 @@ typedef struct packed {
 } reg_bundle_t;
 
 typedef struct packed {
-    logic [15:0] opid;       // operation ID
-    logic [7:0] ldid, stid;  // load and store ID
-    logic [63:0] npc;        // next PC
-    logic [15:0] prda;       // physical destination register number
-    logic [63:0] prdv;       // physical destination register value
-    logic  [7:0] cause;      // exception cause, MSB is exception bit, the next is interrupt bit
-    logic  [2:0] ret;        // exception return, MSB is valid bit
-    logic [63:0] tval;       // exception trap value
-    logic mem, csr;          // memory/CSR change (redundant) (for testing)
-    logic flush;             // force pipeline flush
+    logic [15:0] opid;      // operation ID
+    logic [7:0] ldid, stid; // load and store ID
+    logic [63:0] npc;       // next PC
+    logic [15:0] prda;      // physical destination register number
+    logic [63:0] prdv;      // physical destination register value
+    logic  [7:0] cause;     // exception cause, MSB is exception bit, the next is interrupt bit
+    logic  [2:0] ret;       // exception return, MSB is valid bit
+    logic [63:0] tval;      // exception trap value
+    logic specul;           // speculative mark to avoid committing
+    logic mem, csr;         // memory/CSR change
+    logic flush, retry;     // force pipeline flush and retry
 } exe_bundle_t;
 
 typedef struct packed {
@@ -144,11 +145,11 @@ typedef struct packed {
 } rob_ren_t;
 
 typedef struct packed {
-    logic [63:0] npc;  // next PC
-    logic [7:0] cause; // exception and cause (MSB is exception bit)
-    logic [2:0] ret;   // exception return (MSB is return bit, `ret[1:0]` is privilege level)
-    logic mem, csr;    // memory/CSR change
-    logic flush;       // force pipeline flush
+    logic [63:0] npc;   // next PC
+    logic [7:0] cause;  // exception and cause (MSB is exception bit)
+    logic [2:0] ret;    // exception return (MSB is return bit, `ret[1:0]` is privilege level)
+    logic mem, csr;     // memory/CSR change
+    logic flush, retry; // force pipeline flush
 } rob_exe_t;
 
 typedef struct packed {

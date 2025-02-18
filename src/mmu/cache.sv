@@ -36,6 +36,7 @@ module cache #(
     logic [chn-1:0]        [63:0] b_addr, f_addr;
     logic [chn-1:0][blk-1:0][7:0] b_wdat, f_wdat;
     logic [chn-1:0]               b_ready;
+    logic write;
     always_comb for (int i = 0; i < chn; i++) b_ready[i] = ~|b_rqst[i] | |s_resp[i];
     always_comb for (int i = 0; i < chn; i++) begin
         f_rqst[i] = b_ready[i] ? s_rqst[i] : b_rqst[i];
@@ -46,7 +47,7 @@ module cache #(
     always_ff @(posedge clk) if (rst | flush) b_rqst <= 0;
         else for (int i = 0; i < chn; i++) begin
             if (|s_resp[i]) b_rqst[i] <= 0;
-            else if (|b_strb[i]) b_strb[i] <= 0;
+            else if (i == 0 & write) b_strb[0] <= 0;
             /* only one request can be buffered until response */
             if (|s_rqst[i] & b_ready[i]) begin
                 b_rqst[i] <= s_rqst[i];
@@ -115,34 +116,16 @@ module cache #(
     logic [chn-1:0]         [blk-1:0][7:0] set_hitrdat; // hit data in selected set
     logic                   [blk-1:0][7:0] set_hitmask; // write mask in selected set  
     logic                   [blk-1:0][7:0] set_hitwdat; // write data in selected set
-    always_comb begin
-        for (int i = 0; i < chn; i++) index[i] = $clog2(set)'(f_addr[i] >> $clog2(blk));
-        new_tag = set_tag[0];
-        new_dat = set_dat[0];
-        if (mshr_out[$clog2(mshrsz)]) begin
-            index[0] = $clog2(set)'(mshr_addr[$clog2(mshrsz)'(mshr_out)] >> $clog2(blk));
-            new_tag[set_ptr[0]] = mshr_addr[$clog2(mshrsz)'(mshr_out)] >> $clog2(blk);
-            new_dat[set_ptr[0]] = mshr_rdat[$clog2(mshrsz)'(mshr_out)] & ~set_hitmask | set_hitwdat;
-        end else new_dat[$clog2(way)'(set_hitpos[0])] = set_hitrdat[0] & ~set_hitmask | set_hitwdat;
-    end
-    always_ff @(posedge clk) if (rst) valid <= 0;
-        else if (mshr_out[$clog2(mshrsz)]) begin
-            valid[index[0]][set_ptr] <= 1;
-            dirty[index[0]][set_ptr] <= |mshr_strb[$clog2(mshrsz)];
-            dat  [index[0]]          <= new_dat;
-            tag  [index[0]]          <= new_tag;
-            ptr  [index[0]]          <= set_ptr[0] + 1;
-        end else if (|b_rqst[0] & set_hitpos[0][$clog2(way)] & |b_strb[0]) begin
-            dirty[index[0]][$clog2(way)'(set_hitpos[0])] <= 1;
-            dat  [index[0]]                              <= new_dat;
-        end
-    always_ff @(posedge clk) for (int i = 0; i < chn; i++) begin
-        set_tag  [i] <= tag  [index[i]];
-        set_dat  [i] <= dat  [index[i]];
-        set_ptr  [i] <= ptr  [index[i]];
-        set_valid[i] <= valid[index[i]];
-        set_dirty[i] <= dirty[index[i]];
-    end
+    /* cache fill */
+    logic [$clog2(set):0] fill;     // fill signal and index
+    logic           [7:0] fill_req; // fill request ID
+    logic          [63:0] fill_tag; // cache tag to fill
+    logic  [blk-1:0][7:0] fill_dat; // cache line to fill
+    logic                 stale;    // stale bit caused by cache fill
+    /* cache replacement */
+    logic          [7:0] rep_rqst;           // replaced request ID
+    logic         [63:0] rep_strb, rep_addr; // replaced strobe and address
+    logic [blk-1:0][7:0] rep_wdat;           // replaced write data
     firstk #(.width(way), .k(1)) hit_pos_inst[chn-1:0](.bits(set_hit), .pos(set_hitpos));
     always_comb for (int i = 0; i < chn; i++)
         for (int j = 0; j < way; j++)
@@ -163,12 +146,64 @@ module cache #(
                 set_hitwdat[$clog2(blk)'(i)] = b_wdat[0][i];
             end
     end
+    always_comb begin
+        for (int i = 0; i < chn; i++) index[i] = $clog2(set)'(f_addr[i] >> $clog2(blk));
+        new_tag = set_tag[0];
+        new_dat = set_dat[0];
+        if (mshr_out[$clog2(mshrsz)])
+            index[0] = $clog2(set)'(mshr_addr[$clog2(mshrsz)'(mshr_out)] >> $clog2(blk));
+        if (fill[$clog2(set)]) begin
+            index[0] = $clog2(set)'(fill);
+            new_tag[set_ptr[0]] = fill_tag;
+            new_dat[set_ptr[0]] = fill_dat;
+        end else new_dat[$clog2(way)'(set_hitpos[0])] = set_hitrdat[0] & ~set_hitmask | set_hitwdat;
+    end
+    always_comb write = ~fill[$clog2(set)] & ~stale & |b_strb[0];
+    always_ff @(posedge clk) if (rst) valid <= 0;
+        else if (fill[$clog2(set)]) begin
+            valid[index[0]][set_ptr[0]] <= 1;
+            dirty[index[0]][set_ptr[0]] <= |mshr_strb[$clog2(mshrsz)];
+            dat  [index[0]]             <= new_dat;
+            tag  [index[0]]             <= new_tag;
+            ptr  [index[0]]             <= set_ptr[0] + 1;
+        end else if (|b_rqst[0] & set_hitpos[0][$clog2(way)] & write) begin
+            dirty[index[0]][$clog2(way)'(set_hitpos[0])] <= 1;
+            dat  [index[0]]                              <= new_dat;
+        end
+    always_ff @(posedge clk) if (rst | flush) stale <= 0; else stale <= fill[$clog2(set)];
+    always_ff @(posedge clk) for (int i = 0; i < chn; i++) begin
+        set_tag  [i] <= tag  [index[i]];
+        set_dat  [i] <= dat  [index[i]];
+        set_ptr  [i] <= ptr  [index[i]];
+        set_valid[i] <= valid[index[i]];
+        set_dirty[i] <= dirty[index[i]];
+    end
+    always_ff @(posedge clk) if (~rst & ~flush & mshr_out[$clog2(mshrsz)]) begin
+        fill     <= {1'b1, index[0]};
+        fill_req <= mshr_rqst[$clog2(mshrsz)'(mshr_out)];
+        fill_tag <= mshr_addr[$clog2(mshrsz)'(mshr_out)] >> $clog2(blk);
+        fill_dat <= mshr_rdat[$clog2(mshrsz)'(mshr_out)] & ~set_hitmask | set_hitwdat;
+    end else fill <= 0;
+    always_ff @(posedge clk) if (rst) rep_rqst <= 0;
+        else if (fill[$clog2(set)] & set_valid[0][set_ptr[0]] & set_dirty[0][set_ptr[0]]) begin
+            rep_rqst <= fill_req;
+            rep_strb <= -64'd1;
+            rep_addr <= set_tag[0][set_ptr[0]];
+            rep_wdat <= set_dat[0][set_ptr[0]];
+        end else if (rep_rqst == m_resp) rep_rqst <= 0;
 
     /* master interface */
-    always_comb m_rqst = mshr_pend[$clog2(mshrsz)] ? mshr_rqst[$clog2(mshrsz)'(mshr_pend)] : 0;
-    always_comb m_strb = mshr_strb[$clog2(mshrsz)'(mshr_pend)];
-    always_comb m_addr = mshr_addr[$clog2(mshrsz)'(mshr_pend)];
-    always_comb m_wdat = mshr_wdat[$clog2(mshrsz)'(mshr_pend)];
+    always_comb if (rep_rqst[7]) begin
+        m_rqst = rep_rqst;
+        m_strb = rep_strb;
+        m_addr = rep_addr;
+        m_wdat = rep_wdat;
+    end else begin
+        m_rqst = mshr_pend[$clog2(mshrsz)] ? mshr_rqst[$clog2(mshrsz)'(mshr_pend)] : 0;
+        m_strb = 0;
+        m_addr = mshr_addr[$clog2(mshrsz)'(mshr_pend)];
+        m_wdat = 0;
+    end
 
     /* slave interface */
     always_comb begin
@@ -183,6 +218,9 @@ module cache #(
             if (set_hitpos[i][$clog2(way)] & |b_strb[i]) s_resp[i] = 0;                   // write request
             if (~set_hitpos[i][$clog2(way)] & ~mshr_in[i][$clog2(mshrsz)]) s_resp[i] = 0; // MSHR full
         end
+        /* cache tag and miss situation are stale when line being
+           filled, so that the result in filling cycle is invalid */
+        if (fill[$clog2(set)] | stale) s_resp = 0;
         if (mshr_out[$clog2(mshrsz)]) begin
             s_resp[0] = mshr_rqst[$clog2(mshrsz)'(mshr_out)];
             s_rdat[0] = mshr_rdat[$clog2(mshrsz)'(mshr_out)];

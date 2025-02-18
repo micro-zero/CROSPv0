@@ -110,7 +110,8 @@ all: main
 	$(RM) -r .vcore
 	verilator $(VERILATOR_FLAGS) $(VCORE_SV) -lib-create vcore -top-module vcore -Mdir .vcore \
 		-Grst_pc="32'h$(RST_PC)" -Gdcbase="64'h$(DCBASE)" -Gpwd="$(PWD)" \
-		-Gtohost="64'h$(TOHOST)" -Gfrhost="64'h$(FRHOST)" -Guart="64'h$(UART)"
+		-Gtohost="64'h$(TOHOST)" -Gfrhost="64'h$(FRHOST)" \
+		-Guart="64'h$(UART)" -Gclint="64'h$(CLINT)"
 	$(MAKE) -C .vcore -f Vvcore.mk
 
 .intc : $(INTC_SV)

@@ -73,39 +73,55 @@ module lsu #(
     /* store queue */
     logic [$clog2(sqsz)-1:0] sq_front;                       // load queue front index
     logic [$clog2(sqsz):0] sq_in, sq_out, sq_exe;            // load queue numbers
-    logic [sqsz-1:0] sq_valid, sq_trans;                     // valid and translated entry
-    logic            sq_accsd;                               // accessed and executed front entry
+    logic [sqsz-1:0] sq_valid, sq_trans, sq_trans_fwd;       // valid and translated entry
+    logic [sqsz-1:0] sq_csr, sq_fence;                       // CSRRW and fence entry
+    logic            sq_accsd, sq_flush;                     // accessed and flush bit of front entry
     logic [sqsz-1:0] sq_to_trans;                            // forwarded store queue bits
+    logic [sqsz-1:0] sq_to_trans_off;                        // forwarded store queue bits with offset
     logic [mwd-1:0][$clog2(sqsz):0] sq_pos_trans;            // positions to be translated
+    logic [mwd-1:0][$clog2(sqsz):0] sq_pos_trans_off;        // positions to be translated with offset
     logic [sqsz-1:0] [7:0] sq_miss;                          // miss index
-    logic [sqsz-1:0][63:0] sq_padd;                          // physical address part of store queue
+    logic [sqsz-1:0]       sq_pgft;                          // page fault bits of store queue
+    logic [sqsz-1:0] [1:0] sq_rsrv;                          // reservation bits of store queue
+    logic [sqsz-1:0][63:0] sq_padd, sq_padd_fwd;             // physical address part of store queue
+    logic [lqsz-1:0] [2:0] sq_bits;                          // functional bits of load queue
     logic [sqsz-1:0] [7:0] sq_strb;                          // strobe part of store queue
     logic [sqsz-1:0][63:0] sq_wdat;                          // write data part of store queue
     logic        [iwd-1:0][$clog2(sqsz)-1:0] sq_waddr;       // store queue write index
     exe_bundle_t                             sq_rvalue;      // store queue read value
     exe_bundle_t [iwd-1:0]                   sq_wvalue;      // store queue write value
     logic        [iwd-1:0]                   sq_wena;        // store queue write enable
-    logic        [mwd-1:0][$clog2(sqsz)-1:0] sq_vadd_raddr;  // virtual address read index
-    logic        [mwd-1:0]            [63:0] sq_vadd_rvalue; // virtual address read value
+    logic          [mwd:0][$clog2(sqsz)-1:0] sq_vadd_raddr;  // virtual address read index
+    logic          [mwd:0]            [63:0] sq_vadd_rvalue; // virtual address read value
     logic        [iwd-1:0]            [63:0] sq_vadd_wvalue; // virtual address write value
-    logic        [mwd-1:0][$clog2(sqsz)-1:0] sq_rdat_waddr;  // write data read address
+    logic          [mwd:0][$clog2(sqsz)-1:0] sq_rdat_waddr;  // write data read address
     logic                             [63:0] sq_rdat_rvalue; // read data read value
-    logic        [mwd-1:0]                   sq_rdat_wena;   // read data write enable
+    logic          [mwd:0]                   sq_rdat_wena;   // read data write enable
+    logic          [mwd:0]            [63:0] sq_rdat_wvalue; // read data write value
+    logic        [mwd-1:0]             [2:0] dc_bits;        // functional bits of DCACHE response
+    logic sc_fail, sc_succ;                                  // SC fail and success signal
     mwpram #(.width($bits(exe_bundle_t)), .depth(sqsz), .rports(1), .wports(iwd))
         sq_inst(.clk(clk), .rst(rst), .wena(sq_wena),
             .raddr(sq_front), .rvalue(sq_rvalue), .waddr(sq_waddr), .wvalue(sq_wvalue));
-    mwpram #(.width(64), .depth(sqsz), .rports(mwd), .wports(iwd))
+    mwpram #(.width(64), .depth(sqsz), .rports(mwd + 1), .wports(iwd))
         sq_vadd_inst(.clk(clk), .rst(rst), .wena(sq_wena),
             .raddr(sq_vadd_raddr), .rvalue(sq_vadd_rvalue), .waddr(sq_waddr), .wvalue(sq_vadd_wvalue));
-    mwpram #(.width(64), .depth(sqsz), .rports(1), .wports(mwd))
+    mwpram #(.width(64), .depth(sqsz), .rports(1), .wports(mwd + 1))
         sq_rdat_inst(.clk(clk), .rst(rst), .wena(sq_rdat_wena),
-            .raddr(sq_front), .rvalue(sq_rdat_rvalue), .waddr(sq_rdat_waddr), .wvalue(dc_rdat));
-    firstk #(.width(sqsz), .k(mwd)) pos_sq_trans_inst(.bits(sq_to_trans), .pos(sq_pos_trans));
+            .raddr(sq_front), .rvalue(sq_rdat_rvalue), .waddr(sq_rdat_waddr), .wvalue(sq_rdat_wvalue));
+    firstk #(.width(sqsz), .k(mwd)) pos_sq_trans_inst(.bits(sq_to_trans_off), .pos(sq_pos_trans_off));
     always_comb begin
-        sq_to_trans = sq_valid & ~sq_trans;
+        sq_to_trans = sq_valid & ~sq_trans & ~sq_csr & ~sq_fence;
         for (int i = 0; i < mwd; i++) if (dt_resp[i][7:5] == 3'b011) sq_to_trans[$clog2(sqsz)'(dt_resp[i])] = 0;
+        /* offset is used to make older operations higher priority */
+        for (int i = 0; i < sqsz; i++) sq_to_trans_off[i] = sq_to_trans[$clog2(sqsz)'(i) + sq_front];
     end
-    always_comb for (int i = 0; i < mwd; i++) sq_vadd_raddr[i] = $clog2(sqsz)'(sq_pos_trans[i]);
+    always_comb for (int i = 0; i < mwd; i++)
+        sq_pos_trans[i] = {sq_pos_trans_off[i][$clog2(sqsz)], $clog2(sqsz)'(sq_pos_trans_off[i]) + sq_front};
+    always_comb begin
+        for (int i = 0; i < mwd; i++) sq_vadd_raddr[i] = $clog2(sqsz)'(sq_pos_trans[i]);
+        sq_vadd_raddr[mwd] = $clog2(sqsz)'(sq_front);
+    end
     always_comb for (int i = 0; i < iwd; i++) begin
         /* store queue common part with execution bundle */
         sq_waddr [i] = $clog2(sqsz)'(req_store[i].stid);
@@ -121,9 +137,24 @@ module lsu #(
         /* store queue virtual address part */
         sq_vadd_wvalue[i] = (func_store[i].csr ? 0 : req_store[i].prs[0]) + req_store[i].b[63:0];
     end
-    always_comb for (int i = 0; i < mwd; i++) begin
-        sq_rdat_waddr[i] = $clog2(sqsz)'(dc_resp[i]);
-        sq_rdat_wena [i] = dc_resp[i][7:5] == 3'b111;
+    always_comb begin
+        for (int i = 0; i < mwd; i++) begin
+            sq_rdat_waddr [i] = $clog2(sqsz)'(dc_resp[i]);
+            sq_rdat_wena  [i] = dc_resp[i][7:5] == 3'b111;
+            case (dc_bits[i])
+                3'b000: sq_rdat_wvalue[i] = {{56{dc_rdat[i] [7]}}, dc_rdat[i] [7:0]};
+                3'b100: sq_rdat_wvalue[i] = {               56'd0, dc_rdat[i] [7:0]};
+                3'b001: sq_rdat_wvalue[i] = {{48{dc_rdat[i][15]}}, dc_rdat[i][15:0]};
+                3'b101: sq_rdat_wvalue[i] = {               48'd0, dc_rdat[i][15:0]};
+                3'b010: sq_rdat_wvalue[i] = {{32{dc_rdat[i][31]}}, dc_rdat[i][31:0]};
+                3'b110: sq_rdat_wvalue[i] = {               32'd0, dc_rdat[i][31:0]};
+                default: sq_rdat_wvalue[i] = dc_rdat[i];
+            endcase
+            if ($clog2(sqsz)'(dc_resp[i]) == sq_front & sc_succ) sq_rdat_wvalue[i] = 0; // SC succeeds
+        end
+        sq_rdat_waddr [mwd] = sq_front;
+        sq_rdat_wena  [mwd] = csr_rqst | sc_fail;
+        sq_rdat_wvalue[mwd] = csr_rqst ? csr_rdat : 64'(sc_fail);
     end
     always_comb begin
         sq_in = 0; sq_out = 0;
@@ -132,30 +163,60 @@ module lsu #(
         for (int i = 0; i < cwd; i++)
             if (com_bundle[i].opid[15] & ~com_bundle[i].ldid[7] & com_bundle[i].stid[7]) sq_out++;
     end
-    always_ff @(posedge clk) if (rst) {sq_valid, sq_trans, sq_accsd} <= 0;
+    always_comb begin
+        /* this forwarding only used for checking now, there may be more use */
+        sq_trans_fwd = sq_trans;
+        sq_padd_fwd = sq_padd;
+        lq_chck_fwd = lq_chck;
+        for (int i = 0; i < mwd; i++)
+            if (dt_resp[i][7:5] == 3'b011) begin
+                sq_trans_fwd = 1;
+                sq_padd_fwd[$clog2(sqsz)'(dt_resp[i])] = dt_padd[i];
+            end
+        for (int i = 0; i < mwd; i++)
+            if (ck_resp[i][7:5] == 3'b110) lq_chck_fwd[$clog2(lqsz)'(ck_resp[i])] = ck_rslt[i];
+    end
+    always_ff @(posedge clk)
+        if (rst | flush) {sq_valid, sq_csr, sq_fence, sq_trans, sq_accsd, sq_rsrv, sq_pgft} <= 0;
         else begin
-            /* address calculated */
+            /* virtual address calculated */
             for (int i = 0; i < iwd; i++)
-                if (reg_bundle[i].opid[15] & ~reg_bundle[i].ldid[7] & reg_bundle[i].stid[7])
-                    sq_valid[$clog2(sqsz)'(reg_bundle[i].stid)] <= 1;
+                if (req_store[i].opid[15] & ~req_store[i].ldid[7] & req_store[i].stid[7]) begin
+                    sq_valid[$clog2(sqsz)'(req_store[i].stid)] <= 1;
+                    sq_csr  [$clog2(sqsz)'(req_store[i].stid)] <= func_store[i].csr;
+                    sq_fence[$clog2(sqsz)'(req_store[i].stid)] <= func_store[i].fence;
+                    sq_rsrv [$clog2(sqsz)'(req_store[i].stid)] <= func_store[i].rsrv;
+                end
             /* translate store entries */
-            for (int i = 0; i < mwd; i++) if (dt_resp[i][7:5] == 3'b011)
+            for (int i = 0; i < mwd; i++) if (dt_resp[i][7:5] == 3'b011) begin
                 sq_trans[$clog2(sqsz)'(dt_resp[i])] <= 1;
+                /* store permission: DA---W-V */
+                if ((dt_perm[i] | 8'b11000101) != dt_perm[i]) sq_pgft[$clog2(sqsz)'(dt_resp[i])] <= 1;
+            end
             /* access entries */
             for (int i = 0; i < mwd; i++) begin
                 if (dc_resp[i][7:6] == 2'b11 & dc_miss[i][7:6] != 2'b11)
                     for (int j = 0; j < sqsz; j++) if (dc_resp[i] == sq_miss[j]) sq_miss[j] <= 0;
                 if (dc_resp[i][7:5] == 3'b111 & dc_miss[i][7:6] == 2'b11) // cache miss
                     sq_miss[$clog2(sqsz)'(dc_resp[i])] <= dc_miss[i];
-                if (dc_resp[i][7:5] == 3'b111) sq_accsd <= 1; // store entry
+                if (dc_resp[i][7:5] == 3'b111 & dc_miss[i][7:6] != 2'b11) sq_accsd <= 1; // store entry
             end
+            /* SC fails */
+            if (sc_fail) sq_accsd <= 1;
+            /* access CSR entries */
+            if (csr_rqst) sq_accsd <= 1;
+            if (csr_rqst) sq_flush <= csr_flsh;
             /* output execution bundles */
             for (int i = 0; i < ewd; i++)
-                if (exe_bundle[i].opid[15] & ~exe_bundle[i].ldid[7] & exe_bundle[i].stid[7] & claim[i]) begin
+                if (exe_bundle[i].opid[15] & ~exe_bundle[i].ldid[7] & exe_bundle[i].stid[7] & claim[i])
                     sq_valid[sq_front] <= 0;
-                    sq_trans[sq_front] <= 0;
-                    sq_miss [sq_front] <= 0;
-                    sq_accsd <= 0;
+            /* commit entries */
+            for (int i = 0; i < cwd; i++)
+                if (com_bundle[i].opid[15] & ~com_bundle[i].ldid[7] & com_bundle[i].stid[7]) begin
+                    sq_trans[sq_front] <= 0; sq_pgft [sq_front] <= 0;
+                    sq_rsrv [sq_front] <= 0; sq_miss [sq_front] <= 0;
+                    sq_csr  [sq_front] <= 0; sq_fence[sq_front] <= 0;
+                    sq_accsd <= 0;           sq_flush <= 0;
                 end
         end
     always_ff @(posedge clk) for (int i = 0; i < iwd; i++) if (sq_wena[i]) begin
@@ -165,11 +226,16 @@ module lsu #(
             2'b10: sq_strb[sq_waddr[i]] <= 8'b0000_1111 << sq_vadd_wvalue[i][2:0];
             2'b11: sq_strb[sq_waddr[i]] <= 8'b1111_1111 << sq_vadd_wvalue[i][2:0];
         endcase
+        sq_bits[sq_waddr[i]] <= func_store[i].bits;
         sq_wdat[sq_waddr[i]] <= req_store[i].prs[1] << (8'(sq_vadd_wvalue[i][2:0]) << 3);
+        /* CSR instructions make use of existing SQ entries */
+        if (func_store[i].csr) begin
+            sq_strb[sq_waddr[i]] <= 8'(func_store[i].bits);
+            sq_wdat[sq_waddr[i]] <= req_store[i].a[64] ? req_store[i].prs[0] : req_store[i].a[63:0];
+        end
     end
-    always_ff @(posedge clk) for (int i = 0; i < mwd; i++)
-        if (dt_resp[i][7:5] == 3'b011) sq_padd[$clog2(sqsz)'(dt_resp[i])] <= dt_padd[i];
-    always_ff @(posedge clk) if (rst) sq_front <= 0; else sq_front <= sq_front + $clog2(sqsz)'(sq_out);
+    always_ff @(posedge clk) sq_padd <= sq_padd_fwd;
+    always_ff @(posedge clk) if (rst | flush) sq_front <= 0; else sq_front <= sq_front + $clog2(sqsz)'(sq_out);
 
     /* load queue */
     logic [$clog2(lqsz)-1:0] lq_front;                       // load queue front index
@@ -177,15 +243,22 @@ module lsu #(
     logic [lqsz-1:0] lq_valid, lq_trans, lq_accsd;           // valid, translated, checked and accessed entry
     logic [lqsz-1:0] lq_to_trans, lq_to_chckd;               // ready to be translated and checked
     logic [lqsz-1:0] lq_to_accsd, lq_to_exect;               // ready to be accessed and executed
+    logic [lqsz-1:0] lq_to_trans_off;                        // ready to be translated (with offset)
     logic [mwd-1:0][$clog2(lqsz):0] lq_pos_trans;            // positions to be translated
     logic [mwd-1:0][$clog2(lqsz):0] lq_pos_chckd;            // positions to be checked
     logic [mwd-1:0][$clog2(lqsz):0] lq_pos_accsd;            // positions to be accessed
     logic [ewd-1:0][$clog2(lqsz):0] lq_pos_exect;            // positions to be executed
+    logic [mwd-1:0][$clog2(lqsz):0] lq_pos_trans_off;        // positions to be translated
     logic [lqsz-1:0]             [7:0] lq_miss;              // miss index
-    logic [lqsz-1:0]             [1:0] lq_chck;              // relevance check
+    logic [lqsz-1:0]             [1:0] lq_chck, lq_chck_fwd; // relevance check
+    logic [lqsz-1:0]                   lq_fail;              // relevance check failure
+    logic                              lq_succ;              // relevance check success
     logic [lqsz-1:0][$clog2(sqsz)-1:0] lq_stid;              // previous store index of load entry
     logic [lqsz-1:0]            [63:0] lq_padd;              // physical address part of load queue
+    logic [lqsz-1:0]             [1:0] lq_rsrv;              // reservation bits of load queue
+    logic [lqsz-1:0]                   lq_pgft;              // page fault bits of load queue
     logic [lqsz-1:0]             [7:0] lq_strb;              // strobe part of load queue
+    logic [lqsz-1:0]             [2:0] lq_bits;              // functional bits of load queue
     logic        [ewd-1:0][$clog2(lqsz)-1:0] lq_raddr;       // load queue read index
     logic        [iwd-1:0][$clog2(lqsz)-1:0] lq_waddr;       // load queue write index
     exe_bundle_t [ewd-1:0]                   lq_rvalue;      // load queue read value
@@ -201,6 +274,7 @@ module lsu #(
     logic        [mwd-1:0]             [7:0] ck_resp;        // relevance checking ID
     logic        [mwd-1:0]             [1:0] ck_rslt;        // relevance checking result
     logic        [mwd-1:0]            [64:0] ck_forw;        // forwarded value (MSB is valid bit)
+    logic        [mwd-1:0]             [2:0] ck_bits;        // functional bits of relevance check
     mwpram #(.width($bits(exe_bundle_t)), .depth(lqsz), .rports(ewd), .wports(iwd))
         lq_inst(.clk(clk), .rst(rst), .wena(lq_wena),
             .raddr(lq_raddr), .rvalue(lq_rvalue), .waddr(lq_waddr), .wvalue(lq_wvalue));
@@ -210,17 +284,17 @@ module lsu #(
     mwpram #(.width(64), .depth(lqsz), .rports(ewd), .wports(2*mwd))
         lq_rdat_inst(.clk(clk), .rst(rst), .wena(lq_rdat_wena),
             .raddr(lq_raddr), .rvalue(lq_rdat_rvalue), .waddr(lq_rdat_waddr), .wvalue(lq_rdat_wvalue));
-    firstk #(.width(lqsz), .k(mwd)) pos_lq_trans_inst(.bits(lq_to_trans), .pos(lq_pos_trans));
+    firstk #(.width(lqsz), .k(mwd)) pos_lq_trans_inst(.bits(lq_to_trans_off), .pos(lq_pos_trans_off));
     firstk #(.width(lqsz), .k(mwd)) pos_lq_chckd_inst(.bits(lq_to_chckd), .pos(lq_pos_chckd));
     firstk #(.width(lqsz), .k(mwd)) pos_lq_accsd_inst(.bits(lq_to_accsd), .pos(lq_pos_accsd));
     firstk #(.width(lqsz), .k(ewd)) pos_lq_exect_inst(.bits(lq_to_exect), .pos(lq_pos_exect));
     always_comb begin
         lq_to_trans = lq_valid & ~lq_trans;
-        lq_to_exect = lq_accsd;
+        lq_to_exect = lq_valid & lq_accsd | lq_fail;
         for (int i = 0; i < lqsz; i++) lq_to_chckd[i] = lq_trans[i] & ~|lq_chck[i];
         for (int i = 0; i < lqsz; i++) lq_to_accsd[i] = |lq_chck[i] & ~lq_accsd[i];
         for (int i = 0; i < lqsz; i++)
-            if (lq_chck[i] == 1 & lq_stid[i] != sq_front | lq_miss[i][7:6] == 2'b11) lq_to_accsd[i] = 0;
+            if (lq_chck[i] == 2'b01 & lq_stid[i] != sq_front | lq_miss[i][7:6] == 2'b11) lq_to_accsd[i] = 0;
         /* do some forwarding */
         for (int i = 0; i < mwd; i++) if (dt_resp[i][7:5] == 3'b010) lq_to_trans[$clog2(lqsz)'(dt_resp[i])] = 0;
         for (int i = 0; i < mwd; i++) if (dt_resp[i][7:5] == 3'b010) lq_to_chckd[$clog2(lqsz)'(dt_resp[i])] = 1;
@@ -231,7 +305,11 @@ module lsu #(
         for (int i = 0; i < mwd; i++) if (dc_resp[i][7:5] == 3'b110) lq_to_accsd[$clog2(lqsz)'(dc_resp[i])] = 0;
         for (int i = 0; i < mwd; i++) if (dc_resp[i][7:5] == 3'b110 & dc_miss[i][7:6] != 2'b11)
             lq_to_exect[$clog2(lqsz)'(dc_resp[i])] = 1;
+        if (lq_succ) lq_to_exect[lq_front] = 1; // recheck succeeds
+        for (int i = 0; i < lqsz; i++) lq_to_trans_off[i] = lq_to_trans[$clog2(lqsz)'(i) + lq_front];
     end
+    always_comb for (int i = 0; i < mwd; i++)
+        lq_pos_trans[i] = {lq_pos_trans_off[i][$clog2(lqsz)], $clog2(lqsz)'(lq_pos_trans_off[i]) + lq_front};
     always_comb for (int i = 0; i < ewd; i++) lq_raddr[i] = $clog2(lqsz)'(lq_pos_exect[i]);
     always_comb for (int i = 0; i < mwd; i++) lq_vadd_raddr[i] = $clog2(lqsz)'(lq_pos_trans[i]);
     always_comb for (int i = 0; i < iwd; i++) begin
@@ -250,24 +328,47 @@ module lsu #(
     always_comb for (int i = 0; i < mwd; i++) begin
         lq_rdat_waddr [i] = $clog2(lqsz)'(dc_resp[i]);
         lq_rdat_wena  [i] = dc_resp[i][7:5] == 3'b110;
-        lq_rdat_wvalue[i] = dc_rdat;
+        case (dc_bits[i])
+            3'b000: lq_rdat_wvalue[i] = {{56{dc_rdat[i] [7]}}, dc_rdat[i] [7:0]};
+            3'b100: lq_rdat_wvalue[i] = {               56'd0, dc_rdat[i] [7:0]};
+            3'b001: lq_rdat_wvalue[i] = {{48{dc_rdat[i][15]}}, dc_rdat[i][15:0]};
+            3'b101: lq_rdat_wvalue[i] = {               48'd0, dc_rdat[i][15:0]};
+            3'b010: lq_rdat_wvalue[i] = {{32{dc_rdat[i][31]}}, dc_rdat[i][31:0]};
+            3'b110: lq_rdat_wvalue[i] = {               32'd0, dc_rdat[i][31:0]};
+            default: lq_rdat_wvalue[i] = dc_rdat[i];
+        endcase
         lq_rdat_waddr [mwd + i] = $clog2(lqsz)'(ck_resp[i]);
         lq_rdat_wena  [mwd + i] = ck_resp[i][7:5] == 3'b110 & ck_forw[i][64];
         lq_rdat_wvalue[mwd + i] = ck_forw[i][63:0];
+        case (ck_bits[i])
+            3'b000: lq_rdat_wvalue[mwd + i] = {{56{ck_forw[i] [7]}}, ck_forw[i] [7:0]};
+            3'b100: lq_rdat_wvalue[mwd + i] = {               56'd0, ck_forw[i] [7:0]};
+            3'b001: lq_rdat_wvalue[mwd + i] = {{48{ck_forw[i][15]}}, ck_forw[i][15:0]};
+            3'b101: lq_rdat_wvalue[mwd + i] = {               48'd0, ck_forw[i][15:0]};
+            3'b010: lq_rdat_wvalue[mwd + i] = {{32{ck_forw[i][31]}}, ck_forw[i][31:0]};
+            3'b110: lq_rdat_wvalue[mwd + i] = {               32'd0, ck_forw[i][31:0]};
+            default: lq_rdat_wvalue[mwd + i] = ck_forw[i][63:0];
+        endcase
     end
     always_comb begin
         lq_in = 0; lq_out = 0;
         for (int i = 0; i < iwd; i++) if (reg_bundle[i].opid[15] & reg_bundle[i].ldid[7]) lq_in++;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) lq_out++;
     end
-    always_ff @(posedge clk) if (rst) {lq_valid, lq_trans, lq_accsd, lq_chck, lq_miss} <= 0;
+    always_ff @(posedge clk)
+        if (rst | flush) {lq_valid, lq_trans, lq_rsrv, lq_pgft, lq_accsd, lq_chck, lq_miss} <= 0;
         else begin
-            /* address calculated */
-            for (int i = 0; i < iwd; i++) if (reg_bundle[i].opid[15] & reg_bundle[i].ldid[7])
-                lq_valid[$clog2(lqsz)'(reg_bundle[i].ldid)] <= 1;
+            /* virtual address calculated */
+            for (int i = 0; i < iwd; i++) if (req_load[i].opid[15] & req_load[i].ldid[7]) begin
+                lq_valid[$clog2(lqsz)'(req_load[i].ldid)] <= 1;
+                lq_rsrv [$clog2(lqsz)'(req_load[i].ldid)] <= func_load[i].rsrv;
+            end
             /* translate load entries */
-            for (int i = 0; i < mwd; i++) if (dt_resp[i][7:5] == 3'b010)
+            for (int i = 0; i < mwd; i++) if (dt_resp[i][7:5] == 3'b010) begin
                 lq_trans[$clog2(lqsz)'(dt_resp[i])] <= 1;
+                /* load permission:  -A----RV */
+                if ((dt_perm[i] | 8'b01000011) != dt_perm[i]) sq_pgft[$clog2(sqsz)'(dt_resp[i])] <= 1;
+            end
             /* check relevance */
             for (int i = 0; i < mwd; i++) if (ck_resp[i][7:5] == 3'b110) begin
                 lq_chck[$clog2(lqsz)'(ck_resp[i])] <= ck_rslt[i];
@@ -282,13 +383,19 @@ module lsu #(
                 if (dc_resp[i][7:5] == 3'b110 & dc_miss[i][7:6] == 2'b11) // cache miss
                     lq_miss[$clog2(lqsz)'(dc_resp[i])] <= dc_miss[i];
             end
+            /* successful recheck of LQ front entry */
+            if (lq_succ) lq_chck[lq_front] <= 2'b11;
             /* output execution bundles */
-            for (int i = 0; i < ewd; i++) if (exe_bundle[i].opid[15] & exe_bundle[i].ldid[7] & claim[i]) begin
+            for (int i = 0; i < ewd; i++) if (exe_bundle[i].opid[15] & exe_bundle[i].ldid[7] & claim[i])
                 lq_valid[$clog2(lqsz)'(exe_bundle[i].ldid)] <= 0;
-                lq_trans[$clog2(lqsz)'(exe_bundle[i].ldid)] <= 0;
-                lq_accsd[$clog2(lqsz)'(exe_bundle[i].ldid)] <= 0;
-                lq_chck [$clog2(lqsz)'(exe_bundle[i].ldid)] <= 0;
-                lq_miss [$clog2(lqsz)'(exe_bundle[i].ldid)] <= 0;
+            /* commit entries */
+            for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) begin
+                lq_trans[$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
+                lq_rsrv [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
+                lq_pgft [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
+                lq_accsd[$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
+                lq_chck [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
+                lq_miss [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
             end
         end
     always_ff @(posedge clk) for (int i = 0; i < mwd; i++)
@@ -301,13 +408,36 @@ module lsu #(
             2'b11: lq_strb[lq_waddr[i]] <= 8'b1111_1111 << lq_vadd_wvalue[i][2:0];
         endcase
         lq_stid[lq_waddr[i]] <= $clog2(sqsz)'(req_load[i].stid);
+        lq_bits[lq_waddr[i]] <= func_load[i].bits;
     end
-    always_ff @(posedge clk) if (rst) lq_front <= 0; else lq_front <= lq_front + $clog2(lqsz)'(lq_out);
+    always_ff @(posedge clk) for (int i = 0; i < mwd; i++)
+        if      (dc_rqst[i][7:5] == 3'b110) dc_bits[i] <= lq_bits[$clog2(lqsz)'(dc_rqst[i])];
+        else if (dc_rqst[i][7:5] == 3'b111) dc_bits[i] <= sq_bits[$clog2(sqsz)'(dc_rqst[i])];
+    always_ff @(posedge clk) if (rst | flush) lq_front <= 0; else lq_front <= lq_front + $clog2(lqsz)'(lq_out);
+
+    /* reservation set */
+    logic [63:0] lr_addr;   // reservation address
+    logic  [7:0] lr_strb;   // reservation size, MSB is reserved bit
+    always_ff @(posedge clk) if (rst) lr_strb <= 0;
+        else for (int i = 0; i < cwd; i++) begin
+            if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) // LR committed
+                if (lq_rsrv[$clog2(lqsz)'(com_bundle[i].ldid)][0]) begin
+                    lr_addr <= lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)];
+                    case (lq_bits[$clog2(lqsz)'(com_bundle[i].ldid)][1:0])
+                        2'b00: lr_strb <= 8'b0000_0001 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                        2'b01: lr_strb <= 8'b0000_0011 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                        2'b10: lr_strb <= 8'b0000_1111 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                        2'b11: lr_strb <= 8'b1111_1111 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                    endcase
+                end
+            if (com_bundle[i].opid[15] & ~com_bundle[i].ldid[7] & com_bundle[i].stid[7]) // SC committed
+                if (sq_rsrv[sq_front][0]) lr_strb <= 0;
+        end
 
     /* load-store relevance check */
-    logic [mwd-1:0][$clog2(sqsz)-1:0] ck_stid;
-    logic [mwd-1:0]            [63:0] ck_padd;
-    logic [mwd-1:0]             [7:0] ck_strb;
+    logic [mwd-1:0][$clog2(sqsz)-1:0] ck_stid; // store ID of checking operations
+    logic [mwd-1:0]            [63:0] ck_padd; // physical address of checking operations
+    logic [mwd-1:0]             [7:0] ck_strb; // strobe of checking operations
     always_comb for (int i = 0; i < mwd; i++) begin
         ck_stid[i] = lq_stid[$clog2(lqsz)'(lq_pos_chckd[i])];
         ck_padd[i] = lq_padd[$clog2(lqsz)'(lq_pos_chckd[i])];
@@ -316,7 +446,9 @@ module lsu #(
             if (dt_resp[j][7:5] == 3'b010 & dt_resp[j][4:0] == 5'($clog2(lqsz)'(lq_pos_chckd[i])))
                 ck_padd[i] = dt_padd[j];
     end
-    always_ff @(posedge clk) if (rst) ck_resp <= 0;
+    always_comb lq_succ = lq_chck[lq_front] == 2'b10 & ~lq_fail[lq_front] & lq_stid[lq_front] == sq_front;
+    /* relevance check */
+    always_ff @(posedge clk) if (rst | flush) ck_resp <= 0;
         else for (int i = 0; i < mwd; i++) if (lq_pos_chckd[i][$clog2(lqsz)]) begin
             ck_resp[i] <= {2'b11, 1'b0, 5'($clog2(lqsz)'(lq_pos_chckd[i]))};
             /* result encoding:
@@ -328,19 +460,53 @@ module lsu #(
             ck_rslt[i] <= 2'b11;
             ck_forw[i] <= 0;
             for (int j = 0; j < sqsz; j++) // find previous store operations
-                if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front | ck_stid[i] == sq_front)
-                    if (~sq_trans[32'(sq_front) + j]) ck_rslt[i] <= 2'b10;
-                    else if (sq_padd[32'(sq_front) + j][63:3] == ck_padd[i][63:3])
+                if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front)
+                    /* when SQ is full, SQ index may be same for load instructions those
+                       before all store instructions and those after all instructions,
+                       so that there should be one entry to be left for avoidance of this,
+                       and this can be limited in decoder */
+                    if (~sq_trans_fwd[32'(sq_front) + j]) {ck_forw[i], ck_rslt[i]} <= 'b10;
+                    else if (sq_padd_fwd[32'(sq_front) + j][63:3] == ck_padd[i][63:3])
                         if (~|(~sq_strb[32'(sq_front) + j] & ck_strb[i])) begin // able to cover
                             ck_rslt[i] <= 2'b11;
+                            ck_bits[i] <= lq_bits[$clog2(lqsz)'(lq_pos_chckd[i])];
                             ck_forw[i] <= {1'b1, sq_wdat[32'(sq_front) + j] >> (6'(ck_padd[i][2:0]) << 3)};
                         end else {ck_forw[i], ck_rslt[i]} <= 'b01;
+            for (int j = 0; j < lqsz; j++) // find previous load operations
+                if ($clog2(lqsz)'(j) < $clog2(lqsz)'(lq_pos_chckd[i]) - lq_front)
+                    if (~lq_trans[32'(lq_front) + j]) {ck_forw[i], ck_rslt[i]} <= 'b10;
+                    else if (lq_padd[32'(lq_front) + j][63:3] == ck_padd[i][63:3])
+                        {ck_forw[i], ck_rslt[i]} <= 'b01; // CoRR
         end else ck_resp[i] <= 0;
+    /* relevance recheck */
+    always_ff @(posedge clk) if (rst | flush) lq_fail <= 0;
+        else begin
+            /* address translated */
+            for (int i = 0; i < lqsz; i++) if (lq_chck_fwd[i] == 2'b10)                 // need recheck
+                for (int j = 0; j < mwd; j++) if (dt_padd[j][63:3] == lq_padd[i][63:3]) // same address
+                    if (dt_resp[j][7:5] == 3'b011 & // store address
+                            $clog2(sqsz)'(dt_resp[j]) - sq_front < lq_stid[i] - sq_front |
+                        dt_resp[j][7:5] == 3'b010 & // load address
+                            $clog2(lqsz)'(dt_resp[j]) - lq_front < $clog2(lqsz)'(i) - lq_front)
+                        lq_fail[i] <= 1;
+            /* commit bundle */
+            for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7])
+                lq_fail[$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
+        end
 
     /* MMU interface */
     logic [31:0] dt_num, dc_num;         // DTLB/DCACHE output number
     logic [$clog2(sqsz)-1:0] next_front; // next front index of store queue
     always_comb next_front = sq_front + $clog2(sqsz)'(sq_out);
+    always_comb begin
+        csr_rqst = 0; csr_func = 0; csr_addr = 0; csr_wdat = 0;
+        if (sq_csr[sq_front] & ~nextldid[7] & nextstid[7] & sq_front == $clog2(sqsz)'(nextstid)) begin
+            csr_rqst = ~sq_accsd;
+            csr_func = sq_strb[sq_front][2:0];
+            csr_addr = sq_vadd_rvalue[mwd][11:0];
+            csr_wdat = sq_wdat[sq_front];
+        end
+    end
     always_comb begin
         dt_rqst = 0; dt_vadd = 0; dt_num = 0;
         for (int i = 0; i < mwd; i++) if (sq_pos_trans[i][$clog2(sqsz)]) begin // untranslated entry in SQ
@@ -356,23 +522,28 @@ module lsu #(
             dt_num++;
         end
     end
+    always_comb sc_fail = sq_rsrv[next_front][0] & lr_strb != (lr_strb | sq_strb[next_front]);
+    always_comb sc_succ = sq_rsrv[next_front][0] & lr_strb == (lr_strb | sq_strb[next_front]);
     always_comb begin
         dc_rqst = 0; dc_addr = 0; dc_strb = 0; dc_wdat = 0; dc_num = 0;
-        if (sq_trans[next_front] & ~sq_accsd & next_front == $clog2(sqsz)'(nextstid)) begin // SQ entry to access
-            dc_rqst[0] = {2'b11, 1'b1, 5'(next_front)};
-            dc_addr[0] = sq_padd[next_front];
-            dc_strb[0] = sq_strb[sq_front];
-            dc_wdat[0] = sq_wdat[sq_front];
-            dc_num = 1;
-        end
-        for (int j = 0; j < mwd; j++) // do DTLB response forwarding
-            if (dt_resp[j][7:5] == 3'b011 & dt_resp[j][4:0] == 5'(next_front)) begin
+        if (~nextldid[7] & nextstid[7] & next_front == $clog2(sqsz)'(nextstid)) begin
+            if (sq_trans[next_front] & sq_miss[next_front][7:6] != 2'b11 & ~sq_accsd) begin // SQ entry to access
                 dc_rqst[0] = {2'b11, 1'b1, 5'(next_front)};
-                dc_addr[0] = dt_padd[j];
-                dc_strb[0] = sq_strb[sq_front];
-                dc_wdat[0] = sq_wdat[sq_front];
+                dc_addr[0] = sq_padd[next_front];
+                dc_strb[0] = sq_strb[next_front];
+                dc_wdat[0] = sq_wdat[next_front];
                 dc_num = 1;
             end
+            for (int j = 0; j < mwd; j++) // do DTLB response forwarding
+                if (dt_resp[j][7:5] == 3'b011 & dt_resp[j][4:0] == 5'(next_front)) begin
+                    dc_rqst[0] = {2'b11, 1'b1, 5'(next_front)};
+                    dc_addr[0] = dt_padd[j];
+                    dc_strb[0] = sq_strb[next_front];
+                    dc_wdat[0] = sq_wdat[next_front];
+                    dc_num = 1;
+                end
+        end
+        if (sc_fail) {dc_num, dc_rqst[0]} = 0;
         for (int i = 0; i < mwd; i++) // cancel request when responsed
             if (dc_resp[i][7:5] == 3'b111 & dc_resp[i][4:0] == 5'(sq_front)) {dc_num, dc_rqst[0]} = 0;
         for (int i = 0; i < mwd; i++) if (lq_pos_accsd[i][$clog2(lqsz)]) begin // LQ entry to access
@@ -390,19 +561,25 @@ module lsu #(
     always_comb ready = 1;
     always_comb begin
         exe_bundle = 0; sq_exe = 0; lq_exe = 0;
-        if (sq_accsd & sq_miss[sq_front][7:5] != 3'b111) begin
-            exe_bundle[32'(sq_exe)] = sq_rvalue;
-            exe_bundle[32'(sq_exe)].prdv = sq_rdat_rvalue;
+        if (sq_valid[sq_front] & (sq_accsd | sq_fence[sq_front]) & sq_miss[sq_front][7:6] != 2'b11) begin
+            exe_bundle[32'(sq_exe)]       = sq_rvalue;
+            exe_bundle[32'(sq_exe)].prdv  = sq_rdat_rvalue;
+            exe_bundle[32'(sq_exe)].flush = sq_flush;
             sq_exe = 1;
         end
         for (int i = 0; i < ewd; i++) if (lq_pos_exect[i][$clog2(lqsz)]) begin
             if (sq_exe + lq_exe >= ewd) break;
-            exe_bundle[32'(sq_exe) + 32'(lq_exe)] = lq_rvalue[i];
-            exe_bundle[32'(sq_exe) + 32'(lq_exe)].prdv = lq_rdat_rvalue[i];
+            exe_bundle[32'(sq_exe) + 32'(lq_exe)]        = lq_rvalue[i];
+            exe_bundle[32'(sq_exe) + 32'(lq_exe)].specul = lq_chck[$clog2(lqsz)'(lq_pos_exect[i])] == 2'b10;
+            exe_bundle[32'(sq_exe) + 32'(lq_exe)].prdv   = lq_rdat_rvalue[i];
             for (int j = 0; j < mwd; j++)
                 if (dc_resp[j][7:5] == 3'b110 & dc_miss[j][7:6] != 2'b11 &
                     lq_raddr[i] == $clog2(lqsz)'(dc_resp[j]))
-                    exe_bundle[32'(sq_exe) + 32'(lq_exe)].prdv = dc_rdat[j];
+                    exe_bundle[32'(sq_exe) + 32'(lq_exe)].prdv = lq_rdat_wvalue[j];
+            if ($clog2(lqsz)'(lq_pos_exect[i]) == lq_front & lq_succ)
+                exe_bundle[32'(sq_exe) + 32'(lq_exe)].specul = 0;
+            if (lq_fail[$clog2(lqsz)'(lq_pos_exect[i])])
+                exe_bundle[32'(sq_exe) + 32'(lq_exe)].retry = 1;
             lq_exe++;
         end
     end
