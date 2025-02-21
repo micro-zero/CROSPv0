@@ -75,7 +75,7 @@ module lsu #(
     logic [$clog2(sqsz):0] sq_in, sq_out, sq_exe;            // load queue numbers
     logic [sqsz-1:0] sq_valid, sq_trans, sq_trans_fwd;       // valid and translated entry
     logic [sqsz-1:0] sq_csr, sq_fence;                       // CSRRW and fence entry
-    logic            sq_accsd, sq_flush;                     // accessed and flush bit of front entry
+    logic [sqsz-1:0] sq_accsd, sq_flush;                     // accessed and flush bit of front entry
     logic [sqsz-1:0] sq_to_trans;                            // forwarded store queue bits
     logic [sqsz-1:0] sq_to_trans_off;                        // forwarded store queue bits with offset
     logic [mwd-1:0][$clog2(sqsz):0] sq_pos_trans;            // positions to be translated
@@ -98,8 +98,8 @@ module lsu #(
     logic                             [63:0] sq_rdat_rvalue; // read data read value
     logic          [mwd:0]                   sq_rdat_wena;   // read data write enable
     logic          [mwd:0]            [63:0] sq_rdat_wvalue; // read data write value
-    logic        [mwd-1:0]             [2:0] dc_bits;        // functional bits of DCACHE response
     logic sc_fail, sc_succ;                                  // SC fail and success signal
+    logic [7:0] topstid, topldid;                            // top store and load ID in ROB
     mwpram #(.width($bits(exe_bundle_t)), .depth(sqsz), .rports(1), .wports(iwd))
         sq_inst(.clk(clk), .rst(rst), .wena(sq_wena),
             .raddr(sq_front), .rvalue(sq_rvalue), .waddr(sq_waddr), .wvalue(sq_wvalue));
@@ -141,7 +141,7 @@ module lsu #(
         for (int i = 0; i < mwd; i++) begin
             sq_rdat_waddr [i] = $clog2(sqsz)'(dc_resp[i]);
             sq_rdat_wena  [i] = dc_resp[i][7:5] == 3'b111;
-            case (dc_bits[i])
+            case (sq_bits[sq_rdat_waddr[i]])
                 3'b000: sq_rdat_wvalue[i] = {{56{dc_rdat[i] [7]}}, dc_rdat[i] [7:0]};
                 3'b100: sq_rdat_wvalue[i] = {               56'd0, dc_rdat[i] [7:0]};
                 3'b001: sq_rdat_wvalue[i] = {{48{dc_rdat[i][15]}}, dc_rdat[i][15:0]};
@@ -170,12 +170,14 @@ module lsu #(
         lq_chck_fwd = lq_chck;
         for (int i = 0; i < mwd; i++)
             if (dt_resp[i][7:5] == 3'b011) begin
-                sq_trans_fwd = 1;
+                sq_trans_fwd[$clog2(sqsz)'(dt_resp[i])] = 1;
                 sq_padd_fwd[$clog2(sqsz)'(dt_resp[i])] = dt_padd[i];
             end
         for (int i = 0; i < mwd; i++)
             if (ck_resp[i][7:5] == 3'b110) lq_chck_fwd[$clog2(lqsz)'(ck_resp[i])] = ck_rslt[i];
     end
+    always_ff @(posedge clk) if (rst) {topstid, topldid} <= 0;
+        else {topstid, topldid} <= {nextstid, nextldid};
     always_ff @(posedge clk)
         if (rst | flush) {sq_valid, sq_csr, sq_fence, sq_trans, sq_accsd, sq_rsrv, sq_pgft} <= 0;
         else begin
@@ -199,13 +201,15 @@ module lsu #(
                     for (int j = 0; j < sqsz; j++) if (dc_resp[i] == sq_miss[j]) sq_miss[j] <= 0;
                 if (dc_resp[i][7:5] == 3'b111 & dc_miss[i][7:6] == 2'b11) // cache miss
                     sq_miss[$clog2(sqsz)'(dc_resp[i])] <= dc_miss[i];
-                if (dc_resp[i][7:5] == 3'b111 & dc_miss[i][7:6] != 2'b11) sq_accsd <= 1; // store entry
+                if (dc_resp[i][7:5] == 3'b111 & dc_miss[i][7:6] != 2'b11) sq_accsd[sq_front] <= 1; // store entry
             end
             /* SC fails */
-            if (sc_fail) sq_accsd <= 1;
+            if (~topldid[7] & topstid[7] & next_front == $clog2(sqsz)'(nextstid) & sc_fail)
+                sq_accsd[sq_front] <= 1;
             /* access CSR entries */
-            if (csr_rqst) sq_accsd <= 1;
-            if (csr_rqst) sq_flush <= csr_flsh;
+            if (csr_rqst) sq_accsd[sq_front] <= 1;
+            if (csr_rqst) sq_flush[sq_front] <= csr_flsh;
+            if (csr_rqst) sq_pgft[sq_front] <= csr_excp; // use `pgft` as CSR exception signal
             /* output execution bundles */
             for (int i = 0; i < ewd; i++)
                 if (exe_bundle[i].opid[15] & ~exe_bundle[i].ldid[7] & exe_bundle[i].stid[7] & claim[i])
@@ -216,7 +220,7 @@ module lsu #(
                     sq_trans[sq_front] <= 0; sq_pgft [sq_front] <= 0;
                     sq_rsrv [sq_front] <= 0; sq_miss [sq_front] <= 0;
                     sq_csr  [sq_front] <= 0; sq_fence[sq_front] <= 0;
-                    sq_accsd <= 0;           sq_flush <= 0;
+                    sq_accsd[sq_front] <= 0; sq_flush[sq_front] <= 0;
                 end
         end
     always_ff @(posedge clk) for (int i = 0; i < iwd; i++) if (sq_wena[i]) begin
@@ -328,7 +332,7 @@ module lsu #(
     always_comb for (int i = 0; i < mwd; i++) begin
         lq_rdat_waddr [i] = $clog2(lqsz)'(dc_resp[i]);
         lq_rdat_wena  [i] = dc_resp[i][7:5] == 3'b110;
-        case (dc_bits[i])
+        case (lq_bits[lq_rdat_waddr[i]])
             3'b000: lq_rdat_wvalue[i] = {{56{dc_rdat[i] [7]}}, dc_rdat[i] [7:0]};
             3'b100: lq_rdat_wvalue[i] = {               56'd0, dc_rdat[i] [7:0]};
             3'b001: lq_rdat_wvalue[i] = {{48{dc_rdat[i][15]}}, dc_rdat[i][15:0]};
@@ -410,28 +414,26 @@ module lsu #(
         lq_stid[lq_waddr[i]] <= $clog2(sqsz)'(req_load[i].stid);
         lq_bits[lq_waddr[i]] <= func_load[i].bits;
     end
-    always_ff @(posedge clk) for (int i = 0; i < mwd; i++)
-        if      (dc_rqst[i][7:5] == 3'b110) dc_bits[i] <= lq_bits[$clog2(lqsz)'(dc_rqst[i])];
-        else if (dc_rqst[i][7:5] == 3'b111) dc_bits[i] <= sq_bits[$clog2(sqsz)'(dc_rqst[i])];
     always_ff @(posedge clk) if (rst | flush) lq_front <= 0; else lq_front <= lq_front + $clog2(lqsz)'(lq_out);
 
     /* reservation set */
-    logic [63:0] lr_addr;   // reservation address
-    logic  [7:0] lr_strb;   // reservation size, MSB is reserved bit
+    logic [63:0] lr_addr; // reservation address
+    logic  [7:0] lr_strb; // reservation size, MSB is reserved bit
     always_ff @(posedge clk) if (rst) lr_strb <= 0;
-        else for (int i = 0; i < cwd; i++) begin
-            if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) // LR committed
-                if (lq_rsrv[$clog2(lqsz)'(com_bundle[i].ldid)][0]) begin
-                    lr_addr <= lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)];
-                    case (lq_bits[$clog2(lqsz)'(com_bundle[i].ldid)][1:0])
-                        2'b00: lr_strb <= 8'b0000_0001 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
-                        2'b01: lr_strb <= 8'b0000_0011 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
-                        2'b10: lr_strb <= 8'b0000_1111 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
-                        2'b11: lr_strb <= 8'b1111_1111 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
-                    endcase
-                end
-            if (com_bundle[i].opid[15] & ~com_bundle[i].ldid[7] & com_bundle[i].stid[7]) // SC committed
-                if (sq_rsrv[sq_front][0]) lr_strb <= 0;
+        else begin
+            for (int i = 0; i < cwd; i++)
+                if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) // LR committed
+                    if (lq_rsrv[$clog2(lqsz)'(com_bundle[i].ldid)][0]) begin
+                        lr_addr <= lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)];
+                        case (lq_bits[$clog2(lqsz)'(com_bundle[i].ldid)][1:0])
+                            2'b00: lr_strb <= 8'b0000_0001 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                            2'b01: lr_strb <= 8'b0000_0011 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                            2'b10: lr_strb <= 8'b0000_1111 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                            2'b11: lr_strb <= 8'b1111_1111 << lq_padd[$clog2(lqsz)'(com_bundle[i].ldid)][2:0];
+                        endcase
+                    end
+            for (int i = 0; i < mwd; i++)
+                if (dc_resp[i][7:5] == 3'b111 & sq_rsrv[sq_front][0]) lr_strb <= 0; // SC handled
         end
 
     /* load-store relevance check */
@@ -446,7 +448,8 @@ module lsu #(
             if (dt_resp[j][7:5] == 3'b010 & dt_resp[j][4:0] == 5'($clog2(lqsz)'(lq_pos_chckd[i])))
                 ck_padd[i] = dt_padd[j];
     end
-    always_comb lq_succ = lq_chck[lq_front] == 2'b10 & ~lq_fail[lq_front] & lq_stid[lq_front] == sq_front;
+    always_comb lq_succ = lq_accsd[lq_front] &
+        lq_chck[lq_front] == 2'b10 & ~lq_fail[lq_front] & lq_stid[lq_front] == sq_front;
     /* relevance check */
     always_ff @(posedge clk) if (rst | flush) ck_resp <= 0;
         else for (int i = 0; i < mwd; i++) if (lq_pos_chckd[i][$clog2(lqsz)]) begin
@@ -467,7 +470,8 @@ module lsu #(
                        and this can be limited in decoder */
                     if (~sq_trans_fwd[32'(sq_front) + j]) {ck_forw[i], ck_rslt[i]} <= 'b10;
                     else if (sq_padd_fwd[32'(sq_front) + j][63:3] == ck_padd[i][63:3])
-                        if (~|(~sq_strb[32'(sq_front) + j] & ck_strb[i])) begin // able to cover
+                        if (~|(~sq_strb[32'(sq_front) + j] & ck_strb[i]) & ~sq_rsrv[32'(sq_front) + j][0]) begin
+                            /* able to cover and unconditionally store */
                             ck_rslt[i] <= 2'b11;
                             ck_bits[i] <= lq_bits[$clog2(lqsz)'(lq_pos_chckd[i])];
                             ck_forw[i] <= {1'b1, sq_wdat[32'(sq_front) + j] >> (6'(ck_padd[i][2:0]) << 3)};
@@ -501,11 +505,12 @@ module lsu #(
     always_comb begin
         csr_rqst = 0; csr_func = 0; csr_addr = 0; csr_wdat = 0;
         if (sq_csr[sq_front] & ~nextldid[7] & nextstid[7] & sq_front == $clog2(sqsz)'(nextstid)) begin
-            csr_rqst = ~sq_accsd;
+            csr_rqst = ~sq_accsd[sq_front];
             csr_func = sq_strb[sq_front][2:0];
             csr_addr = sq_vadd_rvalue[mwd][11:0];
             csr_wdat = sq_wdat[sq_front];
         end
+        if (flush) csr_rqst = 0;
     end
     always_comb begin
         dt_rqst = 0; dt_vadd = 0; dt_num = 0;
@@ -521,13 +526,16 @@ module lsu #(
             dt_vadd[i] = lq_vadd_rvalue[i];
             dt_num++;
         end
+        if (flush) dt_rqst = 0;
     end
-    always_comb sc_fail = sq_rsrv[next_front][0] & lr_strb != (lr_strb | sq_strb[next_front]);
-    always_comb sc_succ = sq_rsrv[next_front][0] & lr_strb == (lr_strb | sq_strb[next_front]);
+    always_comb sc_fail = sq_trans[next_front] & sq_rsrv[next_front][0] &
+        (lr_addr[63:3] != sq_padd[next_front][63:3] | lr_strb != (lr_strb | sq_strb[next_front]));
+    always_comb sc_succ = sq_trans[next_front] & sq_rsrv[next_front][0] &
+        (lr_addr[63:3] == sq_padd[next_front][63:3] & lr_strb == (lr_strb | sq_strb[next_front]));
     always_comb begin
         dc_rqst = 0; dc_addr = 0; dc_strb = 0; dc_wdat = 0; dc_num = 0;
         if (~nextldid[7] & nextstid[7] & next_front == $clog2(sqsz)'(nextstid)) begin
-            if (sq_trans[next_front] & sq_miss[next_front][7:6] != 2'b11 & ~sq_accsd) begin // SQ entry to access
+            if (sq_trans[next_front] & sq_miss[next_front][7:6] != 2'b11 & ~sq_accsd[next_front]) begin
                 dc_rqst[0] = {2'b11, 1'b1, 5'(next_front)};
                 dc_addr[0] = sq_padd[next_front];
                 dc_strb[0] = sq_strb[next_front];
@@ -543,7 +551,7 @@ module lsu #(
                     dc_num = 1;
                 end
         end
-        if (sc_fail) {dc_num, dc_rqst[0]} = 0;
+        if (sq_rsrv[next_front][0] & ~sc_succ) {dc_num, dc_rqst[0]} = 0;
         for (int i = 0; i < mwd; i++) // cancel request when responsed
             if (dc_resp[i][7:5] == 3'b111 & dc_resp[i][4:0] == 5'(sq_front)) {dc_num, dc_rqst[0]} = 0;
         for (int i = 0; i < mwd; i++) if (lq_pos_accsd[i][$clog2(lqsz)]) begin // LQ entry to access
@@ -554,6 +562,7 @@ module lsu #(
             dc_wdat[dc_num] = 0;
             dc_num++;
         end
+        if (flush) dc_rqst = 0;
     end
     always_comb dc_flsh = flush;
 
@@ -561,10 +570,12 @@ module lsu #(
     always_comb ready = 1;
     always_comb begin
         exe_bundle = 0; sq_exe = 0; lq_exe = 0;
-        if (sq_valid[sq_front] & (sq_accsd | sq_fence[sq_front]) & sq_miss[sq_front][7:6] != 2'b11) begin
+        if (sq_valid[sq_front] & (sq_accsd[sq_front] | sq_fence[sq_front]) &
+            sq_miss[sq_front][7:6] != 2'b11) begin
             exe_bundle[32'(sq_exe)]       = sq_rvalue;
             exe_bundle[32'(sq_exe)].prdv  = sq_rdat_rvalue;
-            exe_bundle[32'(sq_exe)].flush = sq_flush;
+            exe_bundle[32'(sq_exe)].flush = sq_flush[sq_front];
+            if (sq_pgft[sq_front]) exe_bundle[32'(sq_exe)].cause = {2'b10, sq_csr[sq_front] ? 6'd2 : 6'd15};
             sq_exe = 1;
         end
         for (int i = 0; i < ewd; i++) if (lq_pos_exect[i][$clog2(lqsz)]) begin
@@ -580,6 +591,8 @@ module lsu #(
                 exe_bundle[32'(sq_exe) + 32'(lq_exe)].specul = 0;
             if (lq_fail[$clog2(lqsz)'(lq_pos_exect[i])])
                 exe_bundle[32'(sq_exe) + 32'(lq_exe)].retry = 1;
+            if (lq_pgft[$clog2(lqsz)'(lq_pos_exect[i])])
+                exe_bundle[32'(sq_exe) + 32'(lq_exe)].cause = {2'b10, 6'd13};
             lq_exe++;
         end
     end

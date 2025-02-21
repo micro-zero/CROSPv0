@@ -16,14 +16,14 @@ bits::bits(double d)
     double data = d;
     this->data = *(uint64_t *)&data;
     if (range(52, 62) == 0x7ff && range(0, 51))
-        this->data = 0x7ff8'0000'0000'0000ul;
+        this->data = 0x7ff8000000000000ul;
 }
 bits::bits(float f)
 {
     float data = f;
-    this->data = *(uint64_t *)&data | 0xffff'ffff'0000'0000ull;
+    this->data = *(uint64_t *)&data | 0xffffffff00000000ull;
     if (range(23, 30) == 0x0ff && range(0, 22))
-        this->data = 0xffff'ffff'7fc0'0000ul;
+        this->data = 0xffffffff7fc00000ul;
 }
 bits::operator uint64_t() const { return data; }
 bits::operator double() const { return *(double *)&data; }
@@ -49,6 +49,7 @@ memory::memory()
     memset(&axiport, 0, sizeof(axiport));
     memset(&axibuff, 0, sizeof(axibuff));
     rbursti = wbursti = 0;
+    thv = fhv = scsent = 0;
     memset(&errstr, 0, sizeof(errstr));
 }
 
@@ -69,13 +70,16 @@ memory::memory(const memory &b) { *this = b; }
  * @param uartaddr UART-lite base address
  * @return error string, NULL if successful
  */
-const char *memory::init(const char *fname, const char *dtb, const char *initrd, uint8_t ftype,
-                         uint64_t entry, uint64_t dtbaddr, uint64_t initrdaddr, uint64_t uartaddr)
+const char *memory::init(const char *fname, const char *dtb, const char *initrd,
+                         uint8_t ftype, std::vector<const char *> args, uint64_t entry,
+                         uint64_t dtbaddr, uint64_t initrdaddr, uint64_t uartaddr)
 {
+    this->args = args;
     this->entry = entry;
     this->dtbaddr = dtbaddr;
     this->initrdaddr = initrdaddr;
     this->uartaddr = uartaddr;
+    this->htifexit = 0;
     if (ftype == MEMINIT_ELF)
     {
         /* ELF format */
@@ -370,7 +374,7 @@ axidev &memory::operator<<(const axiport_t &ap)
  * @brief At reset
  * @param value value of reset signal
  */
-void memory::reset(uint8_t value) {}
+void memory::reset(uint8_t value) { rst = value; }
 
 /**
  * @brief At clock posedge
@@ -387,6 +391,44 @@ void memory::record() {}
  */
 void memory::posedge()
 {
+    /* handle coherence interface */
+    mcresp = mcrqst;
+    if (scrqst)
+        scrqst = 0;
+    if (rst)
+        scsent = 0;
+    else if ((!thv || !fhv) && !scsent)
+    {
+        scsent = 1;
+        scrqst = 0b1;
+        scaddr = !thv ? htifaddr.tohost : htifaddr.fromhost;
+        sctrsc = 1; // own GetV
+    }
+    else if (scresp)
+    {
+        scsent = 0;
+        if ((scaddr & ~0x3flu) == (htifaddr.tohost & ~0x3flu))
+        {
+            thv = 1;
+            /* handle HTIF requests when tohost changed */
+            uint64_t tohost_dev = (*this)[htifaddr.tohost + 7];
+            uint64_t tohost_cmd = (*this)[htifaddr.tohost + 6];
+            uint64_t tohost_dat = this->ui64(htifaddr.tohost) & 0xffffffffffff;
+            if (tohost_dev == 0 && tohost_cmd == 0)
+                if (tohost_dat & 1) // exit
+                    htifexit = this->ui64(htifaddr.tohost);
+        }
+        if ((scaddr & ~0x3flu) == (htifaddr.fromhost & ~0x3flu))
+            fhv = 1;
+    }
+    if (mcrqst && mctrsc == 1) // other GetV
+    {
+        if ((mcaddr & ~0x3flu) == (htifaddr.tohost & ~0x3flu))
+            thv = 0;
+        if ((mcaddr & ~0x3flu) == (htifaddr.fromhost & ~0x3flu))
+            fhv = 0;
+    }
+
     /* handshake and state change */
     if (axiport.arvalid & axiport.arready)
     {
@@ -1752,7 +1794,7 @@ delta_t next(state_t &s)
         case 0b11100:
             ret.gpra = ir.range(7, 11);
             if (funct3 == 0) // FMV.X.F
-                ret.gprv = ir[25] ? *(uint64_t *)&ds1 : *(uint32_t *)&ss1 | 0xffff'ffff'0000'0000;
+                ret.gprv = ir[25] ? *(uint64_t *)&ds1 : *(uint32_t *)&ss1 | 0xffffffff00000000;
             else if (funct3 == 1) // FCLASS
             {
                 using namespace std;
@@ -1937,7 +1979,7 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
     /* handle HTIF requests */
     uint64_t tohost_dev = mem[addr.tohost + 7];
     uint64_t tohost_cmd = mem[addr.tohost + 6];
-    uint64_t tohost_dat = mem.ui64(addr.tohost) & 0xffff'ffff'ffff;
+    uint64_t tohost_dat = mem.ui64(addr.tohost) & 0xffffffffffff;
     if (tohost_dev == 0 && tohost_cmd == 0)
     {
         if (tohost_dat & 1) // exit

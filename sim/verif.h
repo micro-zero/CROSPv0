@@ -91,21 +91,30 @@ private:
     std::vector<uint64_t> size; // segment size list
     std::vector<uint8_t *> ptr; // segment pointer list
     uint64_t segfault;          // returned entity when segfault
+    uint8_t rst;                // reset port
     axiport_t axiport;          // AXI port
     axiport_t axibuff;          // AXI value buffer
     uint8_t rbursti, wbursti;   // AXI burst index
+    uint8_t thv, fhv, scsent;   // tohost and fromhost valid state
     char errstr[128];           // error string
 
 public:
-    uint64_t entry;      // program entry
-    uint64_t hexsz;      // hex code size in bytes
-    uint64_t dtbaddr;    // device tree storing address
-    uint64_t initrdaddr; // initial ramdisk address
-    uint64_t uartaddr;   // UART-lite base address
-    htifaddr_t htifaddr; // HTIF addresses
+    uint8_t scrqst, mcrqst;         // coherence request ports
+    uint8_t sctrsc, mctrsc;         // coherence transaction ports
+    uint8_t scresp, mcresp;         // coherence response ports
+    uint64_t scaddr, mcaddr;        // coherence address ports
+    uint64_t entry;                 // program entry
+    uint64_t hexsz;                 // hex code size in bytes
+    uint64_t dtbaddr;               // device tree storing address
+    uint64_t initrdaddr;            // initial ramdisk address
+    uint64_t uartaddr;              // UART-lite base address
+    htifaddr_t htifaddr;            // HTIF addresses
+    std::vector<const char *> args; // program arguments
+    uint8_t htifexit;               // HTIF exit data
     memory();
     memory(const memory &b);
     const char *init(const char *fname, const char *dtb, const char *initrd, uint8_t ftype,
+                     std::vector<const char *> args,
                      uint64_t entry = 0xc0000000,
                      uint64_t dtbaddr = 0xc0001000,
                      uint64_t initrdaddr = 0xf0000000,

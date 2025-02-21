@@ -49,15 +49,6 @@ VCORE_SV = \
 	vcore.sv
 INTC_SV = ../src/soc/intc.sv
 
-# only pass HTIF addresses to core when "BYPHTIF" is set
-# if set, AXI core will filter HTIF console requests and convert to UART-lite
-ifdef BYPHTIF
-	CXXFLAGS += -DBYPHTIF
-else
-	TOHOST  = 0
-	FRHOST  = 0
-endif
-
 # Scripts
 define RVTESTS_SCRIPT
 	echo "ISA tests errors:"

@@ -48,18 +48,6 @@ Some variables are supported in makefile to determine basic
 parameters and pre-define some simulation behavior. Firstly the
 parameters of SystemVerilog modules are defined in makefile
 which can be changed directly or overwritten in command line.
-Particularly, variable `BYPHTIF` is used to bypass cache for
-access of `tohost` and `fromhost`. It is designed to adapt in
-two different scenarios. If only console protocols in HTIF are
-used, it is better to bypass cache directly and convert to UART
-requests. But in more complicated functions like system call in
-HTIF, some other addresses in memory may change, and these
-addresses are arbitrary and hard to bypass in all programs.
-This will lead to coherence issue, and the current solution is
-to synchronize cache when HTIF registers are accessed. With the
-synchronization, bypassing these registers are not required.
-Notice that if `BYPHTIF` is set, `tohost` and `fromhost`
-addresses should be specified before compilation in makefile.
 
 ## Verification flow
 
@@ -174,7 +162,7 @@ to build images and this may take some time.
 To run Buildroot image, we should bypass HTIF registers to
 handle console requests. Run
 ```
-make PWD=2 BYPHTIF=1 -j8
+make PWD=2 -j8
 ```
 for example to build simulation with a dual-issue core.
 

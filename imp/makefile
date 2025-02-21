@@ -161,8 +161,6 @@ define IMP_TCL
 	connect_bd_net [get_bd_pins core_rst_gate_0/Op2] [get_bd_pins socctl/core_rst]
 	connect_bd_net [get_bd_pins core_rst_gate_0/Res] [get_bd_pins core/rst]
 	connect_bd_net [get_bd_pins core_rst_gate_0/Res] [get_bd_pins intctl/rst]
-	connect_bd_net [get_bd_pins ground/dout] [get_bd_pins core/sync_rqst]
-	connect_bd_net [get_bd_pins ground/dout] [get_bd_pins core/sync_invl]
 	assign_bd_address -offset 0x$(PARAM_CLINT) -range 32M [get_bd_addr_segs intctl/s_axi/reg0]
 	assign_bd_address -offset 0x$(PARAM_UART) -range 64K [get_bd_addr_segs uartlite/S_AXI/Reg]
 	# Save board design
@@ -216,8 +214,6 @@ define SIM_TCL
 	create_bd_port -dir I -type rst rstn
 	connect_bd_net [get_bd_pins core/mip_ext] [get_bd_pins intctl/int_pend]
 	connect_bd_net [get_bd_pins core/mtime] [get_bd_pins intctl/int_time]
-	connect_bd_net [get_bd_pins ground/dout] [get_bd_pins core/sync_rqst]
-	connect_bd_net [get_bd_pins ground/dout] [get_bd_pins core/sync_invl]
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
 		Clk_master {/clk ($(CPUFREQ) MHz)}                      \\
 		Clk_slave  {/clk ($(CPUFREQ) MHz)}                      \\

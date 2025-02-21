@@ -43,6 +43,15 @@ module mmu #(
     output logic  [7:0] s_dc_resp, // data cache response ID
     output logic  [7:0] s_dc_miss, // data cache miss signal
     output logic [63:0] s_dc_rdat, // data cache read data
+    /* coherence interface */
+    input  logic  [7:0] s_coh_rqst, // slave coherence request ID
+    input  logic  [7:0] s_coh_trsc, // slave coherence transaction
+    input  logic [63:0] s_coh_addr, // slave coherence physical address
+    output logic  [7:0] s_coh_resp, // slave coherence response ID
+    output logic  [7:0] m_coh_rqst, // master coherence request ID
+    output logic  [7:0] m_coh_trsc, // master coherence transaction
+    output logic [63:0] m_coh_addr, // master coherence physical address
+    input  logic  [7:0] m_coh_resp, // master coherence response ID
     /* AXI master interface */
     /* write address channel */
     output logic  [7:0] m_axi_awid,
@@ -89,7 +98,8 @@ module mmu #(
 );
     /* request ID catalog:
      *   8'b0000_0000: no request
-     *   8'b0000_0001: ITLB request
+     *   8'b0000_0001: coherence request
+     *   8'b0000_0010: ITLB request
      *   8'b01xx_xxxx: DTLB request
      *   8'b10xx_xxxx: ICACHE requests
      *   8'b11xx_xxxx: DCACHE requests
@@ -155,12 +165,14 @@ module mmu #(
     always_ff @(posedge clk) st_vadd_b <= st_vadd_f;
 
     /* cache definitions */
+    logic       [7:0] dc_trsc_s, dc_trsc_m; logic       [7:0] ic_trsc_s, ic_trsc_m;
     logic       [7:0] dc_rqst_s, dc_rqst_m; logic       [7:0] ic_rqst_s, ic_rqst_m;
     logic      [63:0] dc_strb_s, dc_strb_m; logic      [63:0] ic_strb_s, ic_strb_m;
     logic      [63:0] dc_addr_s, dc_addr_m; logic      [63:0] ic_addr_s, ic_addr_m;
     logic [63:0][7:0] dc_wdat_s, dc_wdat_m; logic [63:0][7:0] ic_wdat_s, ic_wdat_m;
     logic       [7:0] dc_resp_s, dc_resp_m; logic       [7:0] ic_resp_s, ic_resp_m;
     logic       [7:0] dc_miss_s, dc_miss_m; logic       [7:0] ic_miss_s, ic_miss_m;
+    logic      [63:0] dc_ofst_s, dc_ofst_m; logic      [63:0] ic_ofst_s, ic_ofst_m;
     logic [63:0][7:0] dc_rdat_s, dc_rdat_m; logic [63:0][7:0] ic_rdat_s, ic_rdat_m;
     logic             dc_ready;             logic             ic_ready;
     logic       [7:0] dc_rqst_b, dc_rqst_f; logic       [7:0] ic_rqst_b, ic_rqst_f;
@@ -168,18 +180,26 @@ module mmu #(
     logic      [63:0] dc_strb_b, dc_strb_f;
     logic [63:0][7:0] dc_wdat_b, dc_wdat_f;
     logic                        dc_byps_f; logic       [5:0] ic_offset;
+    logic       [7:0] coh_rqst_b, coh_trsc_b;
+    logic      [63:0] coh_addr_b;
+    logic       [7:0] coh_resp_b, coh_mesi_b;
+    logic [63:0][7:0] coh_rdat_b;
+    logic       [7:0] coh_lock_b; // coherence locked request ID
 
     /* instruction cache */
     cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
-        .clk(clk), .rst(rst | fnci), .flush(s_ic_flsh),
+        .clk(clk), .rst(rst | fnci), .flmask(s_ic_flsh ? 8'hff : 8'h00), .flrqst(0),
+        .s_trsc(ic_trsc_s), .m_trsc(ic_trsc_m),
         .s_rqst(ic_rqst_s), .m_rqst(ic_rqst_m),
         .s_strb(ic_strb_s), .m_strb(ic_strb_m),
         .s_addr(ic_addr_s), .m_addr(ic_addr_m),
         .s_wdat(ic_wdat_s), .m_wdat(ic_wdat_m),
         .s_resp(ic_resp_s), .m_resp(ic_resp_m),
         .s_miss(ic_miss_s), .m_miss(ic_miss_m),
+        .s_ofst(ic_ofst_s), .m_ofst(ic_ofst_m),
         .s_rdat(ic_rdat_s), .m_rdat(ic_rdat_m)
     );
+    always_comb ic_trsc_s = 0; // ICACHE requires no coherency
     always_comb ic_rqst_s = s_ic_rqst;
     always_comb ic_addr_s = s_ic_addr;
     always_comb ic_strb_s = 0;
@@ -191,35 +211,53 @@ module mmu #(
     always_comb ic_addr_f = ic_ready ? ic_addr_m : ic_addr_b;
     always_comb ic_resp_m = dc_resp_s[7:6] == 2'b10 ? dc_resp_s : 0;
     always_comb ic_miss_m = dc_miss_s;
+    always_comb ic_ofst_m = dc_ofst_s;
     always_comb ic_rdat_m = dc_rdat_s;
     always_ff @(posedge clk) ic_rqst_b <= rst | s_ic_flsh ? 0 : ic_rqst_f;
     always_ff @(posedge clk) ic_addr_b <= ic_addr_f;
     always_ff @(posedge clk) ic_offset <= ic_addr_s[5:0];
 
     /* data cache */
+    logic [7:0] flmask, flrqst;
     cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(4)) dcache (
-        .clk(clk), .rst(rst), .flush(s_dc_flsh),
+        .clk(clk), .rst(rst), .flmask(flmask), .flrqst(flrqst),
+        .s_trsc(dc_trsc_s), .m_trsc(dc_trsc_m),
         .s_rqst(dc_rqst_s), .m_rqst(dc_rqst_m),
         .s_strb(dc_strb_s), .m_strb(dc_strb_m),
         .s_addr(dc_addr_s), .m_addr(dc_addr_m),
         .s_wdat(dc_wdat_s), .m_wdat(dc_wdat_m),
         .s_resp(dc_resp_s), .m_resp(dc_resp_m),
         .s_miss(dc_miss_s), .m_miss(dc_miss_m),
+        .s_ofst(dc_ofst_s), .m_ofst(dc_ofst_m),
         .s_rdat(dc_rdat_s), .m_rdat(dc_rdat_m)
     );
+    always_comb case ({s_dc_flsh, s_ic_flsh})
+        2'b00: {flmask, flrqst} = {8'b0000_0000, 8'b0000_0000};
+        2'b01: {flmask, flrqst} = {8'b1011_1111, 8'b0000_0000};
+        2'b10: {flmask, flrqst} = {8'b1011_1111, 8'b0100_0000};
+        2'b11: {flmask, flrqst} = {8'b1111_1111, 8'b0000_0000};
+    endcase
     always_comb dc_byps_f = dc_addr_f < dcbase | dc_addr_f == tohost | dc_addr_f == frhost;
     always_comb if (|dc_rqst_f & ~dc_byps_f) begin // DCACHE request arbiter
         dc_rqst_s = dc_rqst_f; dc_strb_s = dc_strb_f;
         dc_addr_s = dc_addr_f; dc_wdat_s = dc_wdat_f;
+        dc_trsc_s = 0;
     end else if (|ic_rqst_f) begin
         dc_rqst_s = ic_rqst_f; dc_strb_s = 0;
         dc_addr_s = ic_addr_f; dc_wdat_s = 0;
+        dc_trsc_s = 0;
     end else if (|st_rqst_f) begin
         dc_rqst_s = st_rqst_f; dc_strb_s = 0;
         dc_addr_s = st_vadd_f; dc_wdat_s = 0;
+        dc_trsc_s = 0;
+    end else if (|coh_rqst_b & ~|coh_resp_b & dc_resp_s != coh_rqst_b & ~|coh_lock_b & ~|m_coh_resp) begin
+        dc_rqst_s = coh_rqst_b; dc_strb_s = 0;
+        dc_addr_s = coh_addr_b; dc_wdat_s = 0;
+        dc_trsc_s = coh_trsc_b;
     end else begin
         dc_rqst_s = 0; dc_strb_s = 0;
         dc_addr_s = 0; dc_wdat_s = 0;
+        dc_trsc_s = 0;
     end
     always_comb dc_ready = ~|dc_rqst_b | dc_rqst_b == s_dc_resp;
     always_comb dc_rqst_f = dc_ready ? s_dc_rqst : dc_rqst_b;
@@ -287,98 +325,118 @@ module mmu #(
         endcase
 
     /* AXI state machine */
-    logic             axi_fls, axi_ccl; // flush and cancel signal
+    logic             axi_fls;          // flush and cancel signal
     logic       [7:0] axi_stt, axi_cnt; // AXI state and counter
     logic       [7:0] axi_req, axi_thr; // AXI request and through ID
     logic [63:0][7:0] axi_buf;          // buffer of cache line
     logic      [63:0] axi_str;          // write strobe
-    always_comb axi_fls = 0;
-    always_comb dc_resp_m = ~axi_ccl & axi_stt == 6 ? axi_req : 0;
+    always_comb axi_fls = |axi_req & (axi_req & ~flmask) == (flrqst & ~flmask);
+    always_comb dc_resp_m = axi_stt == 6 ? axi_req : 0;
     always_comb dc_miss_m = 0;
-    always_ff @(posedge clk) if (rst | ~|axi_stt) axi_ccl <= 0; else if (axi_fls) axi_ccl <= 1;
     always_ff @(posedge clk) if (rst) begin
         axi_stt       <= 0;
+        m_coh_rqst    <= 0;
         m_axi_arvalid <= 0;
         m_axi_awvalid <= 0;
         m_axi_rready  <= 0;
         m_axi_wvalid  <= 0;
         m_axi_bready  <= 0;
-    end else case (axi_stt)
-        0: // initial state
-            if (axi_fls) axi_stt <= 0;
-            else if (|dc_rqst_m) begin
-                axi_stt       <= 1;
-                axi_cnt       <= 0;
-                axi_req       <= dc_rqst_m;
-                axi_thr       <= 0;
-                axi_str       <= dc_strb_m;
-                axi_buf       <= dc_wdat_m;
-                m_axi_arvalid <= 1;
-                m_axi_araddr  <= dc_addr_m & ~64'h3f;
-                if (dc_rqst_m    == 3) m_axi_arlen <= 0; // STLB
-                if (dc_rqst_m[7] == 1) m_axi_arlen <= 7; // CACHE
-            end else if (|dc_rqst_f & dc_byps_f) begin
-                axi_stt       <= 1;
-                axi_cnt       <= 0;
-                axi_req       <= 0;
-                axi_thr       <= dc_rqst_f;
-                axi_str       <= dc_strb_f;
-                axi_buf       <= dc_wdat_f;
-                m_axi_arvalid <= 1;
-                m_axi_araddr  <= dc_addr_f;
-                m_axi_arlen   <= 0;
-            end
-        1: // AXI port request detected, waiting for read address handshake
-            if (m_axi_arready) begin
-                axi_stt <= 2;
-                m_axi_arvalid <= 0;
-                m_axi_rready  <= 1;
-            end
-        2: // read address sent, waiting for response
-            if (m_axi_rvalid) begin
-                dc_rdat_m[axi_cnt+7-:8] <= m_axi_rdata[63:0];
-                axi_cnt <= axi_cnt + 8;
-                if (m_axi_rlast) m_axi_rready <= 0;
-                if (m_axi_rlast)
-                    if (|axi_str) begin
-                        axi_stt       <= 3;
-                        axi_cnt       <= 0;
-                        m_axi_awvalid <= 1;
-                        m_axi_awaddr  <= m_axi_araddr;
-                        m_axi_awlen   <= m_axi_arlen;
-                    end else axi_stt <= 6;
-            end
-        3: // writing enabled, waiting for AW handshake
-            if (m_axi_awready) begin
-                axi_stt <= 4;
-                m_axi_awvalid <= 0;
-                m_axi_wvalid  <= 1;
-                m_axi_wdata   <= axi_buf[7:0];
-                m_axi_wlast   <= 0;
-                m_axi_wstrb   <= axi_str[7:0];
-                axi_cnt       <= axi_cnt + 8;
-            end
-        4: // address sent, transferring data
-            if (m_axi_wready) begin
-                axi_cnt <= axi_cnt + 8;
-                m_axi_wdata <= axi_buf[axi_cnt+7-:8];
-                m_axi_wstrb <= axi_str[axi_cnt+7-:8];
-                if (axi_cnt == m_axi_arlen     << 3) m_axi_wlast <= 1;
-                if (axi_cnt == m_axi_arlen + 1 << 3) begin
-                    m_axi_wvalid <= 0;
-                    m_axi_wdata  <= 0;
-                    m_axi_wlast  <= 0;
-                    m_axi_bready <= 1;
-                    axi_stt <= 5;
+    end else begin
+        case (axi_stt)
+            0: // initial state
+                if (axi_fls) axi_stt <= 0;
+                else if (|coh_resp_b) begin
+                    if (coh_trsc_b == 1 & coh_mesi_b == 1) // other GetV and valid => data response
+                        {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
+                    else {m_axi_arvalid, axi_stt} <= {1'd0, 8'd6};
+                    axi_cnt      <= 0;
+                    axi_req      <= coh_resp_b;
+                    axi_thr      <= 0;
+                    axi_str      <= -64'd1;
+                    axi_buf      <= coh_rdat_b;
+                    m_axi_araddr <= coh_addr_b & ~64'h3f;
+                end else if (|dc_rqst_m) begin
+                    if (dc_trsc_m == 1) begin // GetV
+                        axi_stt <= 10;
+                        m_coh_rqst <= dc_rqst_m;
+                        m_coh_addr <= dc_addr_m & ~64'h3f;
+                        m_coh_trsc <= 1;
+                    end else {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
+                    axi_cnt       <= 0;
+                    axi_req       <= dc_rqst_m;
+                    axi_thr       <= 0;
+                    axi_str       <= dc_strb_m;
+                    axi_buf       <= dc_wdat_m;
+                    m_axi_araddr  <= dc_addr_m & ~64'h3f;
+                    if (dc_rqst_m    == 3) m_axi_arlen <= 0; // STLB
+                    if (dc_rqst_m[7] == 1) m_axi_arlen <= 7; // CACHE
+                end else if (|dc_rqst_f & dc_byps_f) begin
+                    axi_stt       <= 1;
+                    axi_cnt       <= 0;
+                    axi_req       <= 0;
+                    axi_thr       <= dc_rqst_f;
+                    axi_str       <= dc_strb_f;
+                    axi_buf       <= dc_wdat_f;
+                    m_axi_arvalid <= 1;
+                    m_axi_araddr  <= dc_addr_f;
+                    m_axi_arlen   <= 0;
                 end
+            1: // AXI port request detected, waiting for read address handshake
+                if (m_axi_arready) begin
+                    axi_stt <= 2;
+                    m_axi_arvalid <= 0;
+                    m_axi_rready  <= 1;
+                end
+            2: // read address sent, waiting for response
+                if (m_axi_rvalid) begin
+                    dc_ofst_m <= m_axi_araddr;
+                    dc_rdat_m[axi_cnt+7-:8] <= m_axi_rdata[63:0];
+                    axi_cnt <= axi_cnt + 8;
+                    if (m_axi_rlast) m_axi_rready <= 0;
+                    if (m_axi_rlast)
+                        if (|axi_str) begin
+                            axi_stt       <= 3;
+                            axi_cnt       <= 0;
+                            m_axi_awvalid <= 1;
+                            m_axi_awaddr  <= m_axi_araddr;
+                            m_axi_awlen   <= m_axi_arlen;
+                        end else axi_stt <= 6;
+                end
+            3: // writing enabled, waiting for AW handshake
+                if (m_axi_awready) begin
+                    axi_stt <= 4;
+                    m_axi_awvalid <= 0;
+                    m_axi_wvalid  <= 1;
+                    m_axi_wdata   <= axi_buf[7:0];
+                    m_axi_wlast   <= 0;
+                    m_axi_wstrb   <= axi_str[7:0];
+                    axi_cnt       <= axi_cnt + 8;
+                end
+            4: // address sent, transferring data
+                if (m_axi_wready) begin
+                    axi_cnt <= axi_cnt + 8;
+                    m_axi_wdata <= axi_buf[axi_cnt+7-:8];
+                    m_axi_wstrb <= axi_str[axi_cnt+7-:8];
+                    if (axi_cnt == m_axi_arlen     << 3) m_axi_wlast <= 1;
+                    if (axi_cnt == m_axi_arlen + 1 << 3) begin
+                        m_axi_wvalid <= 0;
+                        m_axi_wdata  <= 0;
+                        m_axi_wlast  <= 0;
+                        m_axi_bready <= 1;
+                        axi_stt <= 5;
+                    end
+                end
+            5: // waiting for B handshake
+                if (m_axi_bvalid) {m_axi_bready, axi_stt} <= 6;
+            6: // transaction done, ready for response
+                if (~|axi_thr | axi_thr == s_dc_resp) axi_stt <= 0;
+            10: begin // waiting for GetV response
+                m_coh_rqst <= 0;
+                if (|m_coh_resp) {m_axi_arvalid, axi_stt} <= {1'b1, 8'd1};
             end
-        5: // waiting for B handshake
-            if (m_axi_bvalid) {m_axi_bready, axi_stt} <= 6;
-        6: begin // transaction done, ready for response
-            axi_stt <= 0;
-            if (|axi_thr & axi_thr != s_dc_resp) axi_stt <= 6;
-        end
-    endcase
+        endcase
+        if (axi_fls) axi_req <= 0;
+    end
     always_comb m_axi_arid    = 0;
     always_comb m_axi_arburst = 'b01;  // INCR burst
     always_comb m_axi_arsize  = 'b011; // 8 bytes
@@ -393,11 +451,32 @@ module mmu #(
     always_comb m_axi_awcache = 0;
     always_comb m_axi_awprot  = 0;
     always_comb m_axi_awqos   = 0;
+
+    /* data cache coherence */
+    always_comb s_coh_resp = axi_req == coh_rqst_b & axi_stt == 6 ? axi_req : 0;
+    always_ff @(posedge clk) if (rst) {coh_rqst_b, coh_resp_b} <= 0; else begin
+        if (~|coh_rqst_b) begin // buffer vacant
+            coh_rqst_b <= s_coh_rqst;
+            coh_trsc_b <= s_coh_trsc;
+            coh_addr_b <= s_coh_addr;
+        end else if (dc_resp_s == coh_rqst_b) begin // data cache responses a coherence request
+            coh_resp_b <= dc_resp_s;
+            coh_mesi_b <= |dc_miss_s ? 0 : 1;
+            coh_rdat_b <= dc_rdat_s;
+        end else if (s_coh_resp == coh_rqst_b) begin // coherence request responsed
+            coh_rqst_b <= 0;
+            coh_resp_b <= 0;
+        end
+    end
+    always_ff @(posedge clk) if (rst) coh_lock_b <= 0;
+        else if (|m_coh_resp) coh_lock_b <= m_coh_resp;
+        else if (coh_lock_b == dc_resp_s) coh_lock_b <= 0;
+
     /* assemble data cache response */
     always_comb if (dc_resp_s[7:6] == 2'b11) begin
         s_dc_resp = dc_resp_s;
         s_dc_miss = dc_miss_s;
-        s_dc_rdat = dc_rdat_s[6'(dc_addr_b)+7-:8];
+        s_dc_rdat = dc_rdat_s[6'(dc_ofst_s)+7-:8];
     end else if (axi_stt == 6 & |axi_thr) begin
         s_dc_resp = axi_thr;
         s_dc_miss = 0;

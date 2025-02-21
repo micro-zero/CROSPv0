@@ -80,11 +80,12 @@ private:
 
 public:
     uint8_t &rst = dut.rst;
-    uint8_t &sync_rqst = dut.sync_rqst;
-    uint8_t &sync_done = dut.sync_done;
-    uint8_t &sync_invl = dut.sync_invl;
     uint64_t &mtime = dut.mtime;
     uint64_t &mip_ext = dut.mip_ext;
+    uint8_t &scrqst = dut.s_coh_rqst, &mcrqst = dut.m_coh_rqst;
+    uint8_t &sctrsc = dut.s_coh_trsc, &mctrsc = dut.m_coh_trsc;
+    uint8_t &scresp = dut.s_coh_resp, &mcresp = dut.m_coh_resp;
+    uint64_t &scaddr = dut.s_coh_addr, &mcaddr = dut.m_coh_addr;
     verifcore(const char *fnvcd = 0, const char *fnsave = 0);
     ~verifcore();
     operator axiport_t() const;

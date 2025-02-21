@@ -5,10 +5,6 @@
 #include <signal.h>
 #include "soc.h"
 
-#define DEV_ITER(statement) \
-    for (auto d : dev)      \
-        statement;
-
 typedef struct
 {
     const char *file = 0, *dtb = 0, *initrd = 0, *dump = 0;
@@ -133,7 +129,7 @@ int main(int argc, char *argv[])
     intctl intc(cmd.vcd ? "intc.vcd" : NULL, cmd.sim ? "intc.save" : NULL);
     std::vector<axidev *> dev({&amem, &vrcr, &intc}); // AXI device references
     const char *err = amem.init(
-        cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, RST_PC, DTBADDR, INITRD, UART);
+        cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, cmd.args, RST_PC, DTBADDR, INITRD, UART);
     if (err)
         return fputs(err, stderr), 255;
     if (cmd.dump)
@@ -158,8 +154,6 @@ int main(int argc, char *argv[])
     uint8_t len = 0;
     axidev *master = NULL, *slave = NULL;
     axiport_t zero;
-    uint64_t htifexit;
-    uint8_t syncdone;       // local register for buffering "sync_done" signal
     memory localmem = amem; // record local store values
     state_t sim;
     sim.pc = amem.entry, sim.mem = amem, sim.csr["mtime"] = CLINT + 0xbff8;
@@ -213,11 +207,16 @@ int main(int argc, char *argv[])
             if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && (ap.rlast || !len))
                 master = slave = 0; // current transaction finished
         }
+        vrcr.scrqst = amem.scrqst; // VCORE -- MEM
+        vrcr.scaddr = amem.scaddr;
+        vrcr.sctrsc = amem.sctrsc;
+        vrcr.mcresp = amem.mcresp;
+        amem.mcrqst = vrcr.mcrqst;
+        amem.mcaddr = vrcr.mcaddr;
+        amem.mctrsc = vrcr.mctrsc;
+        amem.scresp = vrcr.scresp;
         vrcr.mtime = intc.int_time; // VCORE -- INTC
         vrcr.mip_ext = intc.int_pend;
-        vrcr.sync_rqst = 0; // other signals synchronized by host
-        vrcr.sync_invl = syncdone;
-        syncdone = vrcr.sync_done;
         if (cycle >= cmd.mintime)
             for (auto d : dev)
                 d->record();
@@ -241,10 +240,6 @@ int main(int argc, char *argv[])
                 sim.csr["mcycle"] = cmts.front().mcycle;
                 sim.csr["minstret"] = cmts.front().minstret;
                 sim.mem.ui64(CLINT + 0xbff8) = cmts.front().time;
-#ifdef BYPHTIF
-                sim.mem.ui64(amem.htifaddr.fromhost) = amem.ui64(amem.htifaddr.fromhost);
-                sim.mem.ui64(amem.htifaddr.tohost) = amem.ui64(amem.htifaddr.tohost);
-#endif
             }
             if (cmts.front().gpr && !dels.gprs.empty())
             {
@@ -261,12 +256,6 @@ int main(int argc, char *argv[])
                 del.mema = dels.mems.front().a;
                 del.memv = dels.mems.front().v;
                 dels.mems.pop();
-                /* when target write into shared space (tohost related),
-                   host memory is incoherent, and needs synchronization */
-#ifndef BYPHTIF
-                if (del.memw && del.mema == amem.htifaddr.tohost && del.memv)
-                    vrcr.sync_rqst = 1; // except HTIF addresses bypassed
-#endif
             }
             else
                 del.memw = 0;
@@ -354,9 +343,8 @@ int main(int argc, char *argv[])
             exitcause = "no commits within long time (hex mode)", exitcode = 255;
         if (cycle > cmd.maxtime)
             exitcause = "reaching maximum cycle", exitcode = 0;
-        if (syncdone)
-            if ((htifexit = htif(amem, amem.htifaddr, cmd.args, &sim.mem)) & 1)
-                exitcause = "HTIF exit call", exitcode = htifexit >> 1;
+        if (amem.htifexit & 1)
+            exitcause = "HTIF exit call", exitcode = amem.htifexit >> 1;
         cycle++;
         emptycycle++;
 

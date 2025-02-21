@@ -30,12 +30,17 @@ module vcore #(
 )(
     input  logic        clk,
     input  logic        rst,
-    input  logic        sync_rqst,
-    input  logic        sync_invl,
-    output logic        sync_done,
     input  logic [63:0] mip_ext,
     input  logic [63:0] mtime,
     /* interface propagation */
+    input  logic  [7:0] s_coh_rqst,
+    input  logic  [7:0] s_coh_trsc,
+    input  logic [63:0] s_coh_addr,
+    output logic  [7:0] s_coh_resp,
+    output logic  [7:0] m_coh_rqst,
+    output logic  [7:0] m_coh_trsc,
+    output logic [63:0] m_coh_addr,
+    input  logic  [7:0] m_coh_resp,
     output logic  [7:0] m_axi_awid,
     output logic [63:0] m_axi_awaddr,
     output logic  [7:0] m_axi_awlen,
@@ -127,7 +132,9 @@ module vcore #(
     logic [63:0] dp0, dp1, dp2;
     crosplite #(.pwd(pwd), .rst_pc(rst_pc), .dcbase(dcbase),
         .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
-        clk, rst, sync_rqst, sync_invl, sync_done, mip_ext, mtime, dp0, dp1, dp2,
+        clk, rst, mip_ext, mtime, dp0, dp1, dp2,
+        s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp,
+        m_coh_rqst, m_coh_trsc, m_coh_addr, m_coh_resp,
         m_axi_awid, m_axi_awaddr, m_axi_awlen, m_axi_awsize, m_axi_awburst,
         m_axi_awlock, m_axi_awcache, m_axi_awprot, m_axi_awqos,
         m_axi_awvalid, m_axi_awready,

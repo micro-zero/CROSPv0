@@ -49,14 +49,15 @@ module commit #(
     always_comb redir = com_bundle[0].redir;
 
     /* ROB entry */
-    logic [$clog2(usz)-1:0] rob_front;                // front index
-    logic [$clog2(usz):0]   rob_num, rob_in, rob_out; // ROB related numbers
-    logic     [cwd-1:0][$clog2(usz)-1:0] rob_raddr;   // ROB read addresses
-    logic [usz-1:0] dec, ren, exe, exe_fwd;           // ROB write-back status
+    logic [$clog2(usz)-1:0] rob_front;                    // front index
+    logic [$clog2(usz):0]   rob_num, rob_in, rob_out;     // ROB related numbers
+    logic     [cwd-1:0][$clog2(usz)-1:0] rob_raddr;       // ROB read addresses
+    logic [usz-1:0] dec, ren, exe, exe_fwd, spc, spc_fwd; // ROB write-back status
     always_ff @(posedge clk) if (rst | redir) rob_front <= 0;
         else rob_front <= rob_front + $clog2(usz)'(rob_out);
     always_ff @(posedge clk) if (rst | redir) rob_num <= 0;
-        else if (rollback & ~ren_bundle[0].opid[15]) rob_num <= 32'(rob_num) < cwd ? 0 : rob_num - $clog2(usz)'(cwd);
+        else if (rollback & ~ren_bundle[0].opid[15])
+            rob_num <= 32'(rob_num) < cwd ? 0 : rob_num - $clog2(usz)'(cwd);
         else rob_num <= rob_num + rob_in - rob_out;
     always_comb for (int i = 0; i < cwd; i++)
         if (rollback) rob_raddr[i] = rob_front + $clog2(usz)'(rob_num) - 1 - $clog2(usz)'(i);
@@ -154,17 +155,20 @@ module commit #(
     end
     always_comb begin
         exe_fwd = exe;
-        for (int i = 0; i < ewd; i++) if (exe_wena[i])
-            exe_fwd[$clog2(usz)'(exe_waddr[i])] = ~exe_bundle[i].specul;
+        spc_fwd = spc;
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) exe_fwd[$clog2(usz)'(exe_waddr[i])] = 1;
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) spc_fwd[$clog2(usz)'(exe_waddr[i])] = exe_bundle[i].specul;
     end
-    always_ff @(posedge clk) if (rst | redir) {dec, ren, exe} <= 0; else begin
+    always_ff @(posedge clk) if (rst | redir) {dec, ren, exe, spc} <= 0; else begin
         for (int i = 0; i < dwd; i++) if (dec_wena[i]) dec[$clog2(usz)'(dec_waddr[i])] <= 1;
         for (int i = 0; i < rwd; i++) if (ren_wena[i]) ren[$clog2(usz)'(ren_waddr[i])] <= 1;
-        for (int i = 0; i < ewd; i++) if (exe_wena[i]) exe[$clog2(usz)'(exe_waddr[i])] <= ~exe_bundle[i].specul;
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) exe[$clog2(usz)'(exe_waddr[i])] <= 1;
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) spc[$clog2(usz)'(exe_waddr[i])] <= exe_bundle[i].specul;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
             dec[$clog2(usz)'(com_bundle[i].opid)] <= 0;
             ren[$clog2(usz)'(com_bundle[i].opid)] <= 0;
             exe[$clog2(usz)'(com_bundle[i].opid)] <= 0;
+            spc[$clog2(usz)'(com_bundle[i].opid)] <= 0;
         end
     end
     always_ff @(posedge clk) if (rst | redir) eid_last  <= 0; else eid_last  <= eid_new;
@@ -240,7 +244,8 @@ module commit #(
         /* set validation of commit */
         for (int i = 0; i < cwd; i++) if (i >= rob_num) com_bundle[i].opid = 0;           // exceeds size of queue
         for (int i = 0; i < cwd; i++) if (com_redir[i]) com_bundle[i].opid = 0;           // encounter redirection
-        for (int i = 0; i < cwd; i++) if (~exe_fwd[rob_raddr[i]]) com_bundle[i].opid = 0; // not ready
+        for (int i = 0; i < cwd; i++) if (~exe_fwd[rob_raddr[i]] | spc_fwd[rob_raddr[i]]) // not ready
+            com_bundle[i].opid = 0;
         for (int i = 1; i < cwd; i++)
             for (int j = 0; j < i; j++) begin
                 if ((com_bundle[i].call | com_bundle[i].ret) & (com_bundle[j].call | com_bundle[j].ret))
@@ -284,7 +289,7 @@ module commit #(
         exe_last.cause <= 0;
         exe_last.ret <= 0;
         exe_last.npc <= com_bundle[0].npc;
-    end else if (exe_rvalue_fwd[0].retry)
+    end else if (exe_fwd[rob_raddr[0]] & exe_rvalue_fwd[0].retry)
         exe_last.retry <= 1;
     /* exception requires rollback of last committed instruction which causes exception */
     /* `rollback_last` will delay rollback for one cycle to roll back the last committed */
