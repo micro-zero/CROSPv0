@@ -99,10 +99,12 @@ module mmu #(
     /* request ID catalog:
      *   8'b0000_0000: no request
      *   8'b0000_0001: coherence request
-     *   8'b0000_0010: ITLB request
-     *   8'b01xx_xxxx: DTLB request
-     *   8'b10xx_xxxx: ICACHE requests
-     *   8'b11xx_xxxx: DCACHE requests
+     *   8'b0000_0010: DCACHE replacement
+     *   8'b100x_xxxx: ITLB request
+     *   8'b101x_xxxx: ICACHE requests
+     *   8'b110x_xxxx: DTLB request
+     *   8'b111x_xxxx: DCACHE requests
+     * to support LQ/SQ of more than 16 entries, ID width needs extension
      */
 
     /* ITLB */
@@ -180,15 +182,17 @@ module mmu #(
     logic      [63:0] dc_strb_b, dc_strb_f;
     logic [63:0][7:0] dc_wdat_b, dc_wdat_f;
     logic                        dc_byps_f; logic       [5:0] ic_offset;
-    logic       [7:0] coh_rqst_b, coh_trsc_b;
-    logic      [63:0] coh_addr_b;
-    logic       [7:0] coh_resp_b, coh_mesi_b;
-    logic [63:0][7:0] coh_rdat_b;
-    logic       [7:0] coh_lock_b; // coherence locked request ID
+    logic       [7:0] coh_rqst_sb, coh_trsc_sb, coh_rqst_mb, coh_trsc_mb;
+    logic      [63:0] coh_addr_sb, coh_addr_mb, coh_strb_mb;
+    logic       [7:0] coh_resp_sb, coh_mesi_sb, coh_resp_mb;
+    logic [63:0][7:0] coh_rdat_sb, coh_wdat_mb;
+    logic       [7:0] coh_lock_sb; // coherence locked request ID
+    logic             coh_flsh_mb;
 
     /* instruction cache */
     cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
-        .clk(clk), .rst(rst | fnci), .flmask(s_ic_flsh ? 8'hff : 8'h00), .flrqst(0),
+        .clk(clk), .rst(rst | fnci), .rep(0),
+        .flmask(s_ic_flsh ? 8'hff : 8'h00), .flrqst(0),
         .s_trsc(ic_trsc_s), .m_trsc(ic_trsc_m),
         .s_rqst(ic_rqst_s), .m_rqst(ic_rqst_m),
         .s_strb(ic_strb_s), .m_strb(ic_strb_m),
@@ -219,8 +223,10 @@ module mmu #(
 
     /* data cache */
     logic [7:0] flmask, flrqst;
+    function logic fl(input logic [7:0] req); fl = |req & (req & ~flmask) == (flrqst & ~flmask); endfunction
     cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(4)) dcache (
-        .clk(clk), .rst(rst), .flmask(flmask), .flrqst(flrqst),
+        .clk(clk), .rst(rst), .rep(8'b0000_0010),
+        .flmask(flmask), .flrqst(flrqst),
         .s_trsc(dc_trsc_s), .m_trsc(dc_trsc_m),
         .s_rqst(dc_rqst_s), .m_rqst(dc_rqst_m),
         .s_strb(dc_strb_s), .m_strb(dc_strb_m),
@@ -233,12 +239,16 @@ module mmu #(
     );
     always_comb case ({s_dc_flsh, s_ic_flsh})
         2'b00: {flmask, flrqst} = {8'b0000_0000, 8'b0000_0000};
-        2'b01: {flmask, flrqst} = {8'b1011_1111, 8'b0000_0000};
-        2'b10: {flmask, flrqst} = {8'b1011_1111, 8'b0100_0000};
-        2'b11: {flmask, flrqst} = {8'b1111_1111, 8'b0000_0000};
+        2'b01: {flmask, flrqst} = {8'b0011_1111, 8'b1000_0000};
+        2'b10: {flmask, flrqst} = {8'b0011_1111, 8'b1100_0000};
+        2'b11: {flmask, flrqst} = {8'b0111_1111, 8'b1000_0000};
     endcase
     always_comb dc_byps_f = dc_addr_f < dcbase | dc_addr_f == tohost | dc_addr_f == frhost;
-    always_comb if (|dc_rqst_f & ~dc_byps_f) begin // DCACHE request arbiter
+    always_comb if (|coh_rqst_sb & ~|coh_resp_sb & dc_resp_s != coh_rqst_sb & ~|coh_lock_sb & ~|m_coh_resp) begin
+        dc_rqst_s = coh_rqst_sb; dc_strb_s = 0;
+        dc_addr_s = coh_addr_sb; dc_wdat_s = 0;
+        dc_trsc_s = coh_trsc_sb;
+    end else if (|dc_rqst_f & ~dc_byps_f) begin
         dc_rqst_s = dc_rqst_f; dc_strb_s = dc_strb_f;
         dc_addr_s = dc_addr_f; dc_wdat_s = dc_wdat_f;
         dc_trsc_s = 0;
@@ -250,10 +260,6 @@ module mmu #(
         dc_rqst_s = st_rqst_f; dc_strb_s = 0;
         dc_addr_s = st_vadd_f; dc_wdat_s = 0;
         dc_trsc_s = 0;
-    end else if (|coh_rqst_b & ~|coh_resp_b & dc_resp_s != coh_rqst_b & ~|coh_lock_b & ~|m_coh_resp) begin
-        dc_rqst_s = coh_rqst_b; dc_strb_s = 0;
-        dc_addr_s = coh_addr_b; dc_wdat_s = 0;
-        dc_trsc_s = coh_trsc_b;
     end else begin
         dc_rqst_s = 0; dc_strb_s = 0;
         dc_addr_s = 0; dc_wdat_s = 0;
@@ -330,12 +336,10 @@ module mmu #(
     logic       [7:0] axi_req, axi_thr; // AXI request and through ID
     logic [63:0][7:0] axi_buf;          // buffer of cache line
     logic      [63:0] axi_str;          // write strobe
-    always_comb axi_fls = |axi_req & (axi_req & ~flmask) == (flrqst & ~flmask);
-    always_comb dc_resp_m = axi_stt == 6 ? axi_req : 0;
+    always_comb dc_resp_m = axi_stt == 6 & ~axi_fls ? axi_req : 0;
     always_comb dc_miss_m = 0;
     always_ff @(posedge clk) if (rst) begin
         axi_stt       <= 0;
-        m_coh_rqst    <= 0;
         m_axi_arvalid <= 0;
         m_axi_awvalid <= 0;
         m_axi_rready  <= 0;
@@ -344,33 +348,38 @@ module mmu #(
     end else begin
         case (axi_stt)
             0: // initial state
-                if (axi_fls) axi_stt <= 0;
-                else if (|coh_resp_b) begin
-                    if (coh_trsc_b == 1 & coh_mesi_b == 1) // other GetV and valid => data response
+                if (|coh_resp_sb & ~fl(coh_resp_sb)) begin
+                    if (coh_trsc_sb == 1 & coh_mesi_sb == 1) // other GetV and valid => data response
                         {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
                     else {m_axi_arvalid, axi_stt} <= {1'd0, 8'd6};
                     axi_cnt      <= 0;
-                    axi_req      <= coh_resp_b;
+                    axi_req      <= coh_resp_sb;
                     axi_thr      <= 0;
                     axi_str      <= -64'd1;
-                    axi_buf      <= coh_rdat_b;
-                    m_axi_araddr <= coh_addr_b & ~64'h3f;
-                end else if (|dc_rqst_m) begin
-                    if (dc_trsc_m == 1) begin // GetV
-                        axi_stt <= 10;
-                        m_coh_rqst <= dc_rqst_m;
-                        m_coh_addr <= dc_addr_m & ~64'h3f;
-                        m_coh_trsc <= 1;
-                    end else {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
+                    axi_buf      <= coh_rdat_sb;
+                    m_axi_araddr <= coh_addr_sb & ~64'h3f;
+                end else if (|coh_resp_mb & ~coh_flsh_mb & ~fl(coh_rqst_mb)) begin
+                    axi_stt       <= 1;
+                    axi_cnt       <= 0;
+                    axi_req       <= coh_rqst_mb;
+                    axi_thr       <= 0;
+                    axi_str       <= coh_strb_mb;
+                    axi_buf       <= coh_wdat_mb;
+                    m_axi_arvalid <= 1;
+                    m_axi_araddr  <= coh_addr_mb;
+                    m_axi_arlen   <= 7;
+                end else if (|dc_rqst_m & ~|dc_trsc_m & ~fl(dc_rqst_m)) begin
+                    axi_stt       <= 1;
                     axi_cnt       <= 0;
                     axi_req       <= dc_rqst_m;
                     axi_thr       <= 0;
                     axi_str       <= dc_strb_m;
                     axi_buf       <= dc_wdat_m;
+                    m_axi_arvalid <= 1;
                     m_axi_araddr  <= dc_addr_m & ~64'h3f;
                     if (dc_rqst_m    == 3) m_axi_arlen <= 0; // STLB
                     if (dc_rqst_m[7] == 1) m_axi_arlen <= 7; // CACHE
-                end else if (|dc_rqst_f & dc_byps_f) begin
+                end else if (|dc_rqst_f & dc_byps_f & ~fl(dc_rqst_f)) begin
                     axi_stt       <= 1;
                     axi_cnt       <= 0;
                     axi_req       <= 0;
@@ -429,14 +438,11 @@ module mmu #(
             5: // waiting for B handshake
                 if (m_axi_bvalid) {m_axi_bready, axi_stt} <= 6;
             6: // transaction done, ready for response
-                if (~|axi_thr | axi_thr == s_dc_resp) axi_stt <= 0;
-            10: begin // waiting for GetV response
-                m_coh_rqst <= 0;
-                if (|m_coh_resp) {m_axi_arvalid, axi_stt} <= {1'b1, 8'd1};
-            end
+                if (~|axi_thr | axi_thr == s_dc_resp | axi_fls) axi_stt <= 0;
         endcase
-        if (axi_fls) axi_req <= 0;
     end
+    always_ff @(posedge clk) if (rst | axi_stt == 6)     axi_fls <= 0;
+        else if (|axi_stt & (fl(axi_req) | fl(axi_thr))) axi_fls <= 1;
     always_comb m_axi_arid    = 0;
     always_comb m_axi_arburst = 'b01;  // INCR burst
     always_comb m_axi_arsize  = 'b011; // 8 bytes
@@ -453,31 +459,54 @@ module mmu #(
     always_comb m_axi_awqos   = 0;
 
     /* data cache coherence */
-    always_comb s_coh_resp = axi_req == coh_rqst_b & axi_stt == 6 ? axi_req : 0;
-    always_ff @(posedge clk) if (rst) {coh_rqst_b, coh_resp_b} <= 0; else begin
-        if (~|coh_rqst_b) begin // buffer vacant
-            coh_rqst_b <= s_coh_rqst;
-            coh_trsc_b <= s_coh_trsc;
-            coh_addr_b <= s_coh_addr;
-        end else if (dc_resp_s == coh_rqst_b) begin // data cache responses a coherence request
-            coh_resp_b <= dc_resp_s;
-            coh_mesi_b <= |dc_miss_s ? 0 : 1;
-            coh_rdat_b <= dc_rdat_s;
-        end else if (s_coh_resp == coh_rqst_b) begin // coherence request responsed
-            coh_rqst_b <= 0;
-            coh_resp_b <= 0;
+    always_comb m_coh_addr = coh_addr_mb;
+    always_comb m_coh_trsc = coh_trsc_mb;
+    always_comb s_coh_resp = axi_stt == 6 & axi_req == coh_rqst_sb ? axi_req : 0;
+    always_ff @(posedge clk) begin
+        if (rst | |coh_resp_mb & fl(coh_resp_mb)) {m_coh_rqst, coh_rqst_mb, coh_resp_mb} <= 0;
+        else if (~|coh_rqst_mb) begin // buffer vacant
+            m_coh_rqst  <= |dc_trsc_m & ~fl(dc_rqst_m) ? dc_rqst_m : 0;
+            coh_rqst_mb <= |dc_trsc_m & ~fl(dc_rqst_m) ? dc_rqst_m : 0;
+            coh_addr_mb <= dc_addr_m & ~64'h3f;
+            coh_strb_mb <= dc_strb_m;
+            coh_wdat_mb <= dc_wdat_m;
+            coh_trsc_mb <= dc_trsc_m;
+        end else if (m_coh_resp == coh_rqst_mb) begin // coherence request responsed
+            coh_resp_mb <= m_coh_resp;
+            if (coh_flsh_mb | fl(m_coh_resp)) {coh_rqst_mb, coh_resp_mb} <= 0;
+        end else if (dc_resp_m == coh_rqst_mb) begin // cache responsed
+            coh_rqst_mb <= 0;
+            coh_resp_mb <= 0;
         end
+        if (|m_coh_rqst) m_coh_rqst <= 0;
     end
-    always_ff @(posedge clk) if (rst) coh_lock_b <= 0;
-        else if (|m_coh_resp) coh_lock_b <= m_coh_resp;
-        else if (coh_lock_b == dc_resp_s) coh_lock_b <= 0;
+    always_ff @(posedge clk)
+        if (rst) {coh_rqst_sb, coh_resp_sb} <= 0;
+        else if (~|coh_rqst_sb) begin // buffer vacant
+            coh_rqst_sb <= s_coh_rqst;
+            coh_trsc_sb <= s_coh_trsc;
+            coh_addr_sb <= s_coh_addr;
+        end else if (dc_resp_s == coh_rqst_sb) begin // data cache responses a coherence request
+            coh_resp_sb <= dc_resp_s;
+            coh_mesi_sb <= |dc_miss_s ? 0 : 1;
+            coh_rdat_sb <= dc_rdat_s;
+        end else if (s_coh_resp == coh_rqst_sb) begin // coherence request responsed
+            coh_rqst_sb <= 0;
+            coh_resp_sb <= 0;
+        end
+    always_ff @(posedge clk) if (rst | |m_coh_resp | |coh_resp_mb)       coh_flsh_mb <= 0;
+        else if (fl(coh_rqst_mb) & ~(|axi_stt & axi_req == coh_rqst_mb)) coh_flsh_mb <= 1;
+    always_ff @(posedge clk)
+        if (rst | fl(coh_lock_sb))         coh_lock_sb <= 0;
+        else if (|m_coh_resp)              coh_lock_sb <= m_coh_resp;
+        else if (coh_lock_sb == dc_resp_s) coh_lock_sb <= 0;
 
     /* assemble data cache response */
     always_comb if (dc_resp_s[7:6] == 2'b11) begin
         s_dc_resp = dc_resp_s;
         s_dc_miss = dc_miss_s;
         s_dc_rdat = dc_rdat_s[6'(dc_ofst_s)+7-:8];
-    end else if (axi_stt == 6 & |axi_thr) begin
+    end else if (axi_stt == 6 & |axi_thr & ~axi_fls) begin
         s_dc_resp = axi_thr;
         s_dc_miss = 0;
         s_dc_rdat = dc_rdat_m[7:0];

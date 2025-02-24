@@ -157,6 +157,7 @@ int main(int argc, char *argv[])
     memory localmem = amem; // record local store values
     state_t sim;
     sim.pc = amem.entry, sim.mem = amem, sim.csr["mtime"] = CLINT + 0xbff8;
+    amem.smem = &sim.mem;
     memset(&zero, 0, sizeof(zero));
     signal(SIGINT, intrhandler);
     while (!exitcause)

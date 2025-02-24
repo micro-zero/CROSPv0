@@ -12,6 +12,7 @@ module cache #(
 )(
     input  logic       clk,    // clock signal
     input  logic       rst,    // reset signal
+    input  logic [7:0] rep,    // replacement request ID
     input  logic [7:0] flmask, // flush ignore mask
     input  logic [7:0] flrqst, // flush request ID
     /* slave interface */
@@ -35,6 +36,20 @@ module cache #(
     input  logic         [63:0] m_ofst, // offset in cache line
     input  logic [blk-1:0][7:0] m_rdat  // read data
 );
+    /* flush function */
+    function logic fl(input logic [7:0] req);
+        /* flush function description:
+         *   this function will return 1 if the request is a flush request,
+         *   which indicates the request ID is same with `flrqst` except
+         *   bits that masked and ignored by `flmask`
+         * some specific cases:
+         *   1. flmask = 8'b0000_0000, flrqst = 8'b0000_0000: flush no request
+         *   2. flmask = 8'b0001_1111, flrqst = 8'b1010_0000: flush 101x_xxxx
+         *   3. flmask = 8'b1111_1111, flrqst = 8'b1111_1111: flush all requests
+         */
+        fl = |req & (req & ~flmask) == (flrqst & ~flmask);
+    endfunction
+
     /* buffered and forwarded requests for each channel */
     logic [chn-1:0]         [7:0] b_rqst, f_rqst;
     logic [chn-1:0]         [7:0] b_trsc, f_trsc;
@@ -42,7 +57,7 @@ module cache #(
     logic [chn-1:0]        [63:0] b_addr, f_addr;
     logic [chn-1:0][blk-1:0][7:0] b_wdat, f_wdat;
     logic [chn-1:0]               b_ready;
-    logic write;
+    logic write, invld;
     always_comb for (int i = 0; i < chn; i++) b_ready[i] = ~|b_rqst[i] | |s_resp[i];
     always_comb for (int i = 0; i < chn; i++) begin
         f_rqst[i] = b_ready[i] ? s_rqst[i] : b_rqst[i];
@@ -53,11 +68,12 @@ module cache #(
     end
     always_ff @(posedge clk) if (rst) b_rqst <= 0;
         else for (int i = 0; i < chn; i++) begin
-            if ((b_rqst[i] & ~flmask) == (flrqst & ~flmask)) b_rqst[i] <= 0;
-            if (|s_resp[i]) b_rqst[i] <= 0;
-            else if (i == 0 & write) b_strb[0] <= 0;
+            if (fl(b_rqst[i]))  b_rqst[i] <= 0;
+            if (|s_resp[i])     b_rqst[i] <= 0;
+            if (i == 0 & write) b_strb[0] <= 0;
+            if (i == 0 & invld) b_trsc[0] <= 0;
             /* only one request can be buffered until response in a channel */
-            if (|s_rqst[i] & b_ready[i] & (s_rqst[i] & ~flmask) != (flrqst & ~flmask)) begin
+            if (|s_rqst[i] & b_ready[i] & ~fl(s_rqst[i])) begin
                 b_rqst[i] <= s_rqst[i];
                 b_trsc[i] <= s_trsc[i];
                 b_strb[i] <= s_strb[i];
@@ -88,10 +104,9 @@ module cache #(
     end
     always_ff @(posedge clk) if (rst) mshr_valid <= 0;
         else begin
-            for (int i = 0; i < mshrsz; i++)
-                if ((mshr_rqst[i] & ~flmask) == (flrqst & ~flmask)) mshr_valid[i] <= 0;
+            for (int i = 0; i < mshrsz; i++) if (fl(mshr_rqst[i])) mshr_valid[i] <= 0;
             for (int i = 0; i < chn; i++) if (|s_resp[i] & |s_miss[i] & ~|b_trsc[i] & ~miss_under_miss) begin
-                mshr_valid[$clog2(mshrsz)'(mshr_in[i])] <= (b_rqst[i] & ~flmask) != (flrqst & ~flmask);
+                mshr_valid[$clog2(mshrsz)'(mshr_in[i])] <= ~fl(b_rqst[i]);
                 mshr_ready[$clog2(mshrsz)'(mshr_in[i])] <= 0;
                 mshr_rqst[$clog2(mshrsz)'(mshr_in[i])] <= b_rqst[i];
                 mshr_miss[$clog2(mshrsz)'(mshr_in[i])] <= 0;
@@ -129,7 +144,7 @@ module cache #(
     logic                   [blk-1:0][7:0] set_hitwdat; // write data in selected set
     /* cache fill */
     logic [$clog2(set):0] fill;     // fill signal and index
-    logic           [7:0] fill_req; // fill request ID
+    logic                 fill_wea; // fill write enable
     logic          [63:0] fill_tag; // cache tag to fill
     logic  [blk-1:0][7:0] fill_dat; // cache line to fill
     logic                 stale;    // stale bit caused by cache fill
@@ -171,15 +186,16 @@ module cache #(
         end else new_dat[$clog2(way)'(set_hitpos[0])] = set_hitrdat[0] & ~set_hitmask | set_hitwdat;
     end
     always_comb write = ~fill[$clog2(set)] & ~stale & |b_strb[0];
+    always_comb invld = ~fill[$clog2(set)] & ~stale & b_trsc[0] == 1; // other GetV
     always_ff @(posedge clk) if (rst) valid <= 0;
         else if (fill[$clog2(set)]) begin
             valid[index[0]][set_ptr[0]] <= 1;
-            dirty[index[0]][set_ptr[0]] <= |mshr_strb[$clog2(mshrsz)];
+            dirty[index[0]][set_ptr[0]] <= fill_wea;
             dat  [index[0]]             <= new_dat;
             tag  [index[0]]             <= new_tag;
             ptr  [index[0]]             <= set_ptr[0] + 1;
         end else if (set_hitpos[0][$clog2(way)]) // hit
-            if (|b_rqst[0] & b_trsc[0] == 1)     // other GetV
+            if (|b_rqst[0] & invld)
                 valid[index[0]][$clog2(way)'(set_hitpos[0])] <= 0;
             else if (|b_rqst[0] & write) begin
                 dirty[index[0]][$clog2(way)'(set_hitpos[0])] <= 1;
@@ -194,18 +210,19 @@ module cache #(
         set_dirty[i] <= dirty[index[i]];
     end
     always_ff @(posedge clk)
-        if (~rst & (mshr_rqst[$clog2(mshrsz)'(mshr_done)] & ~flmask) != (flrqst & ~flmask) &
-            mshr_done[$clog2(mshrsz)] & ~fill[$clog2(set)]) begin
+        if (~rst & mshr_done[$clog2(mshrsz)] & ~fill[$clog2(set)]) begin
             fill     <= {1'b1, index[0]};
-            fill_req <= mshr_rqst[$clog2(mshrsz)'(mshr_done)];
+            fill_wea <= |mshr_strb[$clog2(mshrsz)'(mshr_done)];
             fill_tag <= mshr_addr[$clog2(mshrsz)'(mshr_done)] >> $clog2(blk);
             fill_dat <= mshr_rdat[$clog2(mshrsz)'(mshr_done)] & ~set_hitmask | set_hitwdat;
         end else fill <= 0;
     always_ff @(posedge clk) if (rst) rep_rqst <= 0;
         else if (fill[$clog2(set)] & set_valid[0][set_ptr[0]] & set_dirty[0][set_ptr[0]]) begin
-            rep_rqst <= fill_req;
+            /* replacement request should not be flushed to simplify atomicity
+               maintenance, so it uses distinct request ID specified by input */
+            rep_rqst <= rep;
             rep_strb <= -64'd1;
-            rep_addr <= set_tag[0][set_ptr[0]];
+            rep_addr <= set_tag[0][set_ptr[0]] << $clog2(blk);
             rep_wdat <= set_dat[0][set_ptr[0]];
         end else if (rep_rqst == m_resp) rep_rqst <= 0;
 
@@ -235,7 +252,8 @@ module cache #(
             for (int j = 0; j < mshrsz; j++)
                 if (mshr_valid[j] & mshr_addr[j][63:$clog2(blk)] == b_addr[i][63:$clog2(blk)])
                     {miss_under_miss, s_miss[i]} = {1'b1, mshr_rqst[j]};                  // miss-under-miss
-            if (set_hitpos[i][$clog2(way)] & |b_strb[i]) s_resp[i] = 0;                   // write request
+            if (set_hitpos[i][$clog2(way)] & write) s_resp[i] = 0;                        // write request
+            if (set_hitpos[i][$clog2(way)] & invld) s_resp[i] = 0;                        // other GetV
             if (~set_hitpos[i][$clog2(way)] & ~mshr_in[i][$clog2(mshrsz)]) s_resp[i] = 0; // MSHR full
         end
         /* cache tag and miss situation are stale when line being

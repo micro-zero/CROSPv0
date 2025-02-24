@@ -87,16 +87,19 @@ public:
 class memory : public axidev
 {
 private:
-    std::vector<uint64_t> base; // segment base address list
-    std::vector<uint64_t> size; // segment size list
-    std::vector<uint8_t *> ptr; // segment pointer list
-    uint64_t segfault;          // returned entity when segfault
-    uint8_t rst;                // reset port
-    axiport_t axiport;          // AXI port
-    axiport_t axibuff;          // AXI value buffer
-    uint8_t rbursti, wbursti;   // AXI burst index
-    uint8_t thv, fhv, scsent;   // tohost and fromhost valid state
-    char errstr[128];           // error string
+    std::vector<uint64_t> base;        // segment base address list
+    std::vector<uint64_t> size;        // segment size list
+    std::vector<uint8_t *> ptr;        // segment pointer list
+    uint64_t segfault;                 // returned entity when segfault
+    axiport_t axiport;                 // AXI port
+    axiport_t axibuff;                 // AXI value buffer
+    uint8_t rbursti, wbursti;          // AXI burst index
+    uint8_t scrqstr, mcrqstr;          // coherence request registers
+    uint8_t mctrscr;                   // coherence transaction register
+    uint64_t mcaddrr;                  // coherence address register
+    uint8_t scsent, thbusy;            // slave command sent and handling tohost
+    std::map<uint64_t, uint8_t> owner; // block owner
+    char errstr[128];                  // error string
 
 public:
     uint8_t scrqst, mcrqst;         // coherence request ports
@@ -110,6 +113,7 @@ public:
     uint64_t uartaddr;              // UART-lite base address
     htifaddr_t htifaddr;            // HTIF addresses
     std::vector<const char *> args; // program arguments
+    memory *smem;                   // simulation memory pointer
     uint8_t htifexit;               // HTIF exit data
     memory();
     memory(const memory &b);

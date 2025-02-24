@@ -49,7 +49,9 @@ memory::memory()
     memset(&axiport, 0, sizeof(axiport));
     memset(&axibuff, 0, sizeof(axibuff));
     rbursti = wbursti = 0;
-    thv = fhv = scsent = 0;
+    scrqstr = mcrqstr = 0;
+    scrqst = mcresp = 0;
+    scsent = thbusy = 0;
     memset(&errstr, 0, sizeof(errstr));
 }
 
@@ -374,7 +376,7 @@ axidev &memory::operator<<(const axiport_t &ap)
  * @brief At reset
  * @param value value of reset signal
  */
-void memory::reset(uint8_t value) { rst = value; }
+void memory::reset(uint8_t value) {}
 
 /**
  * @brief At clock posedge
@@ -391,43 +393,101 @@ void memory::record() {}
  */
 void memory::posedge()
 {
+    /* handle HTIF requests */
+    uint64_t reqaddr = 0;
+    if (owner[htifaddr.tohost >> 6]) // tohost out-of-date
+    {
+        reqaddr = htifaddr.tohost >> 6;
+        thbusy = 1;
+    }
+    else if (owner[htifaddr.fromhost >> 6]) // fromhost out-of-date
+        reqaddr = htifaddr.fromhost >> 6;
+    else
+    {
+        uint64_t tohost_dev = (*this)[htifaddr.tohost + 7];
+        uint64_t tohost_cmd = (*this)[htifaddr.tohost + 6];
+        uint64_t tohost_dat = this->ui64(htifaddr.tohost) & 0xffffffffffff;
+        if (tohost_dev == 0 && tohost_cmd == 0)
+        {
+            if (tohost_dat & 1) // exit
+                htifexit = this->ui64(htifaddr.tohost);
+            else if (tohost_dat != 0) // proxied ststem call
+            {
+                uint64_t magic_mem = tohost_dat, which = this->ui64(magic_mem);
+                uint64_t retval = 0;
+                for (int i = 0; i < 8; i++)
+                    if (owner[magic_mem + i * 8 >> 6])
+                        reqaddr = magic_mem + i * 8 >> 6;
+                if (reqaddr)
+                    ;
+                else if (which == 0x40) // syswrite
+                {
+                    uint64_t arg0, arg1, arg2;
+                    arg0 = this->ui64(magic_mem + 8);  // file descriptor
+                    arg1 = this->ui64(magic_mem + 16); // memory address
+                    arg2 = this->ui64(magic_mem + 24); // write size
+                    fflush(NULL);
+                    if (arg0 = 2)
+                        arg0 = 1; // redirect stderr of program to stdout for debugging
+                    for (int i = 0; i < arg2; i++)
+                        if (owner[arg1 + i >> 6])
+                            reqaddr = arg1 + i >> 6;
+                    if (!reqaddr)
+                        retval = write(arg0, &(*this)[arg1], arg2);
+                }
+                else
+                    fprintf(stderr, "[Info] Unhandled proxied system call 0x%lx\n", which);
+                if (!reqaddr)
+                {
+                    this->ui64(magic_mem) = retval;
+                    smem->ui64(magic_mem) = retval;
+                    this->ui64(htifaddr.fromhost) = 1;
+                    smem->ui64(htifaddr.fromhost) = 1;
+                }
+            }
+        }
+        else
+        {
+            fprintf(stderr, "[Info] Unrecognized HTIF command:  dev: 0x%lx  cmd: 0x%lx  data: 0x%lx\n",
+                    tohost_dev, tohost_cmd, tohost_dat);
+            htifexit = 3;
+        }
+        if (!reqaddr)
+        {
+            this->ui64(htifaddr.tohost) = 0;
+            smem->ui64(htifaddr.tohost) = 0;
+            thbusy = 0;
+        }
+    }
+
     /* handle coherence interface */
-    mcresp = mcrqst;
+    if (mcrqst)
+    {
+        mcrqstr = mcrqst;
+        mcaddrr = mcaddr;
+        mctrscr = mctrsc;
+    }
+    if (mcresp)
+        mcrqstr = 0;
+    mcresp = thbusy || scrqstr ? 0 : mcrqstr;
     if (scrqst)
+    {
+        scrqstr = scrqst;
         scrqst = 0;
-    if (rst)
-        scsent = 0;
-    else if ((!thv || !fhv) && !scsent)
+    }
+    if (scresp)
+        scrqstr = 0;
+    if (reqaddr && !scsent)
     {
         scsent = 1;
         scrqst = 0b1;
-        scaddr = !thv ? htifaddr.tohost : htifaddr.fromhost;
-        sctrsc = 1; // own GetV
+        scaddr = reqaddr << 6;
+        sctrsc = 1; // issue GetV transaction
     }
-    else if (scresp)
-    {
-        scsent = 0;
-        if ((scaddr & ~0x3flu) == (htifaddr.tohost & ~0x3flu))
-        {
-            thv = 1;
-            /* handle HTIF requests when tohost changed */
-            uint64_t tohost_dev = (*this)[htifaddr.tohost + 7];
-            uint64_t tohost_cmd = (*this)[htifaddr.tohost + 6];
-            uint64_t tohost_dat = this->ui64(htifaddr.tohost) & 0xffffffffffff;
-            if (tohost_dev == 0 && tohost_cmd == 0)
-                if (tohost_dat & 1) // exit
-                    htifexit = this->ui64(htifaddr.tohost);
-        }
-        if ((scaddr & ~0x3flu) == (htifaddr.fromhost & ~0x3flu))
-            fhv = 1;
-    }
-    if (mcrqst && mctrsc == 1) // other GetV
-    {
-        if ((mcaddr & ~0x3flu) == (htifaddr.tohost & ~0x3flu))
-            thv = 0;
-        if ((mcaddr & ~0x3flu) == (htifaddr.fromhost & ~0x3flu))
-            fhv = 0;
-    }
+    if (scresp)
+        scsent = owner[scaddr >> 6] = 0;
+    if (mcresp && mctrscr == 1) // other GetV
+        owner[mcaddrr >> 6] = 1;
 
     /* handshake and state change */
     if (axiport.arvalid & axiport.arready)
