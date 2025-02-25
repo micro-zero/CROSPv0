@@ -177,10 +177,10 @@ module frontend #(
     always_comb pos_acc = ftq_front + $clog2(ftqsz)'(ftq_acc);
     always_comb next_trn = pos_trn + (|it_resp ? 1 : 0);
     always_comb next_acc = pos_acc + (|ic_resp ? 1 : 0);
-    always_comb it_rqst = ftq_trn + (|it_resp ? 1 : 0) < ftq_num + (ftq_push ? 1 : 0) ? 8'b1000_0010 : 0;
+    always_comb it_rqst = ftq_trn + (|it_resp ? 1 : 0) < ftq_num + (ftq_push ? 1 : 0) ? {2'b10, 6'(next_trn)} : 0;
     always_comb it_vadd = ftq_trn + (|it_resp ? 1 : 0) < ftq_num ? ftq_vpc[next_trn] : pcg_bundle.pc;
     always_comb ic_flsh = redir[0];
-    always_comb ic_rqst = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn + (|it_resp ? 1 : 0) ? 8'b1010_0000 : 0;
+    always_comb ic_rqst = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn + (|it_resp ? 1 : 0) ? {2'b10, 6'(next_acc)} : 0;
     always_comb ic_addr = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn ? ftq_ppc[next_acc] : it_padd;
     always_ff @(posedge clk) begin
         if (ftq_num < ftqsz & pcg_bundle.id[7]) begin // PC generated and to start translation

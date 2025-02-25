@@ -12,7 +12,7 @@ module cache #(
 )(
     input  logic       clk,    // clock signal
     input  logic       rst,    // reset signal
-    input  logic [7:0] rep,    // replacement request ID
+    input  logic [7:0] rid,    // replacement ID
     input  logic [7:0] flmask, // flush ignore mask
     input  logic [7:0] flrqst, // flush request ID
     /* slave interface */
@@ -99,8 +99,7 @@ module cache #(
     firstk #(.width(mshrsz), .k(1))   mshr_o_inst(.bits(mshr_valid & mshr_ready), .pos(mshr_done));
     always_comb begin
         mshr_pend_bits = mshr_valid & ~mshr_ready;
-        for (int i = 0; i < mshrsz; i++)
-            if (~|m_miss & mshr_rqst[i] == m_resp) mshr_pend_bits[i] = 0;
+        for (int i = 0; i < mshrsz; i++) if (~|m_miss & mshr_rqst[i] == m_resp) mshr_pend_bits[i] = 0;
     end
     always_ff @(posedge clk) if (rst) mshr_valid <= 0;
         else begin
@@ -220,16 +219,16 @@ module cache #(
         else if (fill[$clog2(set)] & set_valid[0][set_ptr[0]] & set_dirty[0][set_ptr[0]]) begin
             /* replacement request should not be flushed to simplify atomicity
                maintenance, so it uses distinct request ID specified by input */
-            rep_rqst <= rep;
+            rep_rqst <= rid;
             rep_strb <= -64'd1;
             rep_addr <= set_tag[0][set_ptr[0]] << $clog2(blk);
             rep_wdat <= set_dat[0][set_ptr[0]];
         end else if (rep_rqst == m_resp) rep_rqst <= 0;
 
     /* master interface */
-    always_comb if (|rep_rqst) begin
+    always_comb if (|rep_rqst & rep_rqst != m_resp) begin
         m_rqst = rep_rqst;
-        m_trsc = 0;
+        m_trsc = 0; // own GetI (empty transaction)
         m_strb = rep_strb;
         m_addr = rep_addr;
         m_wdat = rep_wdat;
@@ -239,6 +238,10 @@ module cache #(
         m_strb = 0;
         m_addr = mshr_addr[$clog2(mshrsz)'(mshr_pend)];
         m_wdat = 0;
+        /* `mshr_done` indicates values returned from master interface, and between MSHR
+         * entry being returned and cleared, there may be cache replacement undetermined
+         * and undone, so that during this time, no other MSHR request can be issued */
+        if (mshr_done[$clog2(mshrsz)] | |m_resp) m_rqst = 0;
     end
 
     /* slave interface */

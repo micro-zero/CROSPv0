@@ -217,7 +217,7 @@ module vcore #(
             del_csra = del_csra + 12'h200; // sstatus, sip, sie
         if (del_csra >= 12'hc00 && del_csra <= 12'hc02)
             del_csra = del_csra - 12'h100; // cycle, time, instret
-        del_memw = inst.dc_resp[7:4] == 4'b1111 & inst.dc_miss[7:5] != 3'b111 ? st_size[3'(inst.dc_resp)] : 0;
+        del_memw = inst.dc_resp[7:5] == 3'b111 & inst.dc_miss[7:6] != 2'b11 ? st_size[3'(inst.dc_resp)] : 0;
         del_mema = st_addr[3'(inst.dc_resp)];
         del_memv = st_data[3'(inst.dc_resp)];
     end
@@ -226,7 +226,7 @@ module vcore #(
         st_offset = 0;
         for (int i = 63; i >= 0; i--) if (inst.dc_strb[i]) st_offset = 6'(i);
     end
-    always_ff @(posedge clk) if (inst.dc_rqst[7:4] == 4'b1111) begin
+    always_ff @(posedge clk) if (inst.dc_rqst[7:5] == 3'b111) begin
         st_addr[3'(inst.dc_rqst)] <= inst.dc_addr;
         st_data[3'(inst.dc_rqst)] <= inst.dc_wdat >> 8 * st_offset;
         st_size[3'(inst.dc_rqst)] <= $countones(inst.dc_strb);
