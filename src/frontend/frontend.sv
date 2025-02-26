@@ -167,8 +167,8 @@ module frontend #(
         f1done = ftq_acc + (|ic_resp ? 1 : 0) > 1;
         f0data = ftq_acc > 0 ? ftq_data[pos_0] : ic_rdat;
         f1data = ftq_acc > 1 ? ftq_data[pos_1] : ic_rdat;
-        f0pgft = ftq_trn > 0 ? ftq_pgft[pos_0] : ~it_perm[3];
-        f1pgft = ftq_trn > 1 ? ftq_pgft[pos_1] : ~it_perm[3];
+        f0pgft = ftq_trn > 0 ? ftq_pgft[pos_0] : (8'b01001001 | it_perm) != it_perm;
+        f1pgft = ftq_trn > 1 ? ftq_pgft[pos_1] : (8'b01001001 | it_perm) != it_perm;
     end
 
     /* handling ITLB/ICACHE request using fields of FTQ */
@@ -177,10 +177,10 @@ module frontend #(
     always_comb pos_acc = ftq_front + $clog2(ftqsz)'(ftq_acc);
     always_comb next_trn = pos_trn + (|it_resp ? 1 : 0);
     always_comb next_acc = pos_acc + (|ic_resp ? 1 : 0);
-    always_comb it_rqst = ftq_trn + (|it_resp ? 1 : 0) < ftq_num + (ftq_push ? 1 : 0) ? {2'b10, 6'(next_trn)} : 0;
+    always_comb it_rqst = ftq_trn + (|it_resp ? 1 : 0) < ftq_num + (ftq_push ? 1 : 0) ? {3'b100, 5'd0} : 0;
     always_comb it_vadd = ftq_trn + (|it_resp ? 1 : 0) < ftq_num ? ftq_vpc[next_trn] : pcg_bundle.pc;
     always_comb ic_flsh = redir[0];
-    always_comb ic_rqst = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn + (|it_resp ? 1 : 0) ? {2'b10, 6'(next_acc)} : 0;
+    always_comb ic_rqst = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn + (|it_resp ? 1 : 0) ? {3'b101, 5'd0} : 0;
     always_comb ic_addr = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn ? ftq_ppc[next_acc] : it_padd;
     always_ff @(posedge clk) begin
         if (ftq_num < ftqsz & pcg_bundle.id[7]) begin // PC generated and to start translation
@@ -191,7 +191,8 @@ module frontend #(
         end
         if (|it_resp) begin // ITLB request done
             ftq_ppc [pos_trn] <= it_padd;
-            ftq_pgft[pos_trn] <= ~it_perm[3]; // X permission required
+            ftq_pgft[pos_trn] <= (8'b01001001 | it_perm) != it_perm;
+            /* execution permission: -A--X--V */
         end
         if (|ic_resp) // ICACHE request done
             ftq_data[pos_acc] <= ic_rdat;

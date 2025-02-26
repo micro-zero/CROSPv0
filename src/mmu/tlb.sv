@@ -10,7 +10,6 @@ module tlb #(
 )(
     input  logic       clk,    // clock signal
     input  logic       rst,    // reset signal
-    input  logic [7:0] mid,    // master interface ID
     input  logic [7:0] flmask, // flush ignore mask
     input  logic [7:0] flrqst, // flush request ID
     /* slave interface with lower-level TLB or pipeline */
@@ -77,10 +76,9 @@ module tlb #(
         fil_prm[mis_ptr] = m_perm;
     end
     always_comb for (int i = 0; i < chn; i++) begin
-        set_hit[i][0] = ~|b_satp[i][63:60]; // hit when bare
         for (int j = 0; j < way; j++)
-            if (set_vld[i][j] & set_tag[i][j] == {b_satp[i][59:44], b_vadd[i][63:12]})
-                set_hit[i][j] = 1;
+            set_hit[i][j] = set_vld[i][j] & set_tag[i][j] == {b_satp[i][59:44], b_vadd[i][63:12]};
+        set_hit[i][0] |= ~|b_satp[i][63:60]; // hit when bare
     end
     always_ff @(posedge clk) if (rst) tlb_vld <= 0;
         else if (|m_resp & |m_perm) begin // TLB fill
@@ -99,14 +97,14 @@ module tlb #(
     end
     always_ff @(posedge clk) if (rst) fill <= 0; // also includes page fault
         else if (|m_resp) fill <= 1; else fill <= 0;
-    always_ff @(posedge clk) if (rst) {miss, mis_req} <= 0;
+    always_ff @(posedge clk) if (rst | fl(mis_req)) {miss, mis_req} <= 0;
         else begin
             if (|m_resp) mis_req <= 0; // master interface handled
             if (fill)    miss    <= 0; // filling handled
             if (~miss) for (int i = 0; i < chn; i++)
                 if (|b_rqst[i] & ~set_hitpos[i][$clog2(way)]) begin
-                    miss    <= 1;
-                    mis_req <= b_rqst[i];
+                    miss    <= fl(b_rqst[i]) ? 0 : 1;
+                    mis_req <= fl(b_rqst[i]) ? 0 : b_rqst[i];
                     mis_add <= b_vadd[i];
                     mis_csr <= b_satp[i];
                     mis_vld <= set_vld[i];
@@ -118,7 +116,7 @@ module tlb #(
         end
 
     /* interface */
-    always_comb m_rqst = |m_resp | ~|mis_req ? 0 : mid; // use another ID to avoid flushing
+    always_comb m_rqst = |m_resp ? 0 : mis_req;
     always_comb m_vadd = mis_add;
     always_comb m_satp = mis_csr;
     always_comb for (int i = 0; i < chn; i++) begin
@@ -126,9 +124,9 @@ module tlb #(
         s_perm[i] = set_prm[i][$clog2(way)'(set_hitpos[i])];
         s_padd[i] = {set_dat[i][$clog2(way)'(set_hitpos[i])], b_vadd[i][11:0]};
         if (~|b_satp[i][63:60]) {s_perm[i], s_padd[i]} = {8'hff, b_vadd[i]}; // bare
-        if (|m_resp & b_rqst[i] == mis_req & ~|m_perm) begin // page fault from high level
+        if (|m_resp & ~|m_perm & b_rqst[i] == mis_req) begin
             s_resp[i] = b_rqst[i];
-            s_perm[i] = 0;
+            s_perm[i] = 0; // page fault from high level
         end
     end
 endmodule

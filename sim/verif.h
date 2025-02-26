@@ -114,7 +114,7 @@ public:
     htifaddr_t htifaddr;            // HTIF addresses
     std::vector<const char *> args; // program arguments
     memory *smem;                   // simulation memory pointer
-    uint8_t htifexit;               // HTIF exit data
+    uint64_t htifexit;              // HTIF exit data
     memory();
     memory(const memory &b);
     const char *init(const char *fname, const char *dtb, const char *initrd, uint8_t ftype,

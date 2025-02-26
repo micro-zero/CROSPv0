@@ -1454,10 +1454,10 @@ delta_t next(state_t &s)
     {
     case 0b0000011: // LOAD
         va = rs1 + ir.range(20, 31).sext(12);
+        if (va >> (funct3 & 3) << (funct3 & 3) != va)
+            return genx(s, ret, medeleg[4] ? 1 : 3, 4, va);   // load address misaligned
         if ((pa = paddr(s.mem, satp, va, su | 2)) == -1)      // require R permission
             return genx(s, ret, medeleg[13] ? 1 : 3, 13, va); // load PF
-        if (pa >> (funct3 & 3) << (funct3 & 3) != pa)
-            return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11);
         ret.gprv = s.mem.ui64(pa);
@@ -1480,10 +1480,10 @@ delta_t next(state_t &s)
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
         va = rs1 + ir.range(20, 31).sext(12);
+        if (va >> (funct3 & 3) << (funct3 & 3) != va)
+            return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
         if ((pa = paddr(s.mem, satp, va, su | 2)) == -1)
             return genx(s, ret, medeleg[13] ? 1 : 3, 13, va); // load PF
-        if (pa >> (funct3 & 3) << (funct3 & 3) != pa)
-            return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
         if (funct3 == 0b010) // FLW
@@ -1541,10 +1541,10 @@ delta_t next(state_t &s)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
     case 0b0100011: // STORE
         va = rs1 + bits(ir.range(25, 31) << 5 | ir.range(7, 11)).sext(12);
+        if (va >> (funct3 & 3) << (funct3 & 3) != va)
+            return genx(s, ret, medeleg[6] ? 1 : 3, 6, va);   // store address misaligned
         if ((pa = paddr(s.mem, satp, va, su | 4)) == -1)      // require W permission
             return genx(s, ret, medeleg[15] ? 1 : 3, 15, va); // store PF
-        if (pa >> (funct3 & 3) << (funct3 & 3) != pa)
-            return genx(s, ret, medeleg[6] ? 1 : 3, 6, va); // store address misaligned
         ret.memw = 1 << ir.range(12, 13);
         ret.mema = pa;
         ret.memv = s.gpr[ir.range(20, 24) + (ir[2] ? 32 : 0)];
@@ -1555,10 +1555,10 @@ delta_t next(state_t &s)
         switch (ir.range(27, 31))
         {
         case 0b00010: // LR
+            if (va >> (funct3 & 3) << (funct3 & 3) != va)
+                return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
             if ((pa = paddr(s.mem, satp, rs1, su | 2)) == -1)
                 return genx(s, ret, medeleg[13] ? 1 : 3, 13, rs1); // load PF
-            if (pa >> (funct3 & 3) << (funct3 & 3) != pa)
-                return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
             ret.gprw = 1;
             ret.gpra = ir.range(7, 11);
             ret.gprv = s.mem.ui64(pa);
@@ -1568,10 +1568,10 @@ delta_t next(state_t &s)
                 ret.gprv = (int64_t)(int32_t)ret.gprv;
             break;
         case 0b00011: // SC
+            if (va >> (funct3 & 3) << (funct3 & 3) != va)
+                return genx(s, ret, medeleg[6] ? 1 : 3, 6, va); // store address misaligned
             if ((pa = paddr(s.mem, satp, rs1, su | 4)) == -1)
                 return genx(s, ret, medeleg[15] ? 1 : 3, 15, rs1); // store PF
-            if (pa >> (funct3 & 3) << (funct3 & 3) != pa)
-                return genx(s, ret, medeleg[6] ? 1 : 3, 6, va); // store address misaligned
             ret.gprw = 1;
             ret.gpra = ir.range(7, 11);
             if (s.rsrv.find(pa) == s.rsrv.end())
@@ -1594,10 +1594,10 @@ delta_t next(state_t &s)
             s.rsrv.clear(); // strict successful SC condition
             break;
         default:
+            if (va >> (funct3 & 3) << (funct3 & 3) != va)
+                return genx(s, ret, medeleg[6] ? 1 : 3, 6, va); // AMO address misaligned
             if ((pa = paddr(s.mem, satp, rs1, su | 4)) == -1)
                 return genx(s, ret, medeleg[15] ? 1 : 3, 15, rs1); // AMO PF
-            if (pa >> (funct3 & 3) << (funct3 & 3) != pa)
-                return genx(s, ret, medeleg[6] ? 1 : 3, 6, va); // AMO address misaligned
             ret.gprw = 1;
             ret.gpra = ir.range(7, 11);
             ret.gprv = s.mem.ui64(pa);

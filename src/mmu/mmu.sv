@@ -100,12 +100,11 @@ module mmu #(
      *   8'b0000_0000: no request
      *   8'b0000_0001: coherence request
      *   8'b0000_0010: DCACHE replacement
-     *   8'b0000_0011: STLB master request
-     *   8'b0000_0100: ITLB master request
-     *   8'b0000_0101: DTLB master request
-     *   8'b10xx_xxxx: ITLB/ICACHE requests
-     *   8'b11xx_xxxx: DTLB/DCACHE requests
-     * to support LQ/SQ of more than 32 entries, ID width needs extension
+     *   8'b100x_xxxx: ITLB requests
+     *   8'b101x_xxxx: ICACHE requests
+     *   8'b110x_xxxx: DTLB requests
+     *   8'b111x_xxxx: DCACHE requests
+     * to support LQ/SQ of more than 16 entries, ID width needs extension
      */
 
     /* flush function (see cache.sv) */
@@ -126,7 +125,7 @@ module mmu #(
     logic  [7:0] it_perm_m;
     logic [63:0] it_padd_m;
     tlb #(.chn(1), .set(2), .way(8)) itlb (
-        .clk(clk), .rst(rst), .mid(8'b0000_0100),
+        .clk(clk), .rst(rst | fncv),
         .flmask(flmask), .flrqst(flrqst),
         .s_rqst(s_it_rqst), .m_rqst(it_rqst_m),
         .s_vadd(s_it_vadd), .m_vadd(it_vadd_m),
@@ -144,7 +143,7 @@ module mmu #(
     logic  [7:0] dt_perm_m;
     logic [63:0] dt_padd_m;
     tlb #(.chn(1), .set(2), .way(16)) dtlb (
-        .clk(clk), .rst(rst), .mid(8'b0000_0101),
+        .clk(clk), .rst(rst | fncv),
         .flmask(flmask), .flrqst(flrqst),
         .s_rqst(s_dt_rqst), .m_rqst(dt_rqst_m),
         .s_vadd(s_dt_vadd), .m_vadd(dt_vadd_m),
@@ -165,7 +164,7 @@ module mmu #(
     logic       [7:0] st_rqst_b, st_rqst_f;
     logic      [63:0] st_vadd_b, st_vadd_f;
     tlb #(.chn(2), .set(64), .way(8)) stlb (
-        .clk(clk), .rst(rst), .mid(8'b0000_0011),
+        .clk(clk), .rst(rst | fncv),
         .flmask(flmask), .flrqst(flrqst),
         .s_rqst({dt_rqst_m, it_rqst_m}), .m_rqst(st_rqst_m),
         .s_vadd({dt_vadd_m, it_vadd_m}), .m_vadd(st_vadd_m),

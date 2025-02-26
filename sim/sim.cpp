@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
     uint64_t cycle = 0, htifexit;
     state_t s;
     const char *err =
-        s.mem.init(cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, RST_PC, DTBADDR, INITRD);
+        s.mem.init(cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, cmd.args, RST_PC, DTBADDR, INITRD);
     s.pc = s.mem.entry;
     if (err)
         return fputs(err, stderr), 255;
