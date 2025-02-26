@@ -126,7 +126,7 @@ public:
     ~memory();
     bool add(uint64_t size, uint64_t base);
     bool copy(uint8_t *ptr, uint64_t size, uint64_t base);
-    bool read(FILE *fp, uint64_t size, uint64_t base);
+    bool load(FILE *fp, uint64_t size, uint64_t base);
     void reset(uint8_t value);
     void negedge();
     void posedge();

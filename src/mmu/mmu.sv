@@ -479,10 +479,9 @@ module mmu #(
             coh_rqst_sb <= 0;
             coh_resp_sb <= 0;
         end
-    always_ff @(posedge clk)
-        if (rst | fl(coh_lock_sb))         coh_lock_sb <= 0;
-        else if (|m_coh_resp)              coh_lock_sb <= m_coh_resp;
-        else if (coh_lock_sb == dc_resp_s) coh_lock_sb <= 0;
+    always_ff @(posedge clk) if (rst | fl(coh_lock_sb))        coh_lock_sb <= 0;
+        else if (|m_coh_resp & ~coh_flsh_mb & ~fl(m_coh_resp)) coh_lock_sb <= m_coh_resp;
+        else if (coh_lock_sb == dc_resp_s)                     coh_lock_sb <= 0;
 
     /* assemble data cache request and response */
     always_comb if (|coh_rqst_sb & ~|coh_resp_sb & dc_resp_s != coh_rqst_sb & ~|coh_lock_sb & ~|m_coh_resp) begin

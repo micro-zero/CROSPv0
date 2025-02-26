@@ -231,10 +231,10 @@ module decoder #(
                 lsu_funct[0].bits = ir[14:12];
                 if (op[`AMO]) lsu_funct[0].rsrv = {|alu_funct[1], ~|alu_funct[1]};
                 if (op[`AMO]) lsu_funct[0].aqrl = ir[26:25];
-                /* as memory operation only violate sequence consistency when forwarding,
-                   fence instructions can only record PW and SR bits, and be inserted in
-                   store queue with `aq` bit set to fence load forwarding. todo: ??? */
-                if (lsu_funct[0].fence) lsu_funct[0].aqrl = {ir[24] & ir[21], 1'b0}; // PW and SR fence (read after write)
+                /* acquire bit can be used to block load instructions succeeding fence,
+                   at P[IORW]-S[IR] fence (read after write and read after read), and
+                   this may be coarse but easy to check consistency after translation */
+                if (lsu_funct[0].fence) lsu_funct[0].aqrl = {|ir[27:24] & (ir[23] | ir[21]), 1'b0};
             end
 
             /* some invalid situation */

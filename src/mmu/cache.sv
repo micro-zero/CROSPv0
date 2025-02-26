@@ -228,7 +228,7 @@ module cache #(
     /* master interface */
     always_comb if (|rep_rqst & rep_rqst != m_resp) begin
         m_rqst = rep_rqst;
-        m_trsc = 0; // own GetI (empty transaction)
+        m_trsc = 0; // own GetI (evict cache block)
         m_strb = rep_strb;
         m_addr = rep_addr;
         m_wdat = rep_wdat;

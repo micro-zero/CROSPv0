@@ -224,7 +224,7 @@ int main(int argc, char *argv[])
 
         /* state check */
         vrcr >> cmts >> dels; // extract from DUT of vcore
-        intc >> dels;
+        // intc >> dels; // extract from DUT of intc (if necessary)
         while (cmts.size() > 1)
         {
             state_t stt; // for print
