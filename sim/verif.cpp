@@ -579,13 +579,13 @@ void memory::posedge()
     if (mcresp)
         mcrqstr = 0;
     mcresp = (thbusy || scrqstr) && mctrscr ? 0 : mcrqstr;
+    mcmesi = 1;
     if (scrqst)
     {
         scrqstr = scrqst;
+        scaddrr = scaddr;
         scrqst = 0;
     }
-    if (scresp)
-        scrqstr = 0;
     if (reqaddr && !scsent)
     {
         scsent = 1;
@@ -594,7 +594,11 @@ void memory::posedge()
         sctrsc = 1; // issue GetV transaction
     }
     if (scresp)
-        scsent = 0;
+    {
+        if (!scmesi) // core also do not have valid line (caused by flushing maybe)
+            owner[scaddrr >> 6] = 0;
+        scrqstr = scsent = 0;
+    }
 
     /* handshake and state change */
     if (axiport.arvalid & axiport.arready)

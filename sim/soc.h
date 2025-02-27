@@ -85,6 +85,7 @@ public:
     uint8_t &scrqst = dut.s_coh_rqst, &mcrqst = dut.m_coh_rqst;
     uint8_t &sctrsc = dut.s_coh_trsc, &mctrsc = dut.m_coh_trsc;
     uint8_t &scresp = dut.s_coh_resp, &mcresp = dut.m_coh_resp;
+    uint8_t &scmesi = dut.s_coh_mesi, &mcmesi = dut.m_coh_mesi;
     uint64_t &scaddr = dut.s_coh_addr, &mcaddr = dut.m_coh_addr;
     verifcore(const char *fnvcd = 0, const char *fnsave = 0);
     ~verifcore();

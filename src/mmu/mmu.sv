@@ -48,10 +48,12 @@ module mmu #(
     input  logic  [7:0] s_coh_trsc, // slave coherence transaction
     input  logic [63:0] s_coh_addr, // slave coherence physical address
     output logic  [7:0] s_coh_resp, // slave coherence response ID
+    output logic  [7:0] s_coh_mesi, // slave coherence state
     output logic  [7:0] m_coh_rqst, // master coherence request ID
     output logic  [7:0] m_coh_trsc, // master coherence transaction
     output logic [63:0] m_coh_addr, // master coherence physical address
     input  logic  [7:0] m_coh_resp, // master coherence response ID
+    input  logic  [7:0] m_coh_mesi, // master coherence state
     /* AXI master interface */
     /* write address channel */
     output logic  [7:0] m_axi_awid,
@@ -211,7 +213,7 @@ module mmu #(
      */
     logic       [7:0] coh_rqst_sb, coh_trsc_sb, coh_rqst_mb, coh_trsc_mb; // buffered request and response
     logic      [63:0] coh_addr_sb, coh_addr_mb, coh_strb_mb;
-    logic       [7:0] coh_resp_sb, coh_mesi_sb, coh_resp_mb;
+    logic       [7:0] coh_resp_sb, coh_mesi_sb, coh_resp_mb, coh_mesi_mb;
     logic [63:0][7:0] coh_rdat_sb, coh_wdat_mb;
     logic       [7:0] coh_lock_sb; // coherence locked request ID
     logic             coh_flsh_mb; // record flush when master coherence request sent but not answered
@@ -356,13 +358,14 @@ module mmu #(
                     m_axi_araddr <= coh_addr_sb & ~64'h3f;
                     m_axi_arlen  <= 7;
                 end else if (|coh_resp_mb & ~coh_flsh_mb & ~fl(coh_resp_mb)) begin
-                    axi_stt       <= 1;
+                    if (coh_mesi_mb == 1) {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
+                    /* todo: different transactions from cache can be distinguished */
+                    else {m_axi_arvalid, axi_stt} <= {1'd0, 8'd6};
                     axi_cnt       <= 0;
                     axi_req       <= coh_resp_mb;
                     axi_thr       <= 0;
                     axi_str       <= coh_strb_mb;
                     axi_buf       <= coh_wdat_mb;
-                    m_axi_arvalid <= 1;
                     m_axi_araddr  <= coh_addr_mb;
                     m_axi_arlen   <= 7;
                 end else if (|dc_rqst_f & dc_byps_f & ~fl(dc_rqst_f)) begin
@@ -447,7 +450,8 @@ module mmu #(
     /* data cache coherence */
     always_comb m_coh_addr = coh_addr_mb;
     always_comb m_coh_trsc = coh_trsc_mb;
-    always_comb s_coh_resp = axi_stt == 6 & axi_req == coh_rqst_sb ? axi_req : 0;
+    always_comb s_coh_resp = axi_stt == 6 & axi_req == coh_rqst_sb ? coh_resp_sb : 0;
+    always_comb s_coh_mesi = axi_stt == 6 & axi_req == coh_rqst_sb ? coh_mesi_sb : 0;
     always_ff @(posedge clk) begin
         if (rst | |coh_resp_mb & fl(coh_resp_mb)) {m_coh_rqst, coh_rqst_mb, coh_resp_mb} <= 0;
         else if (~|coh_rqst_mb) begin // buffer vacant
@@ -459,6 +463,7 @@ module mmu #(
             coh_trsc_mb <= dc_trsc_m;
         end else if (m_coh_resp == coh_rqst_mb) begin // coherence request responsed
             coh_resp_mb <= m_coh_resp;
+            coh_mesi_mb <= m_coh_mesi;
             if (coh_flsh_mb | fl(m_coh_resp)) {coh_rqst_mb, coh_resp_mb} <= 0;
         end else if (dc_resp_m == coh_rqst_mb) begin // cache responsed
             coh_rqst_mb <= 0;

@@ -96,6 +96,7 @@ private:
     axiport_t axibuff;                 // AXI value buffer
     uint8_t rbursti, wbursti;          // AXI burst index
     uint8_t scrqstr, mcrqstr;          // coherence request registers
+    uint64_t scaddrr;                  // coherence address register
     uint8_t mctrscr;                   // coherence transaction register
     uint64_t mcaddrr;                  // coherence address register
     uint8_t scsent, thbusy;            // slave command sent and handling tohost
@@ -106,6 +107,7 @@ public:
     uint8_t scrqst, mcrqst;         // coherence request ports
     uint8_t sctrsc, mctrsc;         // coherence transaction ports
     uint8_t scresp, mcresp;         // coherence response ports
+    uint8_t scmesi, mcmesi;         // coherence state ports
     uint64_t scaddr, mcaddr;        // coherence address ports
     uint64_t entry;                 // program entry
     uint64_t hexsz;                 // hex code size in bytes

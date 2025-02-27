@@ -212,10 +212,12 @@ int main(int argc, char *argv[])
         vrcr.scaddr = amem.scaddr;
         vrcr.sctrsc = amem.sctrsc;
         vrcr.mcresp = amem.mcresp;
+        vrcr.mcmesi = amem.mcmesi;
         amem.mcrqst = vrcr.mcrqst;
         amem.mcaddr = vrcr.mcaddr;
         amem.mctrsc = vrcr.mctrsc;
         amem.scresp = vrcr.scresp;
+        amem.scmesi = vrcr.scmesi;
         vrcr.mtime = intc.int_time; // VCORE -- INTC
         vrcr.mip_ext = intc.int_pend;
         if (cycle >= cmd.mintime)
