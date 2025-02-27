@@ -45,11 +45,13 @@ verifcore::~verifcore()
 verifcore::operator axiport_t() const
 {
     axiport_t ap;
+    ap.awid = dut.m_axi_awid;
     ap.awvalid = dut.m_axi_awvalid;
     ap.awaddr = dut.m_axi_awaddr;
     ap.awburst = dut.m_axi_awburst;
     ap.awlen = dut.m_axi_awlen;
     ap.awsize = dut.m_axi_awsize;
+    ap.arid = dut.m_axi_arid;
     ap.arvalid = dut.m_axi_arvalid;
     ap.araddr = dut.m_axi_araddr;
     ap.arburst = dut.m_axi_arburst;
@@ -74,10 +76,12 @@ axidev &verifcore::operator<=(const axiport_t &ap)
     dut.m_axi_awready = ap.awready;
     dut.m_axi_arready = ap.arready;
     dut.m_axi_wready = ap.wready;
+    dut.m_axi_rid = ap.rid;
     dut.m_axi_rvalid = ap.rvalid;
     dut.m_axi_rresp = ap.rresp;
     dut.m_axi_rdata = ap.rdata;
     dut.m_axi_rlast = ap.rlast;
+    dut.m_axi_bid = ap.bid;
     dut.m_axi_bvalid = ap.bvalid;
     dut.m_axi_bresp = ap.bresp;
     return *this;
@@ -224,6 +228,8 @@ intctl::~intctl()
 intctl::operator axiport_t() const
 {
     axiport_t ap;
+    ap.arid = dut.s_axi_arid;
+    ap.awid = dut.s_axi_awid;
     ap.awready = dut.s_axi_awready;
     ap.arready = dut.s_axi_arready;
     ap.wready = dut.s_axi_wready;
@@ -243,11 +249,13 @@ intctl::operator axiport_t() const
  */
 axidev &intctl::operator<<(const axiport_t &ap)
 {
+    dut.s_axi_awid = ap.awid;
     dut.s_axi_awvalid = ap.awvalid;
     dut.s_axi_awaddr = ap.awaddr;
     dut.s_axi_awburst = ap.awburst;
     dut.s_axi_awlen = ap.awlen;
     dut.s_axi_awsize = ap.awsize;
+    dut.s_axi_arid = ap.arid;
     dut.s_axi_arvalid = ap.arvalid;
     dut.s_axi_araddr = ap.araddr;
     dut.s_axi_arburst = ap.arburst;

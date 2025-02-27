@@ -230,9 +230,12 @@ module mmu #(
         .s_ofst(ic_ofst_s), .m_ofst(ic_ofst_m),
         .s_rdat(ic_rdat_s), .m_rdat(ic_rdat_m)
     );
-    always_comb ic_trsc_s = 0; // ICACHE requires no coherency
-    always_comb ic_rqst_s = s_ic_rqst;
-    always_comb ic_addr_s = s_ic_addr;
+    always_comb ic_trsc_s = |coh_rqst_sb ? coh_trsc_sb : 0;
+    always_comb ic_rqst_s = |coh_rqst_sb ? coh_rqst_sb : s_ic_rqst;
+    always_comb ic_addr_s = |coh_rqst_sb ? coh_addr_sb : s_ic_addr;
+    /* It seems that proxy kernel does not exceute FENCE.I after handling
+       HTIF system proxy of loading data to code segment, so invalidating
+       coherence-related line in instruction cache can issue this problem */
     always_comb ic_strb_s = 0;
     always_comb ic_wdat_s = 0;
     always_comb s_ic_resp = |ic_miss_s ? 0 : ic_resp_s;
@@ -426,14 +429,14 @@ module mmu #(
     end
     always_ff @(posedge clk) if (rst | axi_stt == 6)     axi_fls <= 0;
         else if (|axi_stt & (fl(axi_req) | fl(axi_thr))) axi_fls <= 1;
-    always_comb m_axi_arid    = 0;
+    always_comb m_axi_arid    = axi_req;
     always_comb m_axi_arburst = 'b01;  // INCR burst
     always_comb m_axi_arsize  = 'b011; // 8 bytes
     always_comb m_axi_arlock  = 0;
     always_comb m_axi_arcache = 0;
     always_comb m_axi_arprot  = 0;
     always_comb m_axi_arqos   = 0;
-    always_comb m_axi_awid    = 0;
+    always_comb m_axi_awid    = axi_req;
     always_comb m_axi_awburst = 'b01;  // INCR burst
     always_comb m_axi_awsize  = 'b011; // 8 bytes
     always_comb m_axi_awlock  = 0;
@@ -479,9 +482,12 @@ module mmu #(
             coh_rqst_sb <= 0;
             coh_resp_sb <= 0;
         end
-    always_ff @(posedge clk) if (rst | fl(coh_lock_sb))        coh_lock_sb <= 0;
-        else if (|m_coh_resp & ~coh_flsh_mb & ~fl(m_coh_resp)) coh_lock_sb <= m_coh_resp;
-        else if (coh_lock_sb == dc_resp_s)                     coh_lock_sb <= 0;
+    always_ff @(posedge clk) if (rst | fl(coh_lock_sb)) coh_lock_sb <= 0;
+        else if (|m_coh_resp & ~coh_flsh_mb & ~fl(m_coh_resp) & coh_trsc_mb == 1)
+            coh_lock_sb <= m_coh_resp;
+        /* todo: use AXI handshake to confirm may be better than `dc_resp_s`,
+           for not all requests must have a data cache response */
+        else if (coh_lock_sb == dc_resp_s) coh_lock_sb <= 0;
 
     /* assemble data cache request and response */
     always_comb if (|coh_rqst_sb & ~|coh_resp_sb & dc_resp_s != coh_rqst_sb & ~|coh_lock_sb & ~|m_coh_resp) begin

@@ -353,12 +353,14 @@ memory::operator axiport_t() const { return axiport; }
  */
 axidev &memory::operator<<(const axiport_t &ap)
 {
+    axiport.awid = ap.arid;
     axiport.awvalid = ap.awvalid;
     axiport.awaddr = ap.awaddr;
     axiport.awburst = ap.awburst;
     axiport.awlen = ap.awlen;
     axiport.awsize = ap.awsize;
     axiport.arvalid = ap.arvalid;
+    axiport.arid = ap.arid;
     axiport.araddr = ap.araddr;
     axiport.arburst = ap.arburst;
     axiport.arlen = ap.arlen;
@@ -418,10 +420,6 @@ void memory::posedge()
                 for (int i = 0; i < 8; i++)
                     if (owner[magic_mem + i * 8 >> 6])
                         reqaddr = magic_mem + i * 8 >> 6;
-                fprintf(stderr, "%d %d %lx %lx %x %lx %x %x %lx %x\n",
-                        owner[0x8000b008 >> 6], owner[0x8000e000 >> 6],
-                        this->ui64(0x8000b008), this->ui64(0x8000e000),
-                        scrqst, scaddr, scresp, mcresp, mcaddr, mcrqst);
                 if (reqaddr)
                     ;
                 else if (which == 0x38) // sysopenat
@@ -580,7 +578,7 @@ void memory::posedge()
     }
     if (mcresp)
         mcrqstr = 0;
-    mcresp = thbusy || scrqstr ? 0 : mcrqstr;
+    mcresp = (thbusy || scrqstr) && mctrscr ? 0 : mcrqstr;
     if (scrqst)
     {
         scrqstr = scrqst;
@@ -596,11 +594,7 @@ void memory::posedge()
         sctrsc = 1; // issue GetV transaction
     }
     if (scresp)
-        scsent = owner[scaddr >> 6] = 0;
-    if (mcresp && mctrscr == 1) // other GetV
-        owner[mcaddrr >> 6] = 1;
-    if (mcresp && mctrscr == 0) // other GetI
-        owner[mcaddrr >> 6] = 0;
+        scsent = 0;
 
     /* handshake and state change */
     if (axiport.arvalid & axiport.arready)
@@ -618,7 +612,11 @@ void memory::posedge()
         wbursti = 0;
     }
     if (axiport.rready & axiport.rvalid)
+    {
         rbursti++;
+        if (axiport.rlast)
+            owner[axibuff.araddr >> 6] = 1;
+    }
     if (axiport.wvalid & axiport.wready)
     {
         if (axibuff.awaddr == uartaddr) // UART-lite Rx/Tx FIFO
@@ -631,7 +629,10 @@ void memory::posedge()
     if (axiport.wlast || axibuff.awlen == 1)
         axibuff.bvalid = 1;
     if (axiport.bready & axiport.bvalid)
+    {
         axibuff.bvalid = 0;
+        owner[axibuff.awaddr >> 6] = 0;
+    }
 
     /* update output according to current status */
     axiport.arready = !(rbursti < axibuff.arlen);

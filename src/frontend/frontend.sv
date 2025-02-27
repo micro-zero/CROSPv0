@@ -91,6 +91,7 @@ module frontend #(
             if (com_bundle[i].opid[15]) com_last <= com_bundle[i];
 
     /* instruction fetch queue */
+    localparam itreq = {3'b100, 5'd0}, icreq = {3'b101, 5'd0};
     logic [$clog2(fqsz)-1:0] fq_front;              // fetch queue front index
     logic   [$clog2(fqsz):0] fq_num, fq_in, fq_out; // fetch queue numbers
     logic        [fwd-1:0][$clog2(fqsz)-1:0] fq_raddr, fq_waddr;
@@ -150,9 +151,9 @@ module frontend #(
     always_ff @(posedge clk) if (rst | redir[0]) ftq_num   <= 0;
         else ftq_num <= ftq_num - (ftq_pop ? 1 : 0) + (ftq_push ? 1 : 0);
     always_ff @(posedge clk) if (rst | redir[0]) ftq_trn   <= 0;
-        else ftq_trn <= ftq_trn - (ftq_pop ? 1 : 0) + (|it_resp ? 1 : 0);
+        else ftq_trn <= ftq_trn - (ftq_pop ? 1 : 0) + (it_resp == itreq ? 1 : 0);
     always_ff @(posedge clk) if (rst | redir[0]) ftq_acc   <= 0;
-        else ftq_acc <= ftq_acc - (ftq_pop ? 1 : 0) + (|ic_resp ? 1 : 0);
+        else ftq_acc <= ftq_acc - (ftq_pop ? 1 : 0) + (ic_resp == icreq ? 1 : 0);
     always_ff @(posedge clk)
         if (rst | redir[0]) ftq_cur <= 0;
         else if (ftq_next < ftq_size[ftq_front]) ftq_cur <= ftq_next;
@@ -163,8 +164,8 @@ module frontend #(
     always_comb pos_0 = ftq_front;
     always_comb pos_1 = ftq_front + 1;
     always_comb begin
-        f0done = ftq_acc + (|ic_resp ? 1 : 0) > 0;
-        f1done = ftq_acc + (|ic_resp ? 1 : 0) > 1;
+        f0done = ftq_acc + (ic_resp == icreq ? 1 : 0) > 0;
+        f1done = ftq_acc + (ic_resp == icreq ? 1 : 0) > 1;
         f0data = ftq_acc > 0 ? ftq_data[pos_0] : ic_rdat;
         f1data = ftq_acc > 1 ? ftq_data[pos_1] : ic_rdat;
         f0pgft = ftq_trn > 0 ? ftq_pgft[pos_0] : (8'b01001001 | it_perm) != it_perm;
@@ -175,13 +176,13 @@ module frontend #(
     logic [$clog2(ftqsz)-1:0] pos_trn, pos_acc, next_trn, next_acc;
     always_comb pos_trn = ftq_front + $clog2(ftqsz)'(ftq_trn);
     always_comb pos_acc = ftq_front + $clog2(ftqsz)'(ftq_acc);
-    always_comb next_trn = pos_trn + (|it_resp ? 1 : 0);
-    always_comb next_acc = pos_acc + (|ic_resp ? 1 : 0);
-    always_comb it_rqst = ftq_trn + (|it_resp ? 1 : 0) < ftq_num + (ftq_push ? 1 : 0) ? {3'b100, 5'd0} : 0;
-    always_comb it_vadd = ftq_trn + (|it_resp ? 1 : 0) < ftq_num ? ftq_vpc[next_trn] : pcg_bundle.pc;
+    always_comb next_trn = pos_trn + (it_resp == itreq ? 1 : 0);
+    always_comb next_acc = pos_acc + (ic_resp == icreq ? 1 : 0);
+    always_comb it_rqst = ftq_trn + (it_resp == itreq ? 1 : 0) < ftq_num + (ftq_push ? 1 : 0) ? itreq : 0;
+    always_comb it_vadd = ftq_trn + (it_resp == itreq ? 1 : 0) < ftq_num ? ftq_vpc[next_trn] : pcg_bundle.pc;
     always_comb ic_flsh = redir[0];
-    always_comb ic_rqst = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn + (|it_resp ? 1 : 0) ? {3'b101, 5'd0} : 0;
-    always_comb ic_addr = ftq_acc + (|ic_resp ? 1 : 0) < ftq_trn ? ftq_ppc[next_acc] : it_padd;
+    always_comb ic_rqst = ftq_acc + (ic_resp == icreq ? 1 : 0) < ftq_trn + (it_resp == itreq ? 1 : 0) ? icreq : 0;
+    always_comb ic_addr = ftq_acc + (ic_resp == icreq ? 1 : 0) < ftq_trn ? ftq_ppc[next_acc] : it_padd;
     always_ff @(posedge clk) begin
         if (ftq_num < ftqsz & pcg_bundle.id[7]) begin // PC generated and to start translation
             ftq_vpc [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pc;
@@ -189,12 +190,12 @@ module frontend #(
             ftq_pat [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pat[fnum-1:0];
             ftq_size[$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.num;
         end
-        if (|it_resp) begin // ITLB request done
+        if (it_resp == itreq) begin // ITLB request done
             ftq_ppc [pos_trn] <= it_padd;
             ftq_pgft[pos_trn] <= (8'b01001001 | it_perm) != it_perm;
             /* execution permission: -A--X--V */
         end
-        if (|ic_resp) // ICACHE request done
+        if (ic_resp == icreq) // ICACHE request done
             ftq_data[pos_acc] <= ic_rdat;
     end
 
