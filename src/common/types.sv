@@ -84,6 +84,8 @@ typedef struct packed {
     logic [64:0] a, b;
     logic [1:0][15:0] prsa;
     logic [1:0][15:0] prda;
+    /* busy bit used for early address translation */
+    logic [1:0] prsb; // physical register busy bit
 } iss_bundle_t;
 
 typedef struct packed {
@@ -97,6 +99,7 @@ typedef struct packed {
     logic [64:0] base;
     logic [63:0] offset;
     logic [64:0] a, b;
+    logic [1:0]       prsb;
     logic [1:0][63:0] prs; // convert register addresses to values
     logic [1:0][15:0] prda;
 } reg_bundle_t;

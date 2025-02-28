@@ -57,7 +57,7 @@ module cache #(
     logic [chn-1:0]        [63:0] b_addr, f_addr;
     logic [chn-1:0][blk-1:0][7:0] b_wdat, f_wdat;
     logic [chn-1:0]               b_ready;
-    logic write, invld;
+    logic read; // mark normal read at last cycle
     always_comb for (int i = 0; i < chn; i++) b_ready[i] = ~|b_rqst[i] | |s_resp[i];
     always_comb for (int i = 0; i < chn; i++) begin
         f_rqst[i] = b_ready[i] ? s_rqst[i] : b_rqst[i];
@@ -70,8 +70,8 @@ module cache #(
         else for (int i = 0; i < chn; i++) begin
             if (fl(b_rqst[i]))  b_rqst[i] <= 0;
             if (|s_resp[i])     b_rqst[i] <= 0;
-            if (i == 0 & write) b_strb[0] <= 0;
-            if (i == 0 & invld) b_trsc[0] <= 0;
+            if (i == 0 & |b_strb[0]     & read) b_strb[0] <= 0;
+            if (i == 0 & b_trsc[0] == 1 & read) b_trsc[0] <= 0;// other GetV
             /* only one request can be buffered until response in a channel */
             if (|s_rqst[i] & b_ready[i] & ~fl(s_rqst[i])) begin
                 b_rqst[i] <= s_rqst[i];
@@ -184,8 +184,7 @@ module cache #(
             new_dat[set_ptr[0]] = fill_dat;
         end else new_dat[$clog2(way)'(set_hitpos[0])] = set_hitrdat[0] & ~set_hitmask | set_hitwdat;
     end
-    always_comb write = ~fill[$clog2(set)] & ~stale & |b_strb[0];
-    always_comb invld = ~fill[$clog2(set)] & ~stale & b_trsc[0] == 1; // other GetV
+    always_comb read = ~fill[$clog2(set)] & ~mshr_done[$clog2(mshrsz)] & ~stale;
     always_ff @(posedge clk) if (rst) valid <= 0;
         else if (fill[$clog2(set)]) begin
             valid[index[0]][set_ptr[0]] <= 1;
@@ -193,10 +192,10 @@ module cache #(
             dat  [index[0]]             <= new_dat;
             tag  [index[0]]             <= new_tag;
             ptr  [index[0]]             <= set_ptr[0] + 1;
-        end else if (set_hitpos[0][$clog2(way)]) // hit
-            if (|b_rqst[0] & invld)
+        end else if (read & set_hitpos[0][$clog2(way)]) // hit
+            if (|b_rqst[0] & b_trsc[0] == 1)
                 valid[index[0]][$clog2(way)'(set_hitpos[0])] <= 0;
-            else if (|b_rqst[0] & write) begin
+            else if (|b_rqst[0] & |b_strb[0]) begin
                 dirty[index[0]][$clog2(way)'(set_hitpos[0])] <= 1;
                 dat  [index[0]]                              <= new_dat;
             end
@@ -255,8 +254,8 @@ module cache #(
             for (int j = 0; j < mshrsz; j++)
                 if (mshr_valid[j] & mshr_addr[j][63:$clog2(blk)] == b_addr[i][63:$clog2(blk)])
                     {miss_under_miss, s_miss[i]} = {1'b1, mshr_rqst[j]};                  // miss-under-miss
-            if (set_hitpos[i][$clog2(way)] & write) s_resp[i] = 0;                        // write request
-            if (set_hitpos[i][$clog2(way)] & invld) s_resp[i] = 0;                        // other GetV
+            if (set_hitpos[i][$clog2(way)] & |b_strb[0])     s_resp[i] = 0;               // write request
+            if (set_hitpos[i][$clog2(way)] & b_trsc[0] == 1) s_resp[i] = 0;               // other GetV
             if (~set_hitpos[i][$clog2(way)] & ~mshr_in[i][$clog2(mshrsz)]) s_resp[i] = 0; // MSHR full
         end
         /* cache tag and miss situation are stale when line being

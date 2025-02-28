@@ -40,7 +40,19 @@ module issue #(
             begin
                 /* for now all operations are sent to default issue queue */
                 if (32'(iq_in) >= iwd | 32'(iq_in) >= iqsz - 32'(iq_num)) break;
-                iq_in_data[32'(iq_in)] = ren_bundle[i];
+                iq_in_data[32'(iq_in)].opid   = ren_bundle[i].opid;
+                iq_in_data[32'(iq_in)].ldid   = ren_bundle[i].ldid;
+                iq_in_data[32'(iq_in)].stid   = ren_bundle[i].stid;
+                iq_in_data[32'(iq_in)].ir     = ren_bundle[i].ir;
+                iq_in_data[32'(iq_in)].delta  = ren_bundle[i].delta;
+                iq_in_data[32'(iq_in)].fu     = ren_bundle[i].fu;
+                iq_in_data[32'(iq_in)].funct  = ren_bundle[i].funct;
+                iq_in_data[32'(iq_in)].base   = ren_bundle[i].base;
+                iq_in_data[32'(iq_in)].offset = ren_bundle[i].offset;
+                iq_in_data[32'(iq_in)].a      = ren_bundle[i].a;
+                iq_in_data[32'(iq_in)].b      = ren_bundle[i].b;
+                iq_in_data[32'(iq_in)].prsa   = ren_bundle[i].prsa;
+                iq_in_data[32'(iq_in)].prda   = ren_bundle[i].prda;
                 iq_in_busy[32'(iq_in)] = busy_resp[i];
                 iq_in++;
             end
@@ -94,8 +106,10 @@ module issue #(
     always_comb begin
         iss_bundle = 0;
         for (int i = 0; i < iwd; i++)
-            if (iq_ready_pos[i][$clog2(iqsz)])
+            if (iq_ready_pos[i][$clog2(iqsz)]) begin
                 iss_bundle[i] = iq_rvalue[i];
+                iss_bundle[i].prsb = iq_prsb_fwd[iq_raddr[i]];
+            end
     end
     always_comb begin
         iq_out = 0; iq_out_mask = 0;

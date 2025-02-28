@@ -39,6 +39,7 @@ module execute #(
         reg_bundle[i].b      = iss_bundle[i].b;
         reg_bundle[i].prs    = reg_resp[i];
         reg_bundle[i].prda   = iss_bundle[i].prda;
+        reg_bundle[i].prsb   = iss_bundle[i].prsb;
     end
 
     /* result arbiter */

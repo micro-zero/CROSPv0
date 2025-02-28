@@ -231,7 +231,7 @@ module commit #(
             /* set redirection commit bundle */
             com_bundle = 0;
             com_bundle[0].redir = 1;
-            com_bundle[0].brid = exception ? 0 : dec_last.brid;
+            com_bundle[0].brid = exception | eret[2] | exe_last.flush | exe_last.retry ? 0 : dec_last.brid;
             com_bundle[0].ldid = dec_last.ldid;
             com_bundle[0].stid = dec_last.stid;
             com_bundle[0].pc = dec_last.pc;
