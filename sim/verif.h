@@ -178,7 +178,8 @@ uint64_t paddr(memory &mem, bits satp, bits vaddr, bits perm = 0, bool adpf = 1)
 std::string disas(uint32_t ir);
 delta_t next(state_t &s);
 void apply(state_t &s, delta_t delta);
-uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, memory *pmem = 0);
+uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, memory *pmem = 0,
+              std::map<uint64_t, uint8_t> *owner = 0, uint64_t *pval = 0);
 char nbgetchar();
 void print(uint64_t cycle, state_t &state, const delta_t &delta);
 void print(state_t &s, uint64_t addr = 0, uint64_t size = 0);

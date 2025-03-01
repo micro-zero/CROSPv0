@@ -217,6 +217,7 @@ module mmu #(
     logic [63:0][7:0] coh_rdat_sb, coh_wdat_mb;
     logic       [7:0] coh_lock_sb; // coherence locked request ID
     logic             coh_flsh_mb; // record flush when master coherence request sent but not answered
+    logic             coh_takn_mb; // master coherence request taken by AXI
 
     /* instruction cache */
     cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
@@ -338,12 +339,14 @@ module mmu #(
     always_comb dc_miss_m = 0;
     always_ff @(posedge clk) if (rst) begin
         axi_stt       <= 0;
+        coh_takn_mb   <= 0;
         m_axi_arvalid <= 0;
         m_axi_awvalid <= 0;
         m_axi_rready  <= 0;
         m_axi_wvalid  <= 0;
         m_axi_bready  <= 0;
     end else begin
+        if (|coh_takn_mb & fl(axi_req)) coh_takn_mb <= 0;
         case (axi_stt)
             0: // initial state
                 if (|coh_resp_sb & ~fl(coh_resp_sb)) begin
@@ -368,6 +371,7 @@ module mmu #(
                     axi_buf       <= coh_wdat_mb;
                     m_axi_araddr  <= coh_addr_mb;
                     m_axi_arlen   <= 7;
+                    coh_takn_mb   <= 1;
                 end else if (|dc_rqst_f & dc_byps_f & ~fl(dc_rqst_f)) begin
                     axi_stt       <= 1;
                     axi_cnt       <= 0;
@@ -427,7 +431,7 @@ module mmu #(
             5: // waiting for B handshake
                 if (m_axi_bvalid) {m_axi_bready, axi_stt} <= 6;
             6: // transaction done, ready for response
-                if (~|axi_thr | axi_thr == s_dc_resp | axi_fls) axi_stt <= 0;
+                if (~|axi_thr | axi_thr == s_dc_resp | axi_fls) {coh_takn_mb, axi_stt} <= 0;
         endcase
     end
     always_ff @(posedge clk) if (rst | axi_stt == 6)     axi_fls <= 0;
@@ -471,8 +475,8 @@ module mmu #(
         end
         if (|m_coh_rqst) m_coh_rqst <= 0; // hold for one cycle for port
     end
-    always_ff @(posedge clk) if (rst | |m_coh_resp | |coh_resp_mb)       coh_flsh_mb <= 0;
-        else if (fl(coh_rqst_mb) & ~(|axi_stt & axi_req == coh_rqst_mb)) coh_flsh_mb <= 1;
+    always_ff @(posedge clk) if (rst | |m_coh_resp | |coh_resp_mb) coh_flsh_mb <= 0;
+        else if (fl(coh_rqst_mb) & ~coh_takn_mb)                   coh_flsh_mb <= 1;
     always_ff @(posedge clk)
         if (rst) {coh_rqst_sb, coh_resp_sb} <= 0;
         else if (~|coh_rqst_sb) begin // buffer vacant

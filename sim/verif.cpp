@@ -397,176 +397,13 @@ void memory::posedge()
 {
     /* handle HTIF requests */
     uint64_t reqaddr = 0;
-    if (owner[htifaddr.tohost >> 6]) // tohost out-of-date
+    if (owner[htifaddr.tohost >> 6] || owner[htifaddr.fromhost]) // buffer out-of-date
+        thbusy = 1;                                              // start handling HTIF
+    if (thbusy)
     {
-        reqaddr = htifaddr.tohost >> 6;
-        thbusy = 1;
-    }
-    else if (owner[htifaddr.fromhost >> 6]) // fromhost out-of-date
-        reqaddr = htifaddr.fromhost >> 6;
-    else
-    {
-        uint64_t tohost_dev = (*this)[htifaddr.tohost + 7];
-        uint64_t tohost_cmd = (*this)[htifaddr.tohost + 6];
-        uint64_t tohost_dat = this->ui64(htifaddr.tohost) & 0xffffffffffff;
-        if (tohost_dev == 0 && tohost_cmd == 0)
-        {
-            if (tohost_dat & 1) // exit
-                htifexit = this->ui64(htifaddr.tohost);
-            else if (tohost_dat != 0) // proxied ststem call
-            {
-                uint64_t magic_mem = tohost_dat, which = this->ui64(magic_mem);
-                uint64_t retval = 0;
-                for (int i = 0; i < 8; i++)
-                    if (owner[magic_mem + i * 8 >> 6])
-                        reqaddr = magic_mem + i * 8 >> 6;
-                if (reqaddr)
-                    ;
-                else if (which == 0x38) // sysopenat
-                {
-                    uint64_t arg0, arg1, arg2, arg3, arg4;
-                    arg0 = this->ui64(magic_mem + 8);  // directory file descriptor
-                    arg1 = this->ui64(magic_mem + 16); // filename
-                    arg2 = this->ui64(magic_mem + 24); // filename size
-                    arg3 = this->ui64(magic_mem + 32); // flags
-                    arg4 = this->ui64(magic_mem + 40); // mode
-                    for (int i = 0; i < arg2; i++)
-                        if (owner[arg1 + i >> 6])
-                            reqaddr = arg1 + i >> 6;
-                    if (!reqaddr)
-                        retval = openat(arg0, (char *)&(*this)[arg1], arg3, arg4);
-                }
-                else if (which == 0x39) // sysclose
-                {
-                    uint64_t arg0;
-                    arg0 = this->ui64(magic_mem + 8); // file descriptor
-                    retval = close(arg0);
-                }
-                else if (which == 0x3e) // syslseek
-                {
-                    uint64_t arg0, arg1, arg2;
-                    arg0 = this->ui64(magic_mem + 8);  // file descriptor
-                    arg1 = this->ui64(magic_mem + 16); // pointer
-                    arg2 = this->ui64(magic_mem + 24); // directive
-                    retval = lseek(arg0, arg1, arg2);
-                }
-                else if (which == 0x3f) // sysread
-                {
-                    uint64_t arg0, arg1, arg2;
-                    arg0 = this->ui64(magic_mem + 8);  // file descriptor
-                    arg1 = this->ui64(magic_mem + 16); // memory address
-                    arg2 = this->ui64(magic_mem + 24); // max read size
-                    for (int i = 0; i < arg2; i++)
-                        if (owner[arg1 + i >> 6])
-                            reqaddr = arg1 + i >> 6;
-                    if (!reqaddr)
-                    {
-                        retval = read(arg0, &(*this)[arg1], arg2);
-                        smem->add(arg2, arg1);
-                        memcpy(&(*smem)[arg1], &(*this)[arg1], retval);
-                    }
-                }
-                else if (which == 0x40) // syswrite
-                {
-                    uint64_t arg0, arg1, arg2;
-                    arg0 = this->ui64(magic_mem + 8);  // file descriptor
-                    arg1 = this->ui64(magic_mem + 16); // memory address
-                    arg2 = this->ui64(magic_mem + 24); // write size
-                    fflush(NULL);
-                    if (arg0 = 2)
-                        arg0 = 1; // redirect stderr of program to stdout for debugging
-                    for (int i = 0; i < arg2; i++)
-                        if (owner[arg1 + i >> 6])
-                            reqaddr = arg1 + i >> 6;
-                    if (!reqaddr)
-                        retval = write(arg0, &(*this)[arg1], arg2);
-                }
-                else if (which == 0x43) // syspread
-                {
-                    uint64_t arg0, arg1, arg2, arg3;
-                    arg0 = this->ui64(magic_mem + 8);  // file descriptor
-                    arg1 = this->ui64(magic_mem + 16); // memory address
-                    arg2 = this->ui64(magic_mem + 24); // read size
-                    arg3 = this->ui64(magic_mem + 32); // read offset
-                    for (int i = 0; i < arg2; i++)
-                        if (owner[arg1 + i >> 6])
-                            reqaddr = arg1 + i >> 6;
-                    if (!reqaddr)
-                    {
-                        retval = pread(arg0, &(*smem)[arg1], arg2, arg3);
-                        retval = pread(arg0, &(*this)[arg1], arg2, arg3);
-                    }
-                }
-                else if (which == 0x50) // sysfstat
-                {
-                    uint64_t arg0, arg1;
-                    arg0 = this->ui64(magic_mem + 8);  // file descriptor
-                    arg1 = this->ui64(magic_mem + 16); // memory address
-                    retval = fstat(arg0, (struct stat *)&(*this)[arg1]);
-                    for (int i = 0; i < sizeof(struct stat); i++)
-                        if (owner[arg1 + i >> 6])
-                            reqaddr = arg1 + i >> 6;
-                    if (!reqaddr)
-                        fstat(arg0, (struct stat *)&(*smem)[arg1]);
-                }
-                else if (which == 0x5d) // exit
-                    htifexit = (this->ui64(magic_mem + 8) << 1) | 1;
-                else if (which == 0x7db) // pk-sysgetmainvars
-                {
-                    // buffer format: argc(64) argv[0](64) argv[1](64) ...
-                    uint64_t arg0, arg1;
-                    arg0 = this->ui64(magic_mem + 8);  // argument buffer address
-                    arg1 = this->ui64(magic_mem + 16); // argument buffer size
-                    for (int i = 0; i < arg1; i++)
-                        if (owner[arg0 + i >> 6])
-                            reqaddr = arg0 + i >> 6;
-                    if (!reqaddr)
-                    {
-                        this->ui64(arg0) = args.size();
-                        smem->ui64(arg0) = args.size();
-                        uint64_t addr = arg0 + (args.size() + 1) * 8;
-                        for (int i = 0; i < args.size(); i++)
-                        {
-                            this->ui64(arg0 + (i + 1) * 8) = addr;
-                            smem->ui64(arg0 + (i + 1) * 8) = addr;
-                            if (addr - arg0 + strlen(args[i]) + 1 <= arg1)
-                            {
-                                memcpy(&(*this)[addr], args[i], strlen(args[i]) + 1);
-                                memcpy(&(*smem)[addr], args[i], strlen(args[i]) + 1);
-                            }
-                            addr += strlen(args[i]) + 1;
-                        }
-                        if (addr - arg0 >= arg1)
-                            retval = -1;
-                    }
-                }
-                else
-                    fprintf(stderr, "[Info] Unhandled proxied system call 0x%lx\n", which);
-                if (!reqaddr)
-                {
-                    this->ui64(magic_mem) = retval;
-                    smem->ui64(magic_mem) = retval;
-                    this->ui64(htifaddr.fromhost) = 1;
-                    smem->ui64(htifaddr.fromhost) = 1;
-                }
-            }
-        }
-        else if (tohost_dev == 1 && tohost_cmd == 1) // console write
-            putchar(tohost_dat), fflush(stdout);
-        else if (tohost_dev == 1 && tohost_cmd == 0) // console_read
-            ;
-        else
-        {
-            fprintf(stderr, "[Info] Unrecognized HTIF command:  dev: 0x%lx  cmd: 0x%lx  data: 0x%lx\n",
-                    tohost_dev, tohost_cmd, tohost_dat);
-            htifexit = 3;
-        }
-        if (!reqaddr)
-        {
-            this->ui64(htifaddr.tohost) = 0;
-            smem->ui64(htifaddr.tohost) = 0;
+        htifexit = htif(*this, htifaddr, args, smem, &owner, &reqaddr);
+        if (!reqaddr) // HTIF requests handled
             thbusy = 0;
-        }
     }
 
     /* handle coherence interface */
@@ -2150,11 +1987,22 @@ void apply(state_t &s, delta_t d)
  * @param mem memory working on
  * @param addr HTIF addressed
  * @param pmem memory pointer that also require processing
+ * @param owner owner of cache line (zero means valid)
+ * @param pval pointer of invalid address
  * @return tohost exit call value ((code << 1) | 1)
  */
-uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, memory *pmem)
+uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, memory *pmem,
+              std::map<uint64_t, uint8_t> *owner, uint64_t *pval)
 {
+    /* check whether memory is up-to-date for host machine to support coherece */
+    if (pval)
+        *pval = 0;
+#define owner_check(addr)                       \
+    if (owner && pval && (*owner)[(addr) >> 6]) \
+    return *pval = (addr) >> 6, 0
     /* handle HTIF requests */
+    owner_check(addr.tohost);
+    owner_check(addr.fromhost);
     uint64_t tohost_dev = mem[addr.tohost + 7];
     uint64_t tohost_cmd = mem[addr.tohost + 6];
     uint64_t tohost_dat = mem.ui64(addr.tohost) & 0xffffffffffff;
@@ -2166,6 +2014,8 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
         {
             uint64_t magic_mem = tohost_dat, which = mem.ui64(magic_mem);
             uint64_t retval = 0;
+            for (int i = 0; i < 8; i++)
+                owner_check(magic_mem + i * 8);
             if (which == 0x38) // sysopenat
             {
                 uint64_t arg0, arg1, arg2, arg3, arg4;
@@ -2174,6 +2024,8 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
                 arg2 = mem.ui64(magic_mem + 24); // filename size
                 arg3 = mem.ui64(magic_mem + 32); // flags
                 arg4 = mem.ui64(magic_mem + 40); // mode
+                for (int i = 0; i < arg2; i++)
+                    owner_check(arg1 + i);
                 retval = openat(arg0, (char *)&mem[arg1], arg3, arg4);
             }
             else if (which == 0x39) // sysclose
@@ -2196,10 +2048,12 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
                 arg0 = mem.ui64(magic_mem + 8);  // file descriptor
                 arg1 = mem.ui64(magic_mem + 16); // memory address
                 arg2 = mem.ui64(magic_mem + 24); // max read size
+                for (int i = 0; i < arg2; i++)
+                    owner_check(arg1 + i);
                 retval = read(arg0, &mem[arg1], arg2);
                 if (pmem)
                 {
-                    pmem->add(1, arg1);
+                    pmem->add(arg2, arg1);
                     memcpy(&(*pmem)[arg1], &mem[arg1], retval);
                 }
             }
@@ -2212,6 +2066,8 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
                 fflush(NULL);
                 if (arg0 = 2)
                     arg0 = 1; // redirect stderr of program to stdout for debugging
+                for (int i = 0; i < arg2; i++)
+                    owner_check(arg1 + i);
                 retval = write(arg0, &mem[arg1], arg2);
             }
             else if (which == 0x43) // syspread
@@ -2221,6 +2077,8 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
                 arg1 = mem.ui64(magic_mem + 16); // memory address
                 arg2 = mem.ui64(magic_mem + 24); // read size
                 arg3 = mem.ui64(magic_mem + 32); // read offset
+                for (int i = 0; i < arg2; i++)
+                    owner_check(arg1 + i);
                 if (pmem)
                     retval = pread(arg0, &(*pmem)[arg1], arg2, arg3);
                 retval = pread(arg0, &mem[arg1], arg2, arg3);
@@ -2231,6 +2089,8 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
                 arg0 = mem.ui64(magic_mem + 8);  // file descriptor
                 arg1 = mem.ui64(magic_mem + 16); // memory address
                 retval = fstat(arg0, (struct stat *)&mem[arg1]);
+                for (int i = 0; i < sizeof(struct stat); i++)
+                    owner_check(arg1 + i);
                 if (pmem)
                     fstat(arg0, (struct stat *)&(*pmem)[arg1]);
             }
@@ -2242,6 +2102,8 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
                 uint64_t arg0, arg1;
                 arg0 = mem.ui64(magic_mem + 8);  // argument buffer address
                 arg1 = mem.ui64(magic_mem + 16); // argument buffer size
+                for (int i = 0; i < arg1; i++)
+                    owner_check(arg0 + i);
                 mem.ui64(arg0) = pkargs.size();
                 if (pmem)
                     pmem->ui64(arg0) = pkargs.size();
