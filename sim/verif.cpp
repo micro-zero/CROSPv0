@@ -324,7 +324,7 @@ uint8_t &memory::operator[](uint64_t addr)
 }
 
 /**
- * @brief Copy object from another object
+ * @brief Copy object from another object (port part is not copied)
  * @param b another object
  * @return self object
  */
@@ -389,6 +389,153 @@ void memory::negedge() {}
  * @brief Record state
  */
 void memory::record() {}
+
+/**
+ * @brief Save to checkpoint file
+ * @param fn checkpoint file name
+ */
+void memory::checkpoint(const char *fn)
+{
+    FILE *fp = fopen(fn, "wb");
+    if (!fp)
+        return;
+    uint64_t buf;
+    buf = base.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    for (int i = 0; i < buf; i++)
+    {
+        fwrite(&base[i], sizeof(base[i]), 1, fp);
+        fwrite(&size[i], sizeof(size[i]), 1, fp);
+        fwrite(ptr[i], size[i], 1, fp);
+    }
+    fwrite(&axiport, sizeof(axiport), 1, fp);
+    fwrite(&axibuff, sizeof(axibuff), 1, fp);
+    fwrite(&rbursti, sizeof(rbursti), 1, fp);
+    fwrite(&wbursti, sizeof(wbursti), 1, fp);
+    fwrite(&scrqstr, sizeof(scrqstr), 1, fp);
+    fwrite(&mcrqstr, sizeof(mcrqstr), 1, fp);
+    fwrite(&scaddrr, sizeof(scaddrr), 1, fp);
+    fwrite(&mctrscr, sizeof(mctrscr), 1, fp);
+    fwrite(&mcaddrr, sizeof(mcaddrr), 1, fp);
+    fwrite(&scsent, sizeof(scsent), 1, fp);
+    fwrite(&thbusy, sizeof(thbusy), 1, fp);
+    buf = owner.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    for (auto iter : owner)
+    {
+        fwrite(&iter.first, sizeof(iter.first), 1, fp);
+        fwrite(&iter.second, sizeof(iter.second), 1, fp);
+    }
+    fwrite(&scrqst, sizeof(scrqst), 1, fp);
+    fwrite(&mcrqst, sizeof(mcrqst), 1, fp);
+    fwrite(&sctrsc, sizeof(sctrsc), 1, fp);
+    fwrite(&mctrsc, sizeof(mctrsc), 1, fp);
+    fwrite(&scresp, sizeof(scresp), 1, fp);
+    fwrite(&mcresp, sizeof(mcresp), 1, fp);
+    fwrite(&scmesi, sizeof(scmesi), 1, fp);
+    fwrite(&mcmesi, sizeof(mcmesi), 1, fp);
+    fwrite(&scaddr, sizeof(scaddr), 1, fp);
+    fwrite(&mcaddr, sizeof(mcaddr), 1, fp);
+    fwrite(&entry, sizeof(entry), 1, fp);
+    fwrite(&hexsz, sizeof(hexsz), 1, fp);
+    fwrite(&dtbaddr, sizeof(dtbaddr), 1, fp);
+    fwrite(&initrdaddr, sizeof(initrdaddr), 1, fp);
+    fwrite(&uartaddr, sizeof(uartaddr), 1, fp);
+    fwrite(&htifaddr, sizeof(htifaddr), 1, fp);
+    buf = args.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    for (int i = 0; i < buf; i++)
+    {
+        uint64_t l = strlen(args[i]);
+        fwrite(&l, sizeof(l), 1, fp);
+        fwrite(args[i], l, 1, fp);
+    }
+    fwrite(&smem, sizeof(smem), 1, fp);
+    fwrite(&htifexit, sizeof(htifexit), 1, fp);
+    fclose(fp);
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @return -1 if error occurs
+ */
+int memory::restore(const char *fn)
+{
+    FILE *fp = fopen(fn, "rb");
+    if (!fp)
+        return -1;
+    uint64_t buf;
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        uint64_t b, s;
+        if (fread(&b, sizeof(b), 1, fp) < 0 ||
+            fread(&s, sizeof(s), 1, fp) < 0)
+            return -1;
+        add(s, b);
+        if (fread(&this->ui8(b), s, 1, fp) < 0)
+            return -1;
+    }
+    if (fread(&axiport, sizeof(axiport), 1, fp) < 0 ||
+        fread(&axibuff, sizeof(axibuff), 1, fp) < 0 ||
+        fread(&rbursti, sizeof(rbursti), 1, fp) < 0 ||
+        fread(&wbursti, sizeof(wbursti), 1, fp) < 0 ||
+        fread(&scrqstr, sizeof(scrqstr), 1, fp) < 0 ||
+        fread(&mcrqstr, sizeof(mcrqstr), 1, fp) < 0 ||
+        fread(&scaddrr, sizeof(scaddrr), 1, fp) < 0 ||
+        fread(&mctrscr, sizeof(mctrscr), 1, fp) < 0 ||
+        fread(&mcaddrr, sizeof(mcaddrr), 1, fp) < 0 ||
+        fread(&scsent, sizeof(scsent), 1, fp) < 0 ||
+        fread(&thbusy, sizeof(thbusy), 1, fp) < 0 ||
+        fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        uint64_t f;
+        uint8_t s;
+        if (fread(&f, sizeof(f), 1, fp) < 0 ||
+            fread(&s, sizeof(s), 1, fp) < 0)
+            return -1;
+        owner[f] = s;
+    }
+    if (fread(&scrqst, sizeof(scrqst), 1, fp) < 0 ||
+        fread(&mcrqst, sizeof(mcrqst), 1, fp) < 0 ||
+        fread(&sctrsc, sizeof(sctrsc), 1, fp) < 0 ||
+        fread(&mctrsc, sizeof(mctrsc), 1, fp) < 0 ||
+        fread(&scresp, sizeof(scresp), 1, fp) < 0 ||
+        fread(&mcresp, sizeof(mcresp), 1, fp) < 0 ||
+        fread(&scmesi, sizeof(scmesi), 1, fp) < 0 ||
+        fread(&mcmesi, sizeof(mcmesi), 1, fp) < 0 ||
+        fread(&scaddr, sizeof(scaddr), 1, fp) < 0 ||
+        fread(&mcaddr, sizeof(mcaddr), 1, fp) < 0 ||
+        fread(&entry, sizeof(entry), 1, fp) < 0 ||
+        fread(&hexsz, sizeof(hexsz), 1, fp) < 0 ||
+        fread(&dtbaddr, sizeof(dtbaddr), 1, fp) < 0 ||
+        fread(&initrdaddr, sizeof(initrdaddr), 1, fp) < 0 ||
+        fread(&uartaddr, sizeof(uartaddr), 1, fp) < 0 ||
+        fread(&htifaddr, sizeof(htifaddr), 1, fp) < 0 ||
+        fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        uint64_t s;
+        if (fread(&s, sizeof(s), 1, fp) < 0)
+            return -1;
+        char *b = new char[s + 1]; // todo: memory here will leak
+        if (!b)
+            return -1;
+        args.push_back(b);
+        if (fread(b, s, 1, fp) < 0)
+            return -1;
+        b[s] = 0;
+    }
+    if (fread(&smem, sizeof(smem), 1, fp) < 0 ||
+        fread(&htifexit, sizeof(htifexit), 1, fp) < 0)
+        return -1;
+    fclose(fp);
+    return 0;
+}
 
 /**
  * @brief Update AXI states and output for next cycle
@@ -1046,7 +1193,6 @@ delta_t next(state_t &s)
     delta_t ret;
     ret.level = s.level;
     ret.gprw = ret.memw = 0;
-    ret.ldlocal = 0;
 
     /* interrupt */
     bool mintena = s.level < 3 || s.level == 3 && s.csr["mstatus"][3];
@@ -1428,8 +1574,6 @@ delta_t next(state_t &s)
             ret.gprv = (int64_t)(int32_t)ret.gprv;
         else if (funct3 == 0b110) // LWU
             ret.gprv = (uint32_t)ret.gprv;
-        ret.ldlocal = 1 << (funct3 & 3);
-        ret.ldaddr = pa;
         break;
     case 0b0000111: // LOAD-FP
         if (!fs)

@@ -162,7 +162,7 @@ to build images and this may take some time.
 To run Buildroot image, we should bypass HTIF registers to
 handle console requests. Run
 ```
-make PWD=2 -j8
+make TOHOST=800421b8 FRHOST=800421b0 -j8
 ```
 for example to build simulation with a dual-issue core.
 

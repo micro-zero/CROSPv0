@@ -16,7 +16,164 @@ typedef struct
 int interrupt = 0;
 void intrhandler(int) { fprintf(stderr, "[Info] Interrupted\n"), interrupt = 1; }
 
-bool check(delta_t del, delta_t ref, memory &localmem)
+int restore(uint64_t &cycle, uint64_t &instret, state_t &sim, cmts_t &cmts, dels_t &dels,
+            axidev *&master, axidev *&slave, const char *fn, std::vector<axidev *> dev, memory &amem)
+{
+    FILE *fp = fopen(fn, "rb");
+    uint64_t buf;
+    if (fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
+        fread(&instret, sizeof(instret), 1, fp) < 0 ||
+        fread(&sim.pc, sizeof(sim.pc), 1, fp) < 0 ||
+        fread(&sim.ir, sizeof(sim.ir), 1, fp) < 0)
+        return -1;
+    sim.mem = amem;
+    if (fread(&sim.level, sizeof(sim.level), 1, fp) < 0 ||
+        fread(&sim.gpr, sizeof(sim.gpr), 1, fp) < 0 ||
+        fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        uint64_t l;
+        if (fread(&l, sizeof(l), 1, fp) < 0)
+            return -1;
+        char *s = new (std::nothrow) char[l + 1];
+        if (!s)
+            return -1;
+        s[l] = 0;
+        if (fread(s, l, 1, fp) < 0 ||
+            fread(&sim.csr[s], sizeof(sim.csr[s]), 1, fp) < 0)
+            return -1;
+        delete[] s;
+    }
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        uint64_t f;
+        uint8_t s;
+        if (fread(&f, sizeof(f), 1, fp) < 0 ||
+            fread(&s, sizeof(s), 1, fp) < 0)
+            return -1;
+        sim.rsrv[f] = s;
+    }
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        cmt_t c;
+        if (fread(&c, sizeof(c), 1, fp) < 0)
+            return -1;
+        cmts.push(c);
+    }
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        del_t d;
+        if (fread(&d, sizeof(d), 1, fp) < 0)
+            return -1;
+        dels.gprs.push(d);
+    }
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        del_t d;
+        if (fread(&d, sizeof(d), 1, fp) < 0)
+            return -1;
+        dels.mems.push(d);
+    }
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        del_t d;
+        if (fread(&d, sizeof(d), 1, fp) < 0)
+            return -1;
+        dels.csrs.push(d);
+    }
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    master = (int64_t)buf >= 0 ? dev.at(buf) : NULL;
+    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+        return -1;
+    slave = (int64_t)buf >= 0 ? dev.at(buf) : NULL;
+    fclose(fp);
+    return 0;
+}
+
+void checkpoint(uint64_t &cycle, uint64_t &instret, state_t &sim, cmts_t cmts, dels_t dels,
+                axidev *&master, axidev *&slave, const char *fn, std::vector<axidev *> dev)
+{
+    FILE *fp = fopen(fn, "wb");
+    uint64_t buf;
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fwrite(&instret, sizeof(instret), 1, fp);
+    fwrite(&sim.pc, sizeof(sim.pc), 1, fp);
+    fwrite(&sim.ir, sizeof(sim.ir), 1, fp);
+    fwrite(&sim.level, sizeof(sim.level), 1, fp);
+    fwrite(&sim.gpr, sizeof(sim.gpr), 1, fp);
+    buf = sim.csr.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    for (auto iter : sim.csr)
+    {
+        uint64_t l = iter.first.length();
+        fwrite(&l, sizeof(l), 1, fp);
+        fwrite(iter.first.c_str(), l, 1, fp);
+        fwrite(&iter.second, sizeof(iter.second), 1, fp);
+    }
+    fwrite(&(buf = sim.rsrv.size()), sizeof(buf), 1, fp);
+    for (auto iter : sim.rsrv)
+    {
+        fwrite(&iter.first, sizeof(iter.first), 1, fp);
+        fwrite(&iter.second, sizeof(iter.second), 1, fp);
+    }
+    buf = cmts.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    while (!cmts.empty())
+    {
+        cmt_t c = cmts.front();
+        fwrite(&c, sizeof(c), 1, fp);
+        cmts.pop();
+    }
+    buf = dels.gprs.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    while (!dels.gprs.empty())
+    {
+        del_t d = dels.gprs.front();
+        fwrite(&d, sizeof(d), 1, fp);
+        dels.gprs.pop();
+    }
+    buf = dels.mems.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    while (!dels.mems.empty())
+    {
+        del_t d = dels.mems.front();
+        fwrite(&d, sizeof(d), 1, fp);
+        dels.mems.pop();
+    }
+    buf = dels.csrs.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    while (!dels.csrs.empty())
+    {
+        del_t d = dels.csrs.front();
+        fwrite(&d, sizeof(d), 1, fp);
+        dels.csrs.pop();
+    }
+    uint64_t index = -1;
+    for (uint64_t i = 0; i < dev.size(); i++)
+        if (master == dev.at(i))
+            index = i;
+    fwrite(&index, sizeof(index), 1, fp);
+    index = -1;
+    for (uint64_t i = 0; i < dev.size(); i++)
+        if (slave == dev.at(i))
+            index = i;
+    fwrite(&index, sizeof(index), 1, fp);
+    fclose(fp);
+}
+
+bool check(delta_t del, delta_t ref)
 {
     if (del.level != ref.level || del.pc != ref.pc)
         return false;
@@ -27,11 +184,7 @@ bool check(delta_t del, delta_t ref, memory &localmem)
     if (del.gprw != ref.gprw || del.memw != ref.memw)
         return false;
     if (del.gprw && (del.gpra != ref.gpra || del.gprv != ref.gprv))
-        if (!(ref.ldlocal && del.gprv == localmem.ui64(ref.ldaddr)))
-            /* in load value axiom of RVWMO, the load value can be not only the global
-               memory value, but also local store value
-               this could happen when setting HTIF fromhost by host machine */
-            return false;
+        return false;
     if (del.memw && (del.mema != ref.mema || del.memv != ref.memv))
         return false;
     ref.csr.erase("mcycle");
@@ -97,8 +250,6 @@ int main(int argc, char *argv[])
             cmd.args.push_back(cmd.file = argv[i]);
         else
             cmd.args.push_back(argv[i]);
-    if (!cmd.help && cmd.file == NULL)
-        printf("Not enough arguments\n"), cmd.help = 1;
     if (cmd.help)
     {
         printf("Usage: exec [options] file [arguments]\n");
@@ -115,34 +266,50 @@ int main(int argc, char *argv[])
         printf("    -w: output waveform\n");
         return 0;
     }
-    fprintf(stderr, "[Info] Running simulation in %s mode with:\n[Info]     ",
-            cmd.filetype == MEMINIT_ELF ? "elf" : (cmd.filetype == MEMINIT_HEX ? "hex" : "bin"));
-    for (int i = 0; i < cmd.args.size(); i++)
-        fprintf(stderr, " %s", cmd.args[i]);
-    fprintf(stderr, "\n");
+    if (cmd.file == NULL)
+    {
+        printf("[Info] No input file specified, trying to recover from checkpoint\n");
+        printf("[Info] If help needed, please use -h option\n");
+    }
+    else
+    {
+        fprintf(stderr, "[Info] Running simulation in %s mode with:\n[Info]     ",
+                cmd.filetype == MEMINIT_ELF ? "elf" : (cmd.filetype == MEMINIT_HEX ? "hex" : "bin"));
+        for (int i = 0; i < cmd.args.size(); i++)
+            fprintf(stderr, " %s", cmd.args[i]);
+        fprintf(stderr, "\n");
+    }
     if (cmd.vcd)
         fprintf(stderr, "[Info] Recording waveform in files: vcore.vcd, intc.vcd\n");
 
     /* Device registration */
     memory amem;
-    verifcore vrcr(cmd.vcd ? "vcore.vcd" : NULL, cmd.sim ? "vcore.save" : NULL);
-    intctl intc(cmd.vcd ? "intc.vcd" : NULL, cmd.sim ? "intc.save" : NULL);
+    verifcore vrcr(cmd.vcd ? "vcore.vcd" : NULL);
+    intctl intc(cmd.vcd ? "intc.vcd" : NULL);
     std::vector<axidev *> dev({&amem, &vrcr, &intc}); // AXI device references
-    const char *err = amem.init(
-        cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, cmd.args, RST_PC, DTBADDR, INITRD, UART);
+    const char *err = 0;
+    if (cmd.file) // init memory from file
+    {
+        err = amem.init(cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, cmd.args,
+                        RST_PC, DTBADDR, INITRD, UART);
+        if (cmd.dump)
+        {
+            fprintf(stderr, "[Info] Dumping memory to file: %s\n", cmd.dump);
+            FILE *fp = fopen(cmd.dump, "wb");
+            if (!fp)
+                return fprintf(stderr, "[Error] Cannot open file %s\n", cmd.dump), 255;
+            for (int i = 0; i < 0x4000000; i++)
+                fwrite(&amem[(INITRD - 0x80000000 + i) % 0x40000000 + 0x80000000], 1, 1, fp);
+            fclose(fp);
+            fprintf(stderr, "[Info] Memory dumped\n");
+        }
+    }
+    else if (amem.restore("mem.save") < 0 || // init memory and DUTs from checkpoint
+             vrcr.restore("vcore.save") < 0 ||
+             intc.restore("intc.save") < 0)
+        err = "[Error] Failed to recover from checkpoint\n";
     if (err)
         return fputs(err, stderr), 255;
-    if (cmd.dump)
-    {
-        fprintf(stderr, "[Info] Dumping memory to file: %s\n", cmd.dump);
-        FILE *fp = fopen(cmd.dump, "wb");
-        if (!fp)
-            return fprintf(stderr, "[Error] Cannot open file %s\n", cmd.dump), 255;
-        for (int i = 0; i < 0x4000000; i++)
-            fwrite(&amem[(INITRD - 0x80000000 + i) % 0x40000000 + 0x80000000], 1, 1, fp);
-        fclose(fp);
-        fprintf(stderr, "[Info] Memory dumped\n");
-    }
 
     /* Simulation */
     uint64_t cycle = 0, instret = 0, checkpc = 0, checkir = 0;
@@ -151,15 +318,18 @@ int main(int argc, char *argv[])
     dels_t dels;
     const char *exitcause = NULL;
     uint8_t exitcode = 0;
-    uint8_t len = 0;
     axidev *master = NULL, *slave = NULL;
     axiport_t zero;
-    memory localmem = amem; // record local store values
     state_t sim;
     sim.pc = amem.entry, sim.mem = amem, sim.csr["mtime"] = CLINT + 0xbff8;
     amem.smem = &sim.mem;
     memset(&zero, 0, sizeof(zero));
     signal(SIGINT, intrhandler);
+    if (!cmd.file)
+        if (restore(cycle, instret, sim, cmts, dels, master, slave, "main.save", dev, amem) < 0)
+            return fputs("[Error] Failed to recover from checkpoint\n", stderr), 255;
+        else
+            fprintf(stderr, "[Info] Checkpoint loaded at cycle: %ld\n", cycle);
     while (!exitcause)
     {
         /* reset */
@@ -187,9 +357,9 @@ int main(int argc, char *argv[])
             uint64_t addr;
             axiport_t vap = vrcr;
             if (vap.arvalid)
-                master = &vrcr, addr = vap.araddr, len = vap.arlen;
+                master = &vrcr, addr = vap.araddr;
             else if (vap.awvalid)
-                master = &vrcr, addr = vap.awaddr, len = vap.awlen;
+                master = &vrcr, addr = vap.awaddr;
             if (master) // classify destinations by address
             {
                 slave = &amem;
@@ -205,7 +375,7 @@ int main(int argc, char *argv[])
         {
             *slave << *master, *master <= *slave; // synchronization between AXI objects
             axiport_t ap = *master;
-            if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && (ap.rlast || !len))
+            if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && ap.rlast)
                 master = slave = 0; // current transaction finished
         }
         vrcr.scrqst = amem.scrqst; // VCORE -- MEM
@@ -307,7 +477,7 @@ int main(int argc, char *argv[])
                 }
                 else if (delsim.memw >> 4 == 0xc) // DUT consider SC as normal store
                     del.memw = delsim.memw;
-                if (!check(del, delsim, localmem))
+                if (!check(del, delsim))
                 {
                     fprintf(stderr, "[Debug] ------ Difference detected ------\n");
                     fprintf(stderr, "[Debug] DUT/SIM:\n");
@@ -326,7 +496,6 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "[Debug] ---------------------------------\n");
                     exitcause = "checking failure", exitcode = 255;
                 }
-                localmem.ui64(del.mema) = del.memv;
                 apply(sim, del);
             }
             emptycycle = 0;
@@ -353,7 +522,14 @@ int main(int argc, char *argv[])
 
         /* record checkpoint */
         if (cycle % 1000000 == 0)
-            fprintf(stderr, "[Info] Checkpoint: cycle %ld: pc: 0x%lx ir: 0x%lx\n", cycle, checkpc, checkir);
+        {
+            amem.checkpoint("mem.save");
+            vrcr.checkpoint("vcore.save");
+            intc.checkpoint("intc.save");
+            checkpoint(cycle, instret, sim, cmts, dels, master, slave, "main.save", dev);
+            fprintf(stderr, "[Info] Checkpoint recorded [cycle: %ld  pc: 0x%lx  ir: 0x%lx]\n",
+                    cycle, checkpc, checkir);
+        }
     }
 
     /* Clean and exit */

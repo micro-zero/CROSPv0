@@ -73,6 +73,8 @@ public:
     virtual void negedge() = 0;
     virtual void posedge() = 0;
     virtual void record() = 0;
+    virtual void checkpoint(const char *fn) = 0;
+    virtual int restore(const char *fn) = 0;
     virtual operator axiport_t() const = 0;
     virtual axidev &operator<<(const axiport_t &ap);
     virtual axidev &operator<=(const axiport_t &ap);
@@ -134,6 +136,8 @@ public:
     void negedge();
     void posedge();
     void record();
+    void checkpoint(const char *fn);
+    int restore(const char *fn);
     uint8_t &ui8(uint64_t addr);
     uint16_t &ui16(uint64_t addr);
     uint32_t &ui32(uint64_t addr);
@@ -170,8 +174,6 @@ typedef struct
     uint64_t gpra, mema;
     uint64_t gprv, memv;
     std::map<std::string, bits> csr;
-    uint8_t ldlocal; // possibly load local store in load axiom of RVWMO
-    uint64_t ldaddr;
 } delta_t;
 
 uint64_t paddr(memory &mem, bits satp, bits vaddr, bits perm = 0, bool adpf = 1);

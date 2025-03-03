@@ -219,7 +219,7 @@ module vcore #(
             del_csra = del_csra + 12'h200; // sstatus, sip, sie
         if (del_csra >= 12'hc00 && del_csra <= 12'hc02)
             del_csra = del_csra - 12'h100; // cycle, time, instret
-        del_memw = inst.dc_resp[7:4] == 4'b1111 & inst.dc_miss[7:5] != 3'b111 ? st_size[3'(inst.dc_resp)] : 0;
+        del_memw = inst.dc_resp[7:4] == 4'b1111 & ~|inst.dc_miss ? st_size[3'(inst.dc_resp)] : 0;
         del_mema = st_addr[3'(inst.dc_resp)];
         del_memv = st_data[3'(inst.dc_resp)];
     end
@@ -276,20 +276,13 @@ module vcore #(
             if (inst.com_inst.dec_last.jal)    jmisp  <= jmisp + 1;
             if (inst.com_inst.dec_last.jalr)   jrmisp <= jrmisp + 1;
         end else if (|inst.fe_inst.redir)  fmisp  <= fmisp + 1;
-    // always_ff @(posedge clk) if (rst) loads <= 0; else loads <= loads +
-    //     (inst.dc_rqst[0][7] & ~|inst.dc_strb[0] ? 1 : 0) +
-    //     (inst.dc_rqst[1][7] & ~|inst.dc_strb[1] ? 1 : 0);
-    // always_ff @(posedge clk) if (rst) stores <= 0; else stores <= stores +
-    //     (inst.dc_rqst[0][7] & |inst.dc_strb[0] ? 1 : 0) +
-    //     (inst.dc_rqst[1][7] & |inst.dc_strb[1] ? 1 : 0);
-    // always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (|inst.mmu_inst.axi_done)  dcmiss <= dcmiss + 1;
-    // always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.dc_done[9]) icmiss <= icmiss + 1;
-    // always_ff @(posedge clk) if (rst) stmiss <= 0;
-    //     else if (inst.mmu_inst.ptw_done & ~|inst.mmu_inst.stlb_done) stmiss <= stmiss + 1;
-    // always_ff @(posedge clk) if (rst) itmiss <= 0;
-    //     else if (inst.mmu_inst.stlb_done[0] & ~inst.mmu_inst.itlb_done[7]) itmiss <= itmiss + 1;
-    // always_ff @(posedge clk) if (rst) dtmiss <= 0;
-    //     else if (inst.mmu_inst.stlb_done[1] & ~inst.mmu_inst.dtlb_done[7]) dtmiss <= dtmiss + 1;
+    always_ff @(posedge clk) if (rst) loads  <= 0; else if (|inst.dc_rqst & ~|inst.dc_strb) loads <= loads  + 1;
+    always_ff @(posedge clk) if (rst) stores <= 0; else if (|inst.dc_rqst & |inst.dc_strb) stores <= stores + 1;
+    always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.icache.mshr_out) icmiss <= icmiss + 1;
+    always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (inst.mmu_inst.dcache.mshr_out) dcmiss <= dcmiss + 1;
+    always_ff @(posedge clk) if (rst) itmiss <= 0; else if (inst.mmu_inst.itlb.fill)       itmiss <= itmiss + 1;
+    always_ff @(posedge clk) if (rst) dtmiss <= 0; else if (inst.mmu_inst.dtlb.fill)       dtmiss <= dtmiss + 1;
+    always_ff @(posedge clk) if (rst) stmiss <= 0; else if (inst.mmu_inst.stlb.fill)       stmiss <= stmiss + 1;
 
     /* assertion */
     always_comb assert(inst.dec_inst.opnum <= inst.dec_inst.opsz);

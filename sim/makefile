@@ -9,8 +9,12 @@ PWD     = 4
 INITRD  = be000000 # same as in DTB
 RST_PC  = 81fff000
 DTBADDR = 81ffe000 # limited to 4KB
-TOHOST  = 800421b8
-FRHOST  = 800421b0
+ifndef TOHOST
+	TOHOST = 0
+endif
+ifndef FRHOST
+	FRHOST = 0
+endif
 DCBASE  = 80000000
 UART    = 10000000
 CLINT   = 02000000
@@ -134,4 +138,4 @@ sim : sim.o verif.o
 	$(CXX) -O2 sim.o verif.o -o sim
 
 clean :
-	$(RM) -r main sim *.o *.vcd *.save .[A-z]*/
+	$(RM) -r main sim *.o *.vcd *.save *.save.[0-9]* .[A-z]*/

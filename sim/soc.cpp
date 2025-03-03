@@ -9,20 +9,17 @@
  * @param fnvcd filename of waveform
  * @param fnsave filename of saved checkpoint
  */
-verifcore::verifcore(const char *fnvcd, const char *fnsave)
+verifcore::verifcore(const char *fnvcd)
 {
     st = cycle = 0;
     st = cycle = 0;
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
-    save = fnsave ? new (std::nothrow) VerilatedSave : NULL;
     if (vcd)
     {
         Verilated::traceEverOn(true);
         dut.trace(vcd, 5);
         vcd->open(fnvcd);
     }
-    if (save)
-        save->open(fnsave);
 }
 
 /**
@@ -32,10 +29,7 @@ verifcore::~verifcore()
 {
     if (vcd)
         vcd->close();
-    if (save)
-        save->close();
     delete vcd;
-    delete save;
 }
 
 /**
@@ -183,6 +177,65 @@ void verifcore::record()
         vcd->dump(st);
 }
 
+/**
+ * @brief Save to checkpoint file
+ * @param fn filename of checkpoint
+ */
+void verifcore::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn filename of checkpoint
+ * @return -1 if error occurs
+ */
+int verifcore::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) < 0 ||
+        fread(&cycle, sizeof(cycle), 1, fp) < 0)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
+}
+
 /*-----------------------------------------------------------*\
 |*                   Interrupt controller                    *|
 \*-----------------------------------------------------------*/
@@ -192,20 +245,17 @@ void verifcore::record()
  * @param fnvcd filename of waveform
  * @param fnsave filename of saved checkpoint
  */
-intctl::intctl(const char *fnvcd, const char *fnsave)
+intctl::intctl(const char *fnvcd)
 {
     st = cycle = 0;
     wrec = {0, 0, 0};
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
-    save = fnsave ? new (std::nothrow) VerilatedSave : NULL;
     if (vcd)
     {
         Verilated::traceEverOn(true);
         dut.trace(vcd, 5);
         vcd->open(fnvcd);
     }
-    if (save)
-        save->open(fnsave);
 }
 
 /**
@@ -215,10 +265,7 @@ intctl::~intctl()
 {
     if (vcd)
         vcd->close();
-    if (save)
-        save->close();
     delete vcd;
-    delete save;
 }
 
 /**
@@ -324,4 +371,67 @@ void intctl::record()
 {
     if (vcd)
         vcd->dump(st);
+}
+
+/**
+ * @brief Save to checkpoint file
+ * @param fn checkpoint file name
+ */
+void intctl::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fwrite(&wrec, sizeof(wrec), 1, fp);
+    fwrite(&raddr, sizeof(raddr), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn checkpoint file name
+ * @return -1 if error occurs
+ */
+int intctl::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) < 0 ||
+        fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
+        fread(&wrec, sizeof(wrec), 1, fp) < 0 ||
+        fread(&raddr, sizeof(raddr), 1, fp) < 0)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
 }

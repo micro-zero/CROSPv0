@@ -208,11 +208,11 @@ module lsu #(
             end
             /* access entries */
             for (int i = 0; i < mwd; i++) begin
-                if (dc_resp[i][7:5] == 3'b111 & dc_miss[i][7:5] != 3'b111)
+                if (|dc_resp[i] & ~|dc_miss[i])
                     for (int j = 0; j < sqsz; j++) if (dc_resp[i] == sq_miss[j]) sq_miss[j] <= 0;
-                if (dc_resp[i][7:4] == 4'b1111 & dc_miss[i][7:5] == 3'b111) // cache miss
+                if (dc_resp[i][7:4] == 4'b1111 & |dc_miss[i]) // cache miss
                     sq_miss[$clog2(sqsz)'(dc_resp[i])] <= dc_miss[i];
-                if (dc_resp[i][7:4] == 4'b1111 & dc_miss[i][7:5] != 3'b111) sq_accsd[sq_front] <= 1; // store entry
+                if (dc_resp[i][7:4] == 4'b1111 & ~|dc_miss[i]) sq_accsd[sq_front] <= 1; // store entry
             end
             /* SC fails */
             if (sc_fail) sq_accsd[sq_front] <= 1;
@@ -310,7 +310,7 @@ module lsu #(
         for (int i = 0; i < lqsz; i++) lq_to_chckd[i] = lq_trans[i] & ~|lq_chck[i];
         for (int i = 0; i < lqsz; i++) lq_to_accsd[i] = |lq_chck[i] & ~lq_accsd[i];
         for (int i = 0; i < lqsz; i++)
-            if (lq_chck[i] == 2'b01 & lq_stid[i] != sq_front | lq_miss[i][7:5] == 3'b111) lq_to_accsd[i] = 0;
+            if (lq_chck[i] == 2'b01 & lq_stid[i] != sq_front | |lq_miss[i]) lq_to_accsd[i] = 0;
         /* do some forwarding */
         for (int i = 0; i < mwd; i++) if (dt_resp[i][7:4] == 4'b1100) lq_to_trans[$clog2(lqsz)'(dt_resp[i])] = 0;
         for (int i = 0; i < mwd; i++) if (dt_resp[i][7:4] == 4'b1100) lq_to_chckd[$clog2(lqsz)'(dt_resp[i])] = 1;
@@ -319,7 +319,7 @@ module lsu #(
             if (ck_rslt[i] != 1 | lq_stid[$clog2(lqsz)'(ck_resp[i])] == sq_front)
                 lq_to_accsd[$clog2(lqsz)'(ck_resp[i])] = 1;
         for (int i = 0; i < mwd; i++) if (dc_resp[i][7:4] == 4'b1110) lq_to_accsd[$clog2(lqsz)'(dc_resp[i])] = 0;
-        for (int i = 0; i < mwd; i++) if (dc_resp[i][7:4] == 4'b1110 & dc_miss[i][7:5] != 3'b111)
+        for (int i = 0; i < mwd; i++) if (dc_resp[i][7:4] == 4'b1110 & ~|dc_miss[i])
             lq_to_exect[$clog2(lqsz)'(dc_resp[i])] = 1;
         for (int i = 0; i < mwd; i++) if (ck_resp[i][7:4] == 4'b1110 & ck_forw[i][64])
             lq_to_exect[$clog2(lqsz)'(ck_resp[i])] = 1;
@@ -404,11 +404,11 @@ module lsu #(
             end
             /* access entries */
             for (int i = 0; i < mwd; i++) begin
-                if (dc_resp[i][7:5] == 3'b111 & dc_miss[i][7:5] != 3'b111) begin
+                if (|dc_resp[i] & ~|dc_miss[i]) begin
                     for (int j = 0; j < lqsz; j++) if (dc_resp[i] == lq_miss[j]) lq_miss[j] <= 0;
                     if (dc_resp[i][7:4] == 4'b1110) lq_accsd[$clog2(lqsz)'(dc_resp[i])] <= 1; // load entry
                 end
-                if (dc_resp[i][7:4] == 4'b1110 & dc_miss[i][7:5] == 3'b111) // cache miss
+                if (dc_resp[i][7:4] == 4'b1110 & |dc_miss[i]) // cache miss
                     lq_miss[$clog2(lqsz)'(dc_resp[i])] <= dc_miss[i];
             end
             /* output execution bundles */
@@ -509,8 +509,8 @@ module lsu #(
         forw[i] = 0;
         bits[i] = 0;
         uncertain = 0;
-        for (int j = 0; j < sqsz; j++) // find previous store operations
-            if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front)
+        for (int j = 0; j < sqsz; j++) if (~sq_fence[32'(sq_front) + j] & ~sq_csr[32'(sq_front) + j])
+            if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front) // find previous store operations
                 /* when SQ is full, SQ index may be same for load instructions those
                     before all store instructions and those after all instructions,
                     so that there should be one entry to be left for avoidance of this,
@@ -522,16 +522,16 @@ module lsu #(
                         rslt[i] = 'b11;
                         bits[i] = lq_bits[$clog2(lqsz)'(lq_pos_chckd[i])];
                         forw[i] = {1'b1, sq_wdat[32'(sq_front) + j] >> (6'(ck_padd[i][2:0]) << 3)};
-                    end else {forw[i], rslt[i]} = 'b01;
+                    end else rslt[i] = 2'b01;
         for (int j = 0; j < lqsz; j++) // find previous load operations
             if ($clog2(lqsz)'(j) < $clog2(lqsz)'(lq_pos_chckd[i]) - lq_front)
                 if (~lq_trans[32'(lq_front) + j]) uncertain = 1;
-                else if (lq_padd[32'(lq_front) + j][63:3] == ck_padd[i][63:3])
-                    {forw[i], rslt[i]} = 'b01; // CoRR
-        if (uncertain & rslt[i] == 'b11) rslt[i] = 'b10; // succeeding untranslated entries
-        if (ck_aqrl[i][0])               rslt[i] = 'b01; // release bit
-        for (int j = 0; j < sqsz; j++)                   // acquire bit
-            if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front) if (sq_aqrl[32'(sq_front) + j][1]) rslt[i] = 'b01;
+                else if (lq_padd[32'(lq_front) + j][63:3] == ck_padd[i][63:3]) rslt[i] = 2'b01; // CoRR
+        if (uncertain & rslt[i] == 'b11) rslt[i] = 2'b10; // succeeding untranslated entries
+        if (ck_aqrl[i][0])               rslt[i] = 2'b01; // release bit
+        for (int j = 0; j < sqsz; j++)                    // acquire bit
+            if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front) if (sq_aqrl[32'(sq_front) + j][1]) rslt[i] = 2'b01;
+        if (rslt[i] == 2'b01) forw[i] = 0;
     end
     always_ff @(posedge clk) if (rst | flush) ck_resp <= 0;
         else for (int i = 0; i < mwd; i++)
@@ -583,7 +583,7 @@ module lsu #(
     always_comb begin
         dc_rqst = 0; dc_addr = 0; dc_strb = 0; dc_wdat = 0; dc_num = 0;
         if (~nextldid[7] & nextstid[7] & next_front == $clog2(sqsz)'(nextstid)) begin
-            if (sq_trans[next_front] & sq_miss[next_front][7:5] != 3'b111 & ~sq_accsd[next_front]) begin
+            if (sq_trans[next_front] & ~|sq_miss[next_front] & ~sq_accsd[next_front]) begin
                 dc_rqst[0] = {3'b111, 1'b1, 4'(next_front)};
                 dc_addr[0] = sq_padd[next_front];
                 dc_strb[0] = sq_strb[next_front];
@@ -618,7 +618,7 @@ module lsu #(
     /* arbitrate execution results */
     logic store_resp; // indicating a store response with data
     always_comb ready = 1;
-    always_comb store_resp = dc_resp[0][7:4] == 4'b1111 & dc_miss[0][7:5] != 3'b111;
+    always_comb store_resp = dc_resp[0][7:4] == 4'b1111 & ~|dc_miss[0];
     always_comb begin
         exe_bundle = 0; sq_exe = 0; lq_exe = 0;
         if (sq_valid[sq_front] & (sq_accsd[sq_front] | store_resp)) begin
@@ -640,7 +640,7 @@ module lsu #(
                         lq_raddr[i] == $clog2(lqsz)'(ck_resp[j])) begin
                     exe_bundle[32'(sq_exe) + 32'(lq_exe)].prdv   = ck_forw[j][63:0];
                     exe_bundle[32'(sq_exe) + 32'(lq_exe)].specul = ck_rslt[j] == 2'b10;
-                end else if (dc_resp[j][7:4] == 4'b1110 & dc_miss[j][7:5] != 3'b111 &
+                end else if (dc_resp[j][7:4] == 4'b1110 & ~|dc_miss[j] &
                         lq_raddr[i] == $clog2(lqsz)'(dc_resp[j]))
                     exe_bundle[32'(sq_exe) + 32'(lq_exe)].prdv = lq_rdat_wvalue[j];
             if ($clog2(lqsz)'(lq_pos_exect[i]) == lq_front & lq_succ)

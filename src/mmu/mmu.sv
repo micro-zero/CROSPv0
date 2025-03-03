@@ -5,7 +5,6 @@
  */
 
 module mmu #(
-    parameter mwd    = 1,           // memory width
     parameter tohost = 64'h0,       // bypassed tohost address
     parameter frhost = 64'h0,       // bypassed fromhost address
     parameter dcbase = 64'h80000000 // base address of cacheable memory
@@ -246,7 +245,7 @@ module mmu #(
     always_comb ic_ready = ~|ic_rqst_b | ic_rqst_b == ic_resp_m;
     always_comb ic_rqst_f = ic_ready ? ic_rqst_m : ic_rqst_b;
     always_comb ic_addr_f = ic_ready ? ic_addr_m : ic_addr_b;
-    always_comb ic_resp_m = dc_resp_s[7:6] == 2'b10 ? dc_resp_s : 0;
+    always_comb ic_resp_m = dc_resp_s;
     always_comb ic_miss_m = dc_miss_s;
     always_comb ic_ofst_m = dc_ofst_s;
     always_comb ic_rdat_m = dc_rdat_s;
@@ -431,7 +430,8 @@ module mmu #(
             5: // waiting for B handshake
                 if (m_axi_bvalid) {m_axi_bready, axi_stt} <= 6;
             6: // transaction done, ready for response
-                if (~|axi_thr | axi_thr == s_dc_resp | axi_fls) {coh_takn_mb, axi_stt} <= 0;
+                if (~|axi_thr | axi_thr == s_dc_resp | fl(axi_req) | fl(axi_thr) | axi_fls)
+                    {coh_takn_mb, axi_stt} <= 0;
         endcase
     end
     always_ff @(posedge clk) if (rst | axi_stt == 6)     axi_fls <= 0;
@@ -520,7 +520,7 @@ module mmu #(
         dc_addr_s = 0; dc_wdat_s = 0;
         dc_trsc_s = 0;
     end
-    always_comb if (dc_resp_s[7:6] == 2'b11) begin
+    always_comb if (|dc_resp_s) begin
         s_dc_resp = dc_resp_s;
         s_dc_miss = dc_miss_s;
         s_dc_rdat = dc_rdat_s[6'(dc_ofst_s)+7-:8];
