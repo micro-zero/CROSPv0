@@ -602,7 +602,7 @@ module lsu #(
         end
         if (sq_rsrv[next_front][0] & (~sc_succ | |sq_out)) {dc_num, dc_rqst[0]} = 0;
         for (int i = 0; i < mwd; i++) // cancel request when responsed
-            if (dc_resp[i][7:4] == 4'b1111 & dc_resp[i][3:0] == 4'(sq_front)) {dc_num, dc_rqst[0]} = 0;
+            if (dc_resp[i][7:4] == 4'b1111 & dc_resp[i][3:0] == 4'(next_front)) {dc_num, dc_rqst[0]} = 0;
         for (int i = 0; i < mwd; i++) if (lq_pos_accsd[i][$clog2(lqsz)]) begin // LQ entry to access
             if (dc_num >= mwd) break;
             dc_rqst[dc_num] = {3'b111, 1'b0, 4'(lq_pos_accsd[i][$clog2(lqsz)-1:0])};

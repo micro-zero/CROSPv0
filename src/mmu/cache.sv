@@ -57,8 +57,11 @@ module cache #(
     logic [chn-1:0]        [63:0] b_addr, f_addr;
     logic [chn-1:0][blk-1:0][7:0] b_wdat, f_wdat;
     logic [chn-1:0]               b_ready;
-    logic read; // mark normal read at last cycle
-    always_comb for (int i = 0; i < chn; i++) b_ready[i] = ~|b_rqst[i] | |s_resp[i];
+    logic [chn-1:0]               mshr_rej;        // MSHR reject a missed request
+    logic [chn-1:0]               miss_under_miss; // miss under miss
+    logic                         read;            // mark normal read at last cycle
+    always_comb for (int i = 0; i < chn; i++) b_ready[i] = ~|b_rqst[i] | |s_resp[i] | mshr_rej[i];
+    /* MSHR rejection should make the buffer writable to avoid deadlock */
     always_comb for (int i = 0; i < chn; i++) begin
         f_rqst[i] = b_ready[i] ? s_rqst[i] : b_rqst[i];
         f_trsc[i] = b_ready[i] ? s_trsc[i] : b_trsc[i];
@@ -71,7 +74,7 @@ module cache #(
             if (fl(b_rqst[i]))  b_rqst[i] <= 0;
             if (|s_resp[i])     b_rqst[i] <= 0;
             if (i == 0 & |b_strb[0]     & read) b_strb[0] <= 0;
-            if (i == 0 & b_trsc[0] == 1 & read) b_trsc[0] <= 0;// other GetV
+            if (i == 0 & b_trsc[0] == 1 & read) b_trsc[0] <= 0; // other GetV
             /* only one request can be buffered until response in a channel */
             if (|s_rqst[i] & b_ready[i] & ~fl(s_rqst[i])) begin
                 b_rqst[i] <= s_rqst[i];
@@ -93,7 +96,7 @@ module cache #(
     logic [chn-1:0][$clog2(mshrsz):0] mshr_in;
     logic          [$clog2(mshrsz):0] mshr_pend;
     logic          [$clog2(mshrsz):0] mshr_done;
-    logic miss_under_miss, mshr_out;
+    logic mshr_out;
     firstk #(.width(mshrsz), .k(chn)) mshr_i_inst(.bits(~mshr_valid), .pos(mshr_in));
     firstk #(.width(mshrsz), .k(1))   mshr_p_inst(.bits(mshr_pend_bits), .pos(mshr_pend));
     firstk #(.width(mshrsz), .k(1))   mshr_o_inst(.bits(mshr_valid & mshr_ready), .pos(mshr_done));
@@ -104,7 +107,7 @@ module cache #(
     always_ff @(posedge clk) if (rst) mshr_valid <= 0;
         else begin
             for (int i = 0; i < mshrsz; i++) if (fl(mshr_rqst[i])) mshr_valid[i] <= 0;
-            for (int i = 0; i < chn; i++) if (|s_resp[i] & |s_miss[i] & ~|b_trsc[i] & ~miss_under_miss) begin
+            for (int i = 0; i < chn; i++) if (|s_resp[i] & |s_miss[i] & ~|b_trsc[i] & ~miss_under_miss[i]) begin
                 mshr_valid[$clog2(mshrsz)'(mshr_in[i])] <= ~fl(b_rqst[i]);
                 mshr_ready[$clog2(mshrsz)'(mshr_in[i])] <= 0;
                 mshr_rqst[$clog2(mshrsz)'(mshr_in[i])] <= b_rqst[i];
@@ -244,6 +247,8 @@ module cache #(
     end
 
     /* slave interface */
+    always_comb for (int i = 0; i < chn; i++)
+        mshr_rej[i] = ~set_hitpos[i][$clog2(way)] & ~mshr_in[i][$clog2(mshrsz)] & ~miss_under_miss[i];
     always_comb begin
         miss_under_miss = 0;
         for (int i = 0; i < chn; i++) begin
@@ -253,10 +258,10 @@ module cache #(
             s_rdat[i] = set_hitrdat[i];
             for (int j = 0; j < mshrsz; j++)
                 if (mshr_valid[j] & mshr_addr[j][63:$clog2(blk)] == b_addr[i][63:$clog2(blk)])
-                    {miss_under_miss, s_miss[i]} = {1'b1, mshr_rqst[j]};                  // miss-under-miss
-            if (set_hitpos[i][$clog2(way)] & |b_strb[0])     s_resp[i] = 0;               // write request
-            if (set_hitpos[i][$clog2(way)] & b_trsc[0] == 1) s_resp[i] = 0;               // other GetV
-            if (~set_hitpos[i][$clog2(way)] & ~mshr_in[i][$clog2(mshrsz)]) s_resp[i] = 0; // MSHR full
+                    {miss_under_miss[i], s_miss[i]} = {1'b1, mshr_rqst[j]}; // miss-under-miss
+            if (set_hitpos[i][$clog2(way)] & |b_strb[0])     s_resp[i] = 0; // write request
+            if (set_hitpos[i][$clog2(way)] & b_trsc[0] == 1) s_resp[i] = 0; // other GetV
+            if (mshr_rej[i]) s_resp[i] = 0;                                 // MSHR full
         end
         /* cache tag and miss situation are stale when line being
            filled, so that the result in filling cycle is invalid */
