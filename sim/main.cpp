@@ -17,16 +17,26 @@ int interrupt = 0;
 void intrhandler(int) { fprintf(stderr, "[Info] Interrupted\n"), interrupt = 1; }
 
 int restore(uint64_t &cycle, uint64_t &instret, state_t &sim, cmts_t &cmts, dels_t &dels,
-            axidev *&master, axidev *&slave, const char *fn, std::vector<axidev *> dev, memory &amem)
+            axidev *&master, axidev *&slave, const char *fn, std::vector<axidev *> dev)
 {
     FILE *fp = fopen(fn, "rb");
     uint64_t buf;
     if (fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
         fread(&instret, sizeof(instret), 1, fp) < 0 ||
         fread(&sim.pc, sizeof(sim.pc), 1, fp) < 0 ||
-        fread(&sim.ir, sizeof(sim.ir), 1, fp) < 0)
+        fread(&sim.ir, sizeof(sim.ir), 1, fp) < 0 ||
+        fread(&buf, sizeof(buf), 1, fp) < 0)
         return -1;
-    sim.mem = amem;
+    for (int i = 0; i < buf; i++)
+    {
+        uint64_t b, s;
+        if (fread(&b, sizeof(b), 1, fp) < 0 ||
+            fread(&s, sizeof(s), 1, fp) < 0)
+            return -1;
+        sim.mem.add(s, b);
+        if (fread(&sim.mem.ui8(b), s, 1, fp) < 0)
+            return -1;
+    }
     if (fread(&sim.level, sizeof(sim.level), 1, fp) < 0 ||
         fread(&sim.gpr, sizeof(sim.gpr), 1, fp) < 0 ||
         fread(&buf, sizeof(buf), 1, fp) < 0)
@@ -111,6 +121,14 @@ void checkpoint(uint64_t &cycle, uint64_t &instret, state_t &sim, cmts_t cmts, d
     fwrite(&instret, sizeof(instret), 1, fp);
     fwrite(&sim.pc, sizeof(sim.pc), 1, fp);
     fwrite(&sim.ir, sizeof(sim.ir), 1, fp);
+    buf = sim.mem.base.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    for (int i = 0; i < buf; i++)
+    {
+        fwrite(&sim.mem.base[i], sizeof(sim.mem.base[i]), 1, fp);
+        fwrite(&sim.mem.size[i], sizeof(sim.mem.size[i]), 1, fp);
+        fwrite(sim.mem.ptr[i], sim.mem.size[i], 1, fp);
+    }
     fwrite(&sim.level, sizeof(sim.level), 1, fp);
     fwrite(&sim.gpr, sizeof(sim.gpr), 1, fp);
     buf = sim.csr.size();
@@ -304,7 +322,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "[Info] Memory dumped\n");
         }
     }
-    else if (amem.restore("mem.save") < 0 || // init memory and DUTs from checkpoint
+    else if (amem.restore("amem.save") < 0 || // init memory and DUTs from checkpoint
              vrcr.restore("vcore.save") < 0 ||
              intc.restore("intc.save") < 0)
         err = "[Error] Failed to recover from checkpoint\n";
@@ -321,15 +339,16 @@ int main(int argc, char *argv[])
     axidev *master = NULL, *slave = NULL;
     axiport_t zero;
     state_t sim;
-    sim.pc = amem.entry, sim.mem = amem, sim.csr["mtime"] = CLINT + 0xbff8;
     amem.smem = &sim.mem;
     memset(&zero, 0, sizeof(zero));
     signal(SIGINT, intrhandler);
     if (!cmd.file)
-        if (restore(cycle, instret, sim, cmts, dels, master, slave, "main.save", dev, amem) < 0)
+        if (restore(cycle, instret, sim, cmts, dels, master, slave, "main.save", dev) < 0)
             return fputs("[Error] Failed to recover from checkpoint\n", stderr), 255;
         else
             fprintf(stderr, "[Info] Checkpoint loaded at cycle: %ld\n", cycle);
+    else
+        sim.pc = amem.entry, sim.mem = amem, sim.csr["mtime"] = CLINT + 0xbff8;
     while (!exitcause)
     {
         /* reset */
@@ -523,7 +542,7 @@ int main(int argc, char *argv[])
         /* record checkpoint */
         if (cycle % 1000000 == 0)
         {
-            amem.checkpoint("mem.save");
+            amem.checkpoint("amem.save");
             vrcr.checkpoint("vcore.save");
             intc.checkpoint("intc.save");
             checkpoint(cycle, instret, sim, cmts, dels, master, slave, "main.save", dev);

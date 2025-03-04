@@ -408,9 +408,9 @@ module mmu #(
                     axi_stt <= 4;
                     m_axi_awvalid <= 0;
                     m_axi_wvalid  <= 1;
-                    m_axi_wdata   <= axi_buf[7:0];
+                    m_axi_wdata   <= axi_buf[m_axi_awaddr[5:0]+7-:8];
                     m_axi_wlast   <= 0;
-                    m_axi_wstrb   <= axi_str[7:0];
+                    m_axi_wstrb   <= axi_str[m_axi_awaddr[5:0]+7-:8];
                     axi_cnt       <= axi_cnt + 8;
                 end
             4: // address sent, transferring data

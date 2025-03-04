@@ -2097,6 +2097,14 @@ delta_t next(state_t &s)
  */
 void apply(state_t &s, delta_t d)
 {
+#ifdef TOHOST
+    if (d.mema == TOHOST)
+        d.memw = 0;
+#endif
+#ifdef FRHOST
+    if (d.mema == FRHOST)
+        d.memw = 0;
+#endif
     s.pc = d.pc;
     s.level = d.level;
     if (d.gprw)

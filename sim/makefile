@@ -137,5 +137,8 @@ pk : main
 sim : sim.o verif.o
 	$(CXX) -O2 sim.o verif.o -o sim
 
+tar:
+	tar cf $(PREFIX).save.tar *.save *.save.[0-9]*
+
 clean :
 	$(RM) -r main sim *.o *.vcd *.save *.save.[0-9]* .[A-z]*/

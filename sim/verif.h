@@ -90,9 +90,6 @@ public:
 class memory : public axidev
 {
 private:
-    std::vector<uint64_t> base;        // segment base address list
-    std::vector<uint64_t> size;        // segment size list
-    std::vector<uint8_t *> ptr;        // segment pointer list
     uint64_t segfault;                 // returned entity when segfault
     axiport_t axiport;                 // AXI port
     axiport_t axibuff;                 // AXI value buffer
@@ -106,6 +103,9 @@ private:
     char errstr[128];                  // error string
 
 public:
+    std::vector<uint64_t> base;     // segment base address list
+    std::vector<uint64_t> size;     // segment size list
+    std::vector<uint8_t *> ptr;     // segment pointer list
     uint8_t scrqst, mcrqst;         // coherence request ports
     uint8_t sctrsc, mctrsc;         // coherence transaction ports
     uint8_t scresp, mcresp;         // coherence response ports
