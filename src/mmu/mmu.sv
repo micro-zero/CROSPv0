@@ -5,6 +5,7 @@
  */
 
 module mmu #(
+    parameter init   = 0,           // initialize RAMs
     parameter tohost = 64'h0,       // bypassed tohost address
     parameter frhost = 64'h0,       // bypassed fromhost address
     parameter dcbase = 64'h80000000 // base address of cacheable memory
@@ -143,7 +144,7 @@ module mmu #(
     logic  [7:0] dt_resp_m;
     logic  [7:0] dt_perm_m;
     logic [63:0] dt_padd_m;
-    tlb #(.chn(1), .set(2), .way(16)) dtlb (
+    tlb #(.init(init), .chn(1), .set(2), .way(16)) dtlb (
         .clk(clk), .rst(rst | fncv),
         .flmask(flmask), .flrqst(flrqst),
         .s_rqst(s_dt_rqst), .m_rqst(dt_rqst_m),
@@ -164,7 +165,7 @@ module mmu #(
     logic             st_ready;
     logic       [7:0] st_rqst_b, st_rqst_f;
     logic      [63:0] st_vadd_b, st_vadd_f;
-    tlb #(.chn(2), .set(64), .way(8)) stlb (
+    tlb #(.init(init), .chn(2), .set(64), .way(8)) stlb (
         .clk(clk), .rst(rst | fncv),
         .flmask(flmask), .flrqst(flrqst),
         .s_rqst({dt_rqst_m, it_rqst_m}), .m_rqst(st_rqst_m),
@@ -219,7 +220,7 @@ module mmu #(
     logic             coh_takn_mb; // master coherence request taken by AXI
 
     /* instruction cache */
-    cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
+    cache #(.init(init), .chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
         .clk(clk), .rst(rst | fnci), .rid(0),
         .flmask(flmask), .flrqst(flrqst),
         .s_trsc(ic_trsc_s), .m_trsc(ic_trsc_m),
@@ -254,7 +255,7 @@ module mmu #(
     always_ff @(posedge clk) ic_offset <= ic_addr_s[5:0];
 
     /* data cache */
-    cache #(.chn(1), .set(64), .way(8), .blk(64), .mshrsz(4)) dcache (
+    cache #(.init(init), .chn(1), .set(64), .way(8), .blk(64), .mshrsz(4)) dcache (
         .clk(clk), .rst(rst), .rid(8'b0000_0010),
         .flmask(flmask), .flrqst(flrqst),
         .s_trsc(dc_trsc_s), .m_trsc(dc_trsc_m),

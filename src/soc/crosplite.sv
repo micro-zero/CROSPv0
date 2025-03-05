@@ -243,7 +243,7 @@ module crosplite #(
     logic  [7:0] dc_resp; logic  [7:0] ic_resp;
     logic [63:0] dc_rdat; logic [63:0] ic_rdat;
     logic  [7:0] dc_miss;
-    mmu #(.tohost(tohost), .frhost(frhost), .dcbase(dcbase)) mmu_inst(
+    mmu #(.init(init), .tohost(tohost), .frhost(frhost), .dcbase(dcbase)) mmu_inst(
         .clk(clk), .rst(rst), .fnci(fnci), .fncv(fncv),
         .s_dt_rqst(dt_rqst), .s_it_rqst(it_rqst),
         .s_dt_vadd(dt_vadd), .s_it_vadd(it_vadd),

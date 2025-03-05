@@ -174,7 +174,8 @@ module lsu #(
     always_ff @(posedge clk) if (rst) {topstid, topldid} <= 0;
         else {topstid, topldid} <= {nextstid, nextldid};
     always_ff @(posedge clk) if (rst | flush)
-            {sq_valid, sq_csr, sq_fence, sq_trans, sq_accsd, sq_rsrv, sq_aqrl, sq_pgft, sq_misa} <= 0;
+            {sq_valid, sq_csr, sq_fence, sq_flush, sq_trans, sq_accsd,
+             sq_rsrv, sq_aqrl, sq_pgft, sq_misa, sq_miss} <= 0;
         else begin
             /* virtual address calculated */
             for (int i = 0; i < iwd; i++)

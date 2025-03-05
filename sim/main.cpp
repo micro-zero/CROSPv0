@@ -540,7 +540,7 @@ int main(int argc, char *argv[])
         emptycycle++;
 
         /* record checkpoint */
-        if (cycle % 1000000 == 0)
+        if (cycle % 10000000 == 0)
         {
             amem.checkpoint("amem.save");
             vrcr.checkpoint("vcore.save");

@@ -4,9 +4,10 @@
  */
 
 module tlb #(
-    parameter chn = 1,  // request channel width
-    parameter set = 64, // number of sets
-    parameter way = 8   // number of ways
+    parameter init = 0,  // initialize RAMs
+    parameter chn  = 1,  // request channel width
+    parameter set  = 64, // number of sets
+    parameter way  = 8   // number of ways
 )(
     input  logic       clk,    // clock signal
     input  logic       rst,    // reset signal
@@ -129,4 +130,6 @@ module tlb #(
             s_perm[i] = 0; // page fault from high level
         end
     end
+
+    if (init) initial for (int i = 0; i < set; i++) tlb_ptr[i] = 0;
 endmodule

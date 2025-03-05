@@ -4,6 +4,7 @@
  */
 
 module cache #(
+    parameter init   = 0,  // initialize RAMs
     parameter chn    = 1,  // request channel width
     parameter set    = 64, // number of sets
     parameter way    = 8,  // number of ways
@@ -166,13 +167,13 @@ module cache #(
         set_hitmask = 0;
         if (mshr_done[$clog2(mshrsz)])
             for (int i = 0; i < blk; i++) if (mshr_strb[$clog2(mshrsz)'(mshr_done)][i]) begin
-                set_hitmask[$clog2(blk)'(i)] = 8'hff;
-                set_hitwdat[$clog2(blk)'(i)] = mshr_wdat[$clog2(mshrsz)'(mshr_done)][i];
+                set_hitmask[i] = 8'hff;
+                set_hitwdat[i] = mshr_wdat[$clog2(mshrsz)'(mshr_done)][i];
             end
         if (~mshr_done[$clog2(mshrsz)])
             for (int i = 0; i < blk; i++) if (b_strb[0][i]) begin
-                set_hitmask[$clog2(blk)'(i)] = 8'hff;
-                set_hitwdat[$clog2(blk)'(i)] = b_wdat[0][i];
+                set_hitmask[i] = 8'hff;
+                set_hitwdat[i] = b_wdat[0][i];
             end
     end
     always_comb begin
@@ -211,7 +212,7 @@ module cache #(
         set_dirty[i] <= dirty[index[i]];
     end
     always_ff @(posedge clk)
-        if (~rst & mshr_done[$clog2(mshrsz)] & ~fill[$clog2(set)]) begin
+        if (~rst & mshr_done[$clog2(mshrsz)] & ~fill[$clog2(set)] & ~|rep_rqst) begin
             fill     <= {1'b1, index[0]};
             fill_wea <= |mshr_strb[$clog2(mshrsz)'(mshr_done)];
             fill_tag <= mshr_addr[$clog2(mshrsz)'(mshr_done)] >> $clog2(blk);
@@ -273,4 +274,6 @@ module cache #(
             s_miss[0] = 0;
         end
     end
+
+    if (init) initial for (int i = 0; i < set; i++) ptr[i] = 0;
 endmodule

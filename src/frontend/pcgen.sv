@@ -75,5 +75,5 @@ module pcgen #(
         end
     end
 
-    initial for (int i = 0; i < phtsz; i++) pht[i] = 0;
+    if (init) initial for (int i = 0; i < phtsz; i++) pht[i] = 0;
 endmodule
