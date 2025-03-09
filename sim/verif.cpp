@@ -544,8 +544,8 @@ void memory::posedge()
 {
     /* handle HTIF requests */
     uint64_t reqaddr = 0;
-    if (owner[htifaddr.tohost >> 6] || owner[htifaddr.fromhost]) // buffer out-of-date
-        thbusy = 1;                                              // start handling HTIF
+    if (owner[htifaddr.tohost >> 6] || owner[htifaddr.fromhost >> 6]) // buffer out-of-date
+        thbusy = 1;                                                   // start handling HTIF
     if (thbusy)
     {
         htifexit = htif(*this, htifaddr, args, smem, &owner, &reqaddr);
@@ -631,8 +631,10 @@ void memory::posedge()
     axiport.rdata = this->ui64(axibuff.araddr + rbursti * 8);
     char ch;
     static std::queue<char> chbuf;
-    if ((ch = nbgetchar()) != EOF)
+#ifdef FRHOST
+    if (FRHOST && (ch = nbgetchar()) != EOF)
         chbuf.push(ch);
+#endif
     if (axibuff.araddr == uartaddr) // UART-lite Rx/Tx FIFO
         if (!chbuf.empty())
             axiport.rdata = chbuf.front(), chbuf.pop();
