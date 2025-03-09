@@ -32,6 +32,9 @@ module lsu #(
     input  logic        csr_excp, // CSR exception
     input  logic [63:0] csr_rdat, // CSR reading data
     input  logic        csr_flsh, // CSR flush signal
+    /* MMU flush interface */
+    input  logic [7:0] flmask, // flush mask
+    input  logic [7:0] flrqst, // flush request
     /* DTLB interface */
     output logic [mwd-1:0] [7:0] dt_rqst, // DTLB request ID
     output logic [mwd-1:0][63:0] dt_vadd, // DTLB response ID
@@ -69,6 +72,12 @@ module lsu #(
     end
     always_comb for (int i = 0; i < iwd; i++) func_load [i] = $bits(lsu_funct_t)'(req_load [i].funct);
     always_comb for (int i = 0; i < iwd; i++) func_store[i] = $bits(lsu_funct_t)'(req_store[i].funct);
+
+    /* flush function (see cache.sv):
+     *   flush function here is to reset missing state in load/store queue,
+     *   for the missing ID is possibly flushed when `s_dc_flsh` is zero in
+     *   the miss-under-miss situation */
+    function logic fl(input logic [7:0] req); fl = |req & (req & ~flmask) == (flrqst & ~flmask); endfunction
 
     /* store queue */
     logic [$clog2(sqsz)-1:0] sq_front, next_front;           // store queue front index
@@ -212,9 +221,10 @@ module lsu #(
                 if (|dc_resp[i] & ~|dc_miss[i])
                     for (int j = 0; j < sqsz; j++) if (dc_resp[i] == sq_miss[j]) sq_miss[j] <= 0;
                 if (dc_resp[i][7:4] == 4'b1111 & |dc_miss[i]) // cache miss
-                    sq_miss[$clog2(sqsz)'(dc_resp[i])] <= dc_miss[i];
+                    sq_miss[$clog2(sqsz)'(dc_resp[i])] <= fl(dc_miss[i]) ? 0 : dc_miss[i];
                 if (dc_resp[i][7:4] == 4'b1111 & ~|dc_miss[i]) sq_accsd[sq_front] <= 1; // store entry
             end
+            for (int i = 0; i < sqsz; i++) if (fl(sq_miss[i])) sq_miss[i] <= 0;
             /* SC fails */
             if (sc_fail) sq_accsd[sq_front] <= 1;
             /* access CSR entries */
@@ -410,8 +420,9 @@ module lsu #(
                     if (dc_resp[i][7:4] == 4'b1110) lq_accsd[$clog2(lqsz)'(dc_resp[i])] <= 1; // load entry
                 end
                 if (dc_resp[i][7:4] == 4'b1110 & |dc_miss[i]) // cache miss
-                    lq_miss[$clog2(lqsz)'(dc_resp[i])] <= dc_miss[i];
+                    lq_miss[$clog2(lqsz)'(dc_resp[i])] <= fl(dc_miss[i]) ? 0 : dc_miss[i];
             end
+            for (int i = 0; i < lqsz; i++) if (fl(lq_miss[i])) lq_miss[i] <= 0;
             /* output execution bundles */
             for (int i = 0; i < ewd; i++) if (exe_bundle[i].opid[15] & exe_bundle[i].ldid[7] & claim[i])
                 lq_valid[$clog2(lqsz)'(exe_bundle[i].ldid)] <= 0;

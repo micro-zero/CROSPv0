@@ -228,7 +228,7 @@ module crosplite #(
     always_comb s_axi_rlast = 1;
 
     /* MMU */
-    logic fnci, fncv;
+    logic fnci, fncv; logic [7:0] flmask, flrqst;
     logic  [7:0] it_rqst; logic  [7:0] dt_rqst;
     logic [63:0] it_vadd; logic [63:0] dt_vadd;
     logic [63:0] it_satp; logic [63:0] dt_satp;
@@ -245,6 +245,7 @@ module crosplite #(
     logic  [7:0] dc_miss;
     mmu #(.init(init), .tohost(tohost), .frhost(frhost), .dcbase(dcbase)) mmu_inst(
         .clk(clk), .rst(rst), .fnci(fnci), .fncv(fncv),
+        .flmask(flmask), .flrqst(flrqst),
         .s_dt_rqst(dt_rqst), .s_it_rqst(it_rqst),
         .s_dt_vadd(dt_vadd), .s_it_vadd(it_vadd),
         .s_dt_satp(dt_satp), .s_it_satp(it_satp),
@@ -380,7 +381,7 @@ module crosplite #(
         lsu_inst(clk, rst, dec_inst.redir, nextldid, nextstid, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
-            dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
+            flmask, flrqst, dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
             dc_flsh, dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
 
     /* debug ports */

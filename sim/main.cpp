@@ -286,8 +286,8 @@ int main(int argc, char *argv[])
     }
     if (cmd.file == NULL)
     {
-        printf("[Info] No input file specified, trying to recover from checkpoint\n");
-        printf("[Info] If help needed, please use -h option\n");
+        fprintf(stderr, "[Info] No input file specified, trying to recover from checkpoint\n");
+        fprintf(stderr, "[Info] If help needed, please use -h option\n");
     }
     else
     {

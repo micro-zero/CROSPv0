@@ -10,10 +10,12 @@ module mmu #(
     parameter frhost = 64'h0,       // bypassed fromhost address
     parameter dcbase = 64'h80000000 // base address of cacheable memory
 )(
-    input  logic clk,
-    input  logic rst,
-    input  logic fnci, // fence.i committed
-    input  logic fncv, // sfence.vma committed
+    input  logic       clk,
+    input  logic       rst,
+    input  logic       fnci,   // fence.i committed
+    input  logic       fncv,   // sfence.vma committed
+    output logic [7:0] flmask, // flush mask
+    output logic [7:0] flrqst, // flush request
     /* ITLB interface */
     input  logic  [7:0] s_it_rqst, // instruction TLB request ID
     input  logic [63:0] s_it_vadd, // instruction TLB virtual address
@@ -110,7 +112,6 @@ module mmu #(
      */
 
     /* flush function (see cache.sv) */
-    logic [7:0] flmask, flrqst;
     function logic fl(input logic [7:0] req); fl = |req & (req & ~flmask) == (flrqst & ~flmask); endfunction
     always_comb case ({s_dc_flsh, s_ic_flsh})
         2'b00: {flmask, flrqst} = {8'b0000_0000, 8'b0000_0000};

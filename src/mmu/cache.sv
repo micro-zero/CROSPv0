@@ -121,8 +121,9 @@ module cache #(
             for (int i = 0; i < mshrsz; i++) if (mshr_valid[i] & |m_resp) begin
                 if (~|m_miss & (mshr_rqst[i] == m_resp | mshr_miss[i] == m_resp))
                     {mshr_ready[i], mshr_rdat[i]} <= {1'b1, m_rdat};
-                if (|m_miss & mshr_rqst[i] == m_resp) mshr_miss[i] <= m_miss;
+                if (|m_miss & mshr_rqst[i] == m_resp) mshr_miss[i] <= fl(m_miss) ? 0 : m_miss;
             end
+            for (int i = 0; i < mshrsz; i++) if (fl(mshr_miss[i])) mshr_miss[i] <= 0;
         end
 
     /* cache entity */
