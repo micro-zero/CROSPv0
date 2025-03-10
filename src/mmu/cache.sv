@@ -60,7 +60,7 @@ module cache #(
     logic [chn-1:0]               b_ready;
     logic [chn-1:0]               mshr_rej;        // MSHR reject a missed request
     logic [chn-1:0]               miss_under_miss; // miss under miss
-    logic                         read;            // mark normal read at last cycle
+    logic                         reading, read;   // mark normal read at current and last cycle
     always_comb for (int i = 0; i < chn; i++) b_ready[i] = ~|b_rqst[i] | |s_resp[i] | mshr_rej[i];
     /* MSHR rejection should make the buffer writable to avoid deadlock */
     always_comb for (int i = 0; i < chn; i++) begin
@@ -74,8 +74,8 @@ module cache #(
         else for (int i = 0; i < chn; i++) begin
             if (fl(b_rqst[i]))  b_rqst[i] <= 0;
             if (|s_resp[i])     b_rqst[i] <= 0;
-            if (i == 0 & |b_strb[0]     & read) b_strb[0] <= 0;
-            if (i == 0 & b_trsc[0] == 1 & read) b_trsc[0] <= 0; // other GetV
+            if (i == 0 & |b_strb[0]     & reading & read) b_strb[0] <= 0;
+            if (i == 0 & b_trsc[0] == 1 & reading & read) b_trsc[0] <= 0; // other GetV
             /* only one request can be buffered until response in a channel */
             if (|s_rqst[i] & b_ready[i] & ~fl(s_rqst[i])) begin
                 b_rqst[i] <= s_rqst[i];
@@ -103,6 +103,7 @@ module cache #(
     firstk #(.width(mshrsz), .k(1))   mshr_o_inst(.bits(mshr_valid & mshr_ready), .pos(mshr_done));
     always_comb begin
         mshr_pend_bits = mshr_valid & ~mshr_ready;
+        for (int i = 0; i < mshrsz; i++) if (|mshr_miss[i]) mshr_pend_bits[i] = 0;
         for (int i = 0; i < mshrsz; i++) if (~|m_miss & mshr_rqst[i] == m_resp) mshr_pend_bits[i] = 0;
     end
     always_ff @(posedge clk) if (rst) mshr_valid <= 0;
@@ -151,7 +152,6 @@ module cache #(
     logic                 fill_wea; // fill write enable
     logic          [63:0] fill_tag; // cache tag to fill
     logic  [blk-1:0][7:0] fill_dat; // cache line to fill
-    logic                 stale;    // stale bit caused by cache fill
     /* cache replacement */
     logic          [7:0] rep_rqst;           // replaced request ID
     logic         [63:0] rep_strb, rep_addr; // replaced strobe and address
@@ -189,7 +189,8 @@ module cache #(
             new_dat[set_ptr[0]] = fill_dat;
         end else new_dat[$clog2(way)'(set_hitpos[0])] = set_hitrdat[0] & ~set_hitmask | set_hitwdat;
     end
-    always_comb read = ~fill[$clog2(set)] & ~mshr_done[$clog2(mshrsz)] & ~stale;
+    always_comb reading = ~fill[$clog2(set)] & ~mshr_done[$clog2(mshrsz)];
+    always_ff @(posedge clk) if (rst) read <= 0; else read <= reading;
     always_ff @(posedge clk) if (rst) valid <= 0;
         else if (fill[$clog2(set)]) begin
             valid[index[0]][set_ptr[0]] <= 1;
@@ -197,14 +198,13 @@ module cache #(
             dat  [index[0]]             <= new_dat;
             tag  [index[0]]             <= new_tag;
             ptr  [index[0]]             <= set_ptr[0] + 1;
-        end else if (read & set_hitpos[0][$clog2(way)]) // hit
+        end else if (reading & read & set_hitpos[0][$clog2(way)]) // hit and reading
             if (|b_rqst[0] & b_trsc[0] == 1)
                 valid[index[0]][$clog2(way)'(set_hitpos[0])] <= 0;
             else if (|b_rqst[0] & |b_strb[0]) begin
                 dirty[index[0]][$clog2(way)'(set_hitpos[0])] <= 1;
                 dat  [index[0]]                              <= new_dat;
             end
-    always_ff @(posedge clk) if (rst) stale <= 0; else stale <= fill[$clog2(set)];
     always_ff @(posedge clk) for (int i = 0; i < chn; i++) begin
         set_tag  [i] <= tag  [index[i]];
         set_dat  [i] <= dat  [index[i]];
@@ -254,20 +254,17 @@ module cache #(
     always_comb begin
         miss_under_miss = 0;
         for (int i = 0; i < chn; i++) begin
-            s_resp[i] = b_rqst[i];
+            s_resp[i] = read ? b_rqst[i] : 0;
             s_miss[i] = set_hitpos[i][$clog2(way)] ? 0 : b_rqst[i];
             s_ofst[i] = b_addr[i]; // for convenience of locating data in cache line without indexing
             s_rdat[i] = set_hitrdat[i];
             for (int j = 0; j < mshrsz; j++)
                 if (mshr_valid[j] & mshr_addr[j][63:$clog2(blk)] == b_addr[i][63:$clog2(blk)])
                     {miss_under_miss[i], s_miss[i]} = {1'b1, mshr_rqst[j]}; // miss-under-miss
-            if (set_hitpos[i][$clog2(way)] & |b_strb[0])     s_resp[i] = 0; // write request
-            if (set_hitpos[i][$clog2(way)] & b_trsc[0] == 1) s_resp[i] = 0; // other GetV
             if (mshr_rej[i]) s_resp[i] = 0;                                 // MSHR full
         end
-        /* cache tag and miss situation are stale when line being
-           filled, so that the result in filling cycle is invalid */
-        if (fill[$clog2(set)] | stale) s_resp = 0;
+        if (set_hitpos[0][$clog2(way)] & |b_strb[0])     s_resp[0] = 0; // write request
+        if (set_hitpos[0][$clog2(way)] & b_trsc[0] == 1) s_resp[0] = 0; // other GetV
         if (mshr_out) begin
             s_resp[0] = mshr_rqst[$clog2(mshrsz)'(mshr_done)];
             s_ofst[0] = mshr_addr[$clog2(mshrsz)'(mshr_done)];

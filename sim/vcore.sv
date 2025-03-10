@@ -131,10 +131,12 @@ module vcore #(
     output logic [63:0] stores   // store instruction number
 );
     /* instantiate core with direct memory interface */
-    logic [63:0] dp0, dp1, dp2;
+    logic [63:0] dbg_cycle, dbg_pc0,dbg_pc1;
+    logic  [7:0] dbg_axi_stt, dbg_axi_req;
     crosplite #(.pwd(pwd), .rst_pc(rst_pc), .dcbase(dcbase),
         .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
-        clk, rst, mip_ext, mtime, dp0, dp1, dp2,
+        clk, rst, mip_ext, mtime,
+        dbg_cycle, dbg_pc0, dbg_pc1, dbg_axi_stt, dbg_axi_req,
         s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
         m_coh_rqst, m_coh_trsc, m_coh_addr, m_coh_resp, m_coh_mesi,
         m_axi_awid, m_axi_awaddr, m_axi_awlen, m_axi_awsize, m_axi_awburst,

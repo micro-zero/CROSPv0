@@ -20,9 +20,12 @@ module crosplite #(
     input  logic        rst,
     input  logic [63:0] mip_ext,
     input  logic [63:0] mtime,
-    output logic [63:0] dp0,
-    output logic [63:0] dp1,
-    output logic [63:0] dp2,
+    /* debug ports */
+    output logic [63:0] dbg_cycle,
+    output logic [63:0] dbg_pc0,
+    output logic [63:0] dbg_pc1,
+    output logic  [7:0] dbg_axi_stt,
+    output logic  [7:0] dbg_axi_req,
     /* coherence interface */
     input  logic  [7:0] s_coh_rqst,
     input  logic  [7:0] s_coh_trsc,
@@ -363,7 +366,8 @@ module crosplite #(
         csr_excp, csr_intr, csr_flsh,
         mip_ext, mtime, 64'(com_inst.rob_out), csr_status, csr_tvec, csr_mepc, csr_sepc, it_satp, dt_satp);
     issue #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd))
-        iss_inst(clk, rst, fu_ready, busy_resp, exe_bundle, com_bundle, iss_ready, ren_bundle, (pwd)'(-1), iss_bundle);
+        iss_inst(clk, rst, fu_ready, busy_resp,
+            exe_bundle, com_bundle, iss_ready, ren_bundle, (pwd)'(-1), iss_bundle);
     execute #(.iwd(pwd), .ewd(pwd))
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (pwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(pwd), .rwd(pwd), .ewd(pwd), .cwd(pwd))
@@ -385,7 +389,9 @@ module crosplite #(
             dc_flsh, dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
 
     /* debug ports */
-    always_comb dp0 = csr_inst.mcycle;
-    always_ff @(posedge clk) if (rst) dp1 <= 0; else if (com_bundle[0].opid[15]) dp1 <= com_bundle[0].pc;
-    always_ff @(posedge clk) if (rst) dp2 <= 0; else if (com_bundle[1].opid[15]) dp2 <= com_bundle[1].pc;
+    always_comb dbg_cycle = csr_inst.mcycle;
+    always_comb dbg_axi_stt = mmu_inst.axi_stt;
+    always_comb dbg_axi_req = mmu_inst.axi_req;
+    always_ff @(posedge clk) if (rst) dbg_pc0 <= 0; else if (com_bundle[0].opid[15]) dbg_pc0 <= com_bundle[0].pc;
+    always_ff @(posedge clk) if (rst) dbg_pc1 <= 0; else if (com_bundle[1].opid[15]) dbg_pc1 <= com_bundle[1].pc;
 endmodule

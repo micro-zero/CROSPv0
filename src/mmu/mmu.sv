@@ -411,7 +411,7 @@ module mmu #(
                     m_axi_awvalid <= 0;
                     m_axi_wvalid  <= 1;
                     m_axi_wdata   <= axi_buf[m_axi_awaddr[5:0]+7-:8];
-                    m_axi_wlast   <= 0;
+                    m_axi_wlast   <= m_axi_arlen == 0;
                     m_axi_wstrb   <= axi_str[m_axi_awaddr[5:0]+7-:8];
                     axi_cnt       <= axi_cnt + 8;
                 end
@@ -438,14 +438,14 @@ module mmu #(
     end
     always_ff @(posedge clk) if (rst | axi_stt == 6)     axi_fls <= 0;
         else if (|axi_stt & (fl(axi_req) | fl(axi_thr))) axi_fls <= 1;
-    always_comb m_axi_arid    = axi_req;
+    always_comb m_axi_arid    = 0;
     always_comb m_axi_arburst = 'b01;  // INCR burst
     always_comb m_axi_arsize  = 'b011; // 8 bytes
     always_comb m_axi_arlock  = 0;
     always_comb m_axi_arcache = 0;
     always_comb m_axi_arprot  = 0;
     always_comb m_axi_arqos   = 0;
-    always_comb m_axi_awid    = axi_req;
+    always_comb m_axi_awid    = 0;
     always_comb m_axi_awburst = 'b01;  // INCR burst
     always_comb m_axi_awsize  = 'b011; // 8 bytes
     always_comb m_axi_awlock  = 0;

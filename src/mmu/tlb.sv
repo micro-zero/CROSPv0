@@ -71,6 +71,7 @@ module tlb #(
         fil_tag = mis_tag;
         fil_dat = mis_dat;
         fil_prm = mis_prm;
+        fil_ptr = mis_ptr;
         fil_vld[mis_ptr] = 1;
         fil_tag[mis_ptr] = {m_satp[59:44], m_vadd[63:12]};
         fil_dat[mis_ptr] = m_padd[63:12];
