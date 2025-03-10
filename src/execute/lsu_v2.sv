@@ -1,7 +1,7 @@
 //****************************************************************************
 // File:        LSU_v3.sv
 // Author:      Hao Mingyang<2301213200@pku.edu.cn>
-// Date:        2024.12.25
+// Date:        2025.03.10
 // Version:     v0.3
 // Project:     CROSP
 // Module:      LSU
@@ -15,7 +15,8 @@ module LSU
     parameter STQAddrSz = $clog2(numSTQEntries), 
     parameter LSUAddrSz = (LDQAddrSz > STQAddrSz)? LDQAddrSz : STQAddrSz,
     parameter width     =  1,
-    parameter blockOffBits = 6 
+    parameter blockOffBits = 6,
+    parameter robAddrSz = 128
 )
 (
     input  logic                                                clk,
@@ -41,6 +42,7 @@ module LSU
 
     //connect with Dcache(Memory)
     output logic                                                s1_kill_o,               // 在访存阶段发生load顺序错误或数据前递，将kill信号发往Dcache
+    input  logic                                                dmem_req_ready_i,        // 在访存阶段与Dcache的握手信号，表示当前Dcache可以进行访存
     output dc_req_t                                             dmem_req_o,              // 在访存阶段向Dcache发送访存请求
     output logic                                                dmem_req_valid_o,        // 上述访存请求的有效位
     output logic                                                dmem_release_ready_o,    // 发往Dcache的已经准备好处理release的信号
@@ -50,21 +52,21 @@ module LSU
     input  dc_req_t                                             dmem_nack_i,             // Dcache发进来的对当前load指令的nack信号
     output brupdate_t                                           dmem_brupdate_o,         // 从core发过来的brupdate信号存一周期发往Dcache
     output logic                                                dmem_exception_o,        // 从core发过来的exception信号存一周期发往Dcache
-    output logic [6:0]                                dmem_rob_pnr_idx_o,      // 从core发过来的rob pnr表项存一周期发往Dcache
-    output logic [6:0]                                dmem_rob_head_idx_o,     // 从core发过来的rob表头存一周期发往Dcache
+    output logic [robAddrSz-1:0]                                dmem_rob_pnr_idx_o,      // 从core发过来的rob pnr表项存一周期发往Dcache
+    output logic [robAddrSz-1:0]                                dmem_rob_head_idx_o,     // 从core发过来的rob表头存一周期发往Dcache
     // Clears prefetching MSHRs
     output logic                                                dmem_force_order_o,      // stq处理fence指令要求MSHR进行order
     input  logic                                                dmem_ordered_i,          // MSHR已经order完毕
     //connect with ROB (经过core)
-    input  logic [6:0]                                core_rob_head_idx_i,     // rob表头
-    input  logic [6:0]                                core_rob_pnr_idx_i,      // rob pnr指针
+    input  logic [robAddrSz-1:0]                                core_rob_head_idx_i,     // rob表头
+    input  logic [robAddrSz-1:0]                                core_rob_pnr_idx_i,      // rob pnr指针
     input  logic                                                commit_load_at_rob_head_i,//rob当前commit表头为load指令  
     input  logic                                                core_commit_valids_i,    // 当前commit有效位
     input  lsu_funct_t                                          core_commit_uops_i,      // 当前commit的uop
     output logic                                                core_clr_bsy_valid_o,    // 清除rob对应busy位信号的有效位
-    output logic [7:0]                                  core_clr_bsy_rob_idx_o,  // 需要清除对应busy位的rob表项
+    output logic [robAddrSz:0]                                  core_clr_bsy_rob_idx_o,  // 需要清除对应busy位的rob表项
     output logic                                                core_clr_rob_unsafe_valid_o,//清除rob对应unsafe位信号的有效位     
-    output logic [6:0]                                core_clr_rob_unsafe_idx_o,  //需要清除对应unsafe位的rob表项     
+    output logic [robAddrSz-1:0]                                core_clr_rob_unsafe_idx_o,  //需要清除对应unsafe位的rob表项     
     output xcpt_t                                               core_lxcpt_o,               //推测式load发生错误,将错误信号lxcpt发往core
     output logic                                                core_lxcpt_valid_o,         //上述错误信号的有效位
     //connect with Branch Unit
@@ -95,7 +97,7 @@ module LSU
     logic                             stq_full_wire;      
     logic                             stq_nonempty_wire;  //判断stq当前不空
     logic                             ld_valid_wire;      
-    logic                             st_valid_wire;      //
+    logic                             st_valid_wire;      /
     logic                             lsu_fencei_rdy_wire;//是否可以执行fencei 
     logic[LDQAddrSz-1:0]              ldq_tail_plus1_wire ;
     logic[STQAddrSz-1:0]              stq_tail_plus1_wire ;
@@ -166,7 +168,7 @@ module LSU
     addr_t                                      exe_vaddr_wire;                //exe阶段进行TLB转换前的虚拟地址
     addr_t                                      exe_paddr_r0_wire;             //-----------------后的物理地址
     dc_req_t                                    dmem_req_wire;                 //发往Dcache的请求
-    logic                                       dmem_req_valid_wire ;
+    logic                                       dmem_req_valid_wire ;          
     logic                                       dmem_req_fire_wire;            //标记已经发请求向Dcache中
     logic[numLDQEntries-1:0]                    s0_executing_loads_wire;       //stage 0 阶段正在执行的load指令对应的编码，可能是刚进来的的也可能是刚wakeup的
     logic[numLDQEntries-1:0]                    s1_kill_from_ldq_logic_wire;   //stage 1 阶段load指令查load  queue发现有ld-ld违例，发往Dcache的kill信号 
@@ -196,8 +198,8 @@ module LSU
     addr_t                                      mem_paddr_r0_wire ;
     addr_t                                      mem_paddr_r1_reg;
     logic                                       clr_bsy_valid_reg;//reg
-    logic[7:0]                          clr_bsy_rob_idx_reg;//reg
-    logic[11:0]                       clr_bsy_brmask_reg;//reg
+    logic[robAddrSz:0]                          clr_bsy_rob_idx_reg;//reg
+    logic[MAX_BR_COUNT:0]                       clr_bsy_brmask_reg;//reg
     logic                                       core_exception_i_r1_reg; //用来将core_exception_i寄存一拍
     logic                                       core_exception_i_r2_reg; //-------------------------两拍
   // We translated a store last cycle
@@ -275,8 +277,8 @@ module LSU
     logic[numSTQEntries-1:0]                       ldst_addr_matches_r1_reg;
   // If stores remain blocked for 15 cycles, block load wakeups to get a store through
     logic[3:0]                                      store_blocked_counter_reg;
-    logic[6:0]                            clr_unsafe_idx_r0_wire;
-    logic[6:0]                            clr_unsafe_idx_r1_reg;//寄存一拍
+    logic[robAddrSz-1:0]                            clr_unsafe_idx_r0_wire;
+    logic[robAddrSz-1:0]                            clr_unsafe_idx_r1_reg;//寄存一拍
     logic                                           clr_unsafe_valid_r0_wire;
     logic                                           clr_unsafe_valid_r1_reg;//同理寄存一拍
     logic [LDQAddrSz-1:0]                           l_idx_wire; // 优先级编码结果
@@ -459,7 +461,7 @@ module LSU
   // reading a physical address from the LDQ,STQ, or the HellaCache adapter
 
     assign  dmem_req_valid_wire = dmem_req_wire.dreq_valid;
-    assign  dmem_req_fire_wire  = dmem_req_wire.dreq_valid;
+    assign  dmem_req_fire_wire  = dmem_req_wire.dreq_valid && dmem_req_ready_i;
     always_comb begin
         dmem_req_wire = 0;
         s0_executing_loads_wire = 0;
@@ -661,7 +663,7 @@ module LSU
 
         dword_addr_matches   =  (stq[i].entry.addr_valid           &
                                   //!stq[i].entry.addr_is_virtual    &&
-                                (s_addr[63 : 3] == lcam_addr_wire[63 : 3]));
+                                (s_addr[ADDR_WIDTH-1 : 3] == lcam_addr_wire[ADDR_WIDTH-1 : 3]));
         write_mask = genByteMask(s_addr, s_uop.mem_size);
         if(do_ld_search_wire && stq[i].entry_valid && lcam_st_dep_mask_wire[i])begin
           if(((lcam_mask_wire & write_mask)== lcam_mask_wire) && 
@@ -1207,7 +1209,7 @@ module LSU
             end
   //-------------------------------------------------------------
   // Exception 
-
+//   0 1 2 3 4 5 6 7
   // for the live_store_mask, need to kill stores that haven't been committed
             if(core_exception_i)begin
               ldq_head_reg  <=  0;
