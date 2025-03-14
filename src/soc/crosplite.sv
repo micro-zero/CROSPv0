@@ -10,7 +10,6 @@ import types::*;
 module crosplite #(
     parameter init   = 1,            // whether to initialize some RAM
     parameter pwd    = 4,            // pipeline width
-    parameter mwd    = 2,            // memory request width
     parameter rst_pc = 64'hc0000000, // PC on reset
     parameter tohost = 64'd0,        // TOHOST address
     parameter frhost = 64'd0,        // FROMHOST address
@@ -19,14 +18,25 @@ module crosplite #(
 )(
     input  logic        clk,
     input  logic        rst,
-    input  logic        sync_rqst,
-    input  logic        sync_invl,
-    output logic        sync_done,
     input  logic [63:0] mip_ext,
     input  logic [63:0] mtime,
-    output logic [63:0] dp0,
-    output logic [63:0] dp1,
-    output logic [63:0] dp2,
+    /* debug ports */
+    output logic [63:0] dbg_cycle,
+    output logic [63:0] dbg_pc0,
+    output logic [63:0] dbg_pc1,
+    output logic  [7:0] dbg_axi_stt,
+    output logic  [7:0] dbg_axi_req,
+    /* coherence interface */
+    input  logic  [7:0] s_coh_rqst,
+    input  logic  [7:0] s_coh_trsc,
+    input  logic [63:0] s_coh_addr,
+    output logic  [7:0] s_coh_resp,
+    output logic  [7:0] s_coh_mesi,
+    output logic  [7:0] m_coh_rqst,
+    output logic  [7:0] m_coh_trsc,
+    output logic [63:0] m_coh_addr,
+    input  logic  [7:0] m_coh_resp,
+    input  logic  [7:0] m_coh_mesi,
     /* AXI interface */
     output logic  [7:0] m_axi_awid,
     output logic [63:0] m_axi_awaddr,
@@ -220,58 +230,49 @@ module crosplite #(
     always_comb s_axi_rresp = 0;
     always_comb s_axi_rlast = 1;
 
-    /* L1 memory */
-    logic             s_global_fnci;
-    logic             s_global_fncv;
-    logic      [63:0] s_icache_satp;
-    logic       [7:0] s_icache_rqst;
-    logic             s_icache_flsh;
-    logic      [63:0] s_icache_addr;
-    logic       [7:0] s_icache_done;
-    logic             s_icache_pgft;
-    logic      [63:0] s_icache_data;
-    logic      [63:0] s_dcache_satp;
-    logic             s_dcache_flsh;
-    logic       [7:0] s_dcache_cfrm;
-    logic [1:0] [7:0] s_dcache_rqst;
-    logic [1:0]       s_dcache_fnce;
-    logic [1:0] [1:0] s_dcache_rsrv;
-    logic [1:0] [1:0] s_dcache_aqrl;
-    logic [1:0] [2:0] s_dcache_bits;
-    logic [1:0]       s_dcache_wena;
-    logic [1:0][63:0] s_dcache_addr;
-    logic [1:0][63:0] s_dcache_wdat;
-    logic [1:0] [7:0] s_dcache_done;
-    logic [1:0] [7:0] s_dcache_excp;
-    logic [1:0][63:0] s_dcache_rdat;
-    l1 #(.init(init), .memwd(mwd), .dcbase(dcbase), .tohost(tohost), .frhost(frhost)) l1_inst(
-        .clk(clk), .rst(rst),
-        .s_global_fnci(s_global_fnci),
-        .s_global_fncv(s_global_fncv),
-        .s_synchr_rqst(sync_rqst),
-        .s_synchr_invl(sync_invl),
-        .s_synchr_done(sync_done),
-        .s_icache_satp(s_icache_satp),
-        .s_icache_rqst(s_icache_rqst),
-        .s_icache_flsh(s_icache_flsh),
-        .s_icache_addr(s_icache_addr),
-        .s_icache_done(s_icache_done),
-        .s_icache_pgft(s_icache_pgft),
-        .s_icache_data(s_icache_data),
-        .s_dcache_satp(s_dcache_satp),
-        .s_dcache_flsh(s_dcache_flsh),
-        .s_dcache_cfrm(s_dcache_cfrm),
-        .s_dcache_rqst(s_dcache_rqst),
-        .s_dcache_fnce(s_dcache_fnce),
-        .s_dcache_aqrl(s_dcache_aqrl),
-        .s_dcache_rsrv(s_dcache_rsrv),
-        .s_dcache_bits(s_dcache_bits),
-        .s_dcache_wena(s_dcache_wena),
-        .s_dcache_addr(s_dcache_addr),
-        .s_dcache_wdat(s_dcache_wdat),
-        .s_dcache_done(s_dcache_done),
-        .s_dcache_excp(s_dcache_excp),
-        .s_dcache_rdat(s_dcache_rdat),
+    /* MMU */
+    logic fnci, fncv; logic [7:0] flmask, flrqst;
+    logic  [7:0] it_rqst; logic  [7:0] dt_rqst;
+    logic [63:0] it_vadd; logic [63:0] dt_vadd;
+    logic [63:0] it_satp; logic [63:0] dt_satp;
+    logic  [7:0] it_resp; logic  [7:0] dt_resp;
+    logic  [7:0] it_perm; logic  [7:0] dt_perm;
+    logic [63:0] it_padd; logic [63:0] dt_padd;
+    logic        dc_flsh; logic        ic_flsh;
+    logic  [7:0] dc_rqst; logic  [7:0] ic_rqst;
+    logic [63:0] dc_addr; logic [63:0] ic_addr;
+    logic  [7:0] dc_strb;
+    logic [63:0] dc_wdat;
+    logic  [7:0] dc_resp; logic  [7:0] ic_resp;
+    logic [63:0] dc_rdat; logic [63:0] ic_rdat;
+    logic  [7:0] dc_miss;
+    mmu #(.init(init), .tohost(tohost), .frhost(frhost), .dcbase(dcbase)) mmu_inst(
+        .clk(clk), .rst(rst), .fnci(fnci), .fncv(fncv),
+        .flmask(flmask), .flrqst(flrqst),
+        .s_dt_rqst(dt_rqst), .s_it_rqst(it_rqst),
+        .s_dt_vadd(dt_vadd), .s_it_vadd(it_vadd),
+        .s_dt_satp(dt_satp), .s_it_satp(it_satp),
+        .s_dt_resp(dt_resp), .s_it_resp(it_resp),
+        .s_dt_perm(dt_perm), .s_it_perm(it_perm),
+        .s_dt_padd(dt_padd), .s_it_padd(it_padd),
+        .s_dc_flsh(dc_flsh), .s_ic_flsh(ic_flsh),
+        .s_dc_rqst(dc_rqst), .s_ic_rqst(ic_rqst),
+        .s_dc_addr(dc_addr), .s_ic_addr(ic_addr),
+        .s_dc_strb(dc_strb),
+        .s_dc_wdat(dc_wdat),
+        .s_dc_resp(dc_resp), .s_ic_resp(ic_resp),
+        .s_dc_rdat(dc_rdat), .s_ic_rdat(ic_rdat),
+        .s_dc_miss(dc_miss),
+        .s_coh_rqst(s_coh_rqst),
+        .s_coh_trsc(s_coh_trsc),
+        .s_coh_addr(s_coh_addr),
+        .s_coh_resp(s_coh_resp),
+        .s_coh_mesi(s_coh_mesi),
+        .m_coh_rqst(m_coh_rqst),
+        .m_coh_trsc(m_coh_trsc),
+        .m_coh_addr(m_coh_addr),
+        .m_coh_resp(m_coh_resp),
+        .m_coh_mesi(m_coh_mesi),
         .m_axi_awid(m_axi_awid),
         .m_axi_awaddr(m_axi_awaddr_l1),
         .m_axi_awlen(m_axi_awlen_l1),
@@ -349,12 +350,13 @@ module crosplite #(
     logic exception;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
-    logic [7:0] nextlsid;
+    logic [15:0] nextopid;
     frontend #(.init(init), .rst_pc(rst_pc), .fwd(pwd), .cwd(pwd))
         fe_inst(clk, rst, com_bundle, dec_ready, fet_bundle,
-            s_icache_rqst, s_icache_addr, s_icache_flsh, s_icache_done, |s_icache_pgft, s_icache_data);
+            it_rqst, it_vadd, it_resp, it_perm, it_padd,
+            ic_flsh, ic_rqst, ic_addr, ic_resp, ic_rdat);
     decoder #(.fwd(pwd), .dwd(pwd), .ewd(pwd), .cwd(pwd))
-        dec_inst(clk, rst, csr_intr, csr_status, exe_bundle, com_bundle, dec_ready, fet_bundle, ren_ready, dec_bundle);
+        dec_inst(clk, rst, csr_intr, csr_status, com_bundle, dec_ready, fet_bundle, ren_ready, dec_bundle);
     rename #(.dwd(pwd), .rwd(pwd), .cwd(pwd))
         ren_inst(clk, rst, com_bundle, ren_ready, dec_bundle, iss_ready, ren_bundle);
     prf #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd))
@@ -362,14 +364,15 @@ module crosplite #(
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret,
         csr_excp, csr_intr, csr_flsh,
-        mip_ext, mtime, 64'(com_inst.rob_out), csr_status, csr_tvec, csr_mepc, csr_sepc, s_icache_satp, s_dcache_satp);
-    issue #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd), .mwd(mwd))
-        iss_inst(clk, rst, fu_ready, busy_resp, exe_bundle, com_bundle, iss_ready, ren_bundle, (pwd)'(-1), iss_bundle);
+        mip_ext, mtime, 64'(com_inst.rob_out), csr_status, csr_tvec, csr_mepc, csr_sepc, it_satp, dt_satp);
+    issue #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd))
+        iss_inst(clk, rst, fu_ready, busy_resp,
+            exe_bundle, com_bundle, iss_ready, ren_bundle, (pwd)'(-1), iss_bundle);
     execute #(.iwd(pwd), .ewd(pwd))
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (pwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(pwd), .rwd(pwd), .ewd(pwd), .cwd(pwd))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle,
-            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextlsid, s_global_fnci, s_global_fncv);
+            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextopid, fnci, fncv);
     alu #(.iwd(pwd), .ewd(pwd))
         alu_inst(clk, rst, dec_inst.redir, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
     fpu #(.iwd(pwd), .ewd(pwd))
@@ -378,16 +381,17 @@ module crosplite #(
         mul_inst(clk, rst, dec_inst.redir, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
     div #(.iwd(pwd), .ewd(pwd))
         div_inst(clk, rst, dec_inst.redir, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
-    lsu #(.iwd(pwd), .ewd(pwd), .mwd(mwd))
-        lsu_inst(clk, rst, dec_inst.redir, nextlsid,
+    lsu #(.iwd(pwd), .ewd(pwd))
+        lsu_inst(clk, rst, dec_inst.redir, nextopid, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
-            s_dcache_flsh, s_dcache_cfrm, s_dcache_rqst, s_dcache_fnce, s_dcache_aqrl,
-            s_dcache_rsrv, s_dcache_bits, s_dcache_wena, s_dcache_addr,
-            s_dcache_wdat, s_dcache_done, s_dcache_excp, s_dcache_rdat);
+            flmask, flrqst, dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
+            dc_flsh, dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
 
     /* debug ports */
-    always_comb dp0 = csr_inst.mcycle;
-    always_ff @(posedge clk) if (rst) dp1 <= 0; else if (com_bundle[0].opid[15]) dp1 <= com_bundle[0].pc;
-    always_ff @(posedge clk) if (rst) dp2 <= 0; else if (com_bundle[1].opid[15]) dp2 <= com_bundle[1].pc;
+    always_comb dbg_cycle = csr_inst.mcycle;
+    always_comb dbg_axi_stt = mmu_inst.axi_stt;
+    always_comb dbg_axi_req = mmu_inst.axi_req;
+    always_ff @(posedge clk) if (rst) dbg_pc0 <= 0; else if (com_bundle[0].opid[15]) dbg_pc0 <= com_bundle[0].pc;
+    always_ff @(posedge clk) if (rst) dbg_pc1 <= 0; else if (com_bundle[1].opid[15]) dbg_pc1 <= com_bundle[1].pc;
 endmodule

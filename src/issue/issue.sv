@@ -7,15 +7,11 @@
 import types::*;
 
 module issue #(
-    parameter rwd   = 4,  // rename width
-    parameter iwd   = 4,  // issue width
-    parameter mwd   = 2,  // memory access width
-    parameter ewd   = 4,  // execution width
-    parameter cwd   = 4,  // commit width
-    parameter iqsz  = 16, // OoO issue queue size
-    parameter mfsz  = 8,  // memory FIFO size
-    parameter rrsz  = 16, // register read buffer size
-    parameter prnum = 96  // number of physical registers
+    parameter rwd  = 4, // rename width
+    parameter iwd  = 4, // issue width
+    parameter ewd  = 4, // execution width
+    parameter cwd  = 4, // commit width
+    parameter iqsz = 16 // OoO issue queue size
 )(
     input  logic clk,
     input  logic rst,
@@ -34,22 +30,30 @@ module issue #(
 
     /* classification */
     logic [$clog2(iqsz):0]      iq_in, iq_out, iq_num;
-    logic [$clog2(mfsz):0]      mf_in, mf_out, mf_num;
-    iss_bundle_t [iwd-1:0]      iq_in_data, mf_in_data;
-    logic        [iwd-1:0][1:0] iq_in_busy, mf_in_busy; // bit in busy table
+    iss_bundle_t [iwd-1:0]      iq_in_data;
+    logic        [iwd-1:0][1:0] iq_in_busy; // bit in busy table
     always_comb begin
-        iq_in = 0; mf_in = 0; ready = 0;
-        iq_in_data = 0; mf_in_data = 0;
-        iq_in_busy = 0; mf_in_busy = 0;
+        iq_in = 0; ready = 0;
+        iq_in_data = 0;
+        iq_in_busy = 0;
         for (int i = 0; i < rwd; i++) if (ren_bundle[i].opid[15]) begin
-            if (ren_bundle[i].fu[1]) begin // memory operation
-                if (32'(mf_in) >= iwd | 32'(mf_in) >= mfsz - 32'(mf_num)) break;
-                mf_in_data[32'(mf_in)] = ren_bundle[i]; // issue bundle is same as rename bundle
-                mf_in_busy[32'(mf_in)] = busy_resp[i];
-                mf_in++;
-            end else begin // default
+            begin
+                /* for now all operations are sent to default issue queue */
                 if (32'(iq_in) >= iwd | 32'(iq_in) >= iqsz - 32'(iq_num)) break;
-                iq_in_data[32'(iq_in)] = ren_bundle[i];
+                iq_in_data[32'(iq_in)].opid   = ren_bundle[i].opid;
+                iq_in_data[32'(iq_in)].ldid   = ren_bundle[i].ldid;
+                iq_in_data[32'(iq_in)].stid   = ren_bundle[i].stid;
+                iq_in_data[32'(iq_in)].ir     = ren_bundle[i].ir;
+                iq_in_data[32'(iq_in)].pnpc   = ren_bundle[i].pnpc;
+                iq_in_data[32'(iq_in)].delta  = ren_bundle[i].delta;
+                iq_in_data[32'(iq_in)].fu     = ren_bundle[i].fu;
+                iq_in_data[32'(iq_in)].funct  = ren_bundle[i].funct;
+                iq_in_data[32'(iq_in)].base   = ren_bundle[i].base;
+                iq_in_data[32'(iq_in)].offset = ren_bundle[i].offset;
+                iq_in_data[32'(iq_in)].a      = ren_bundle[i].a;
+                iq_in_data[32'(iq_in)].b      = ren_bundle[i].b;
+                iq_in_data[32'(iq_in)].prsa   = ren_bundle[i].prsa;
+                iq_in_data[32'(iq_in)].prda   = ren_bundle[i].prda;
                 iq_in_busy[32'(iq_in)] = busy_resp[i];
                 iq_in++;
             end
@@ -60,6 +64,7 @@ module issue #(
     /* default issue queue */
     logic [iqsz-1:0]              iq_occ, iq_ready;            // issue queue occupation and readiness
     logic [iqsz-1:0]              iq_out_mask;                 // issue queue output mask (ready =/= out)
+    logic [iqsz-1:0]              iq_resend;                   // issue queue needing resent
     logic [iqsz-1:0][1:0][15:0]   iq_prsa;                     // pending physical register addresses
     logic [iqsz-1:0][1:0]         iq_prsb, iq_prsb_fwd;        // pending physical register busy bits
     logic [iqsz-1:0][4:0]         iq_fu;                       // function unit mask
@@ -71,12 +76,14 @@ module issue #(
         iq_inst(.clk(clk), .rst(rst),
             .raddr(iq_raddr), .rvalue(iq_rvalue),
             .waddr(iq_waddr), .wvalue(iq_in_data), .wena(iq_wena));
-    firstk #(.width(iqsz), .k(iwd)) free_pos_inst(.bits(~iq_occ | iq_out_mask/*todo:ok to delete?*/), .pos(iq_free_pos));
+    firstk #(.width(iqsz), .k(iwd)) free_pos_inst(.bits(~iq_occ), .pos(iq_free_pos));
     firstk #(.width(iqsz), .k(iwd)) ready_pos_inst(.bits(iq_ready), .pos(iq_ready_pos));
-    always_comb for (int i = 0; i < iwd; i++) iq_raddr[i]  = $clog2(iqsz)'(iq_ready_pos[i]);
-    always_comb for (int i = 0; i < iwd; i++) iq_waddr[i]  = $clog2(iqsz)'(iq_free_pos[i]);
-    always_comb for (int i = 0; i < iwd; i++) iq_wena[i]   = i < 32'(iq_in);
-    always_comb for (int i = 0; i < iqsz; i++) iq_ready[i] = iq_occ[i] & ~|iq_prsb_fwd[i] & |(iq_fu[i] & fu_ready);
+    always_comb for (int i = 0; i < iwd; i++) iq_raddr[i] = $clog2(iqsz)'(iq_ready_pos[i]);
+    always_comb for (int i = 0; i < iwd; i++) iq_waddr[i] = $clog2(iqsz)'(iq_free_pos[i]);
+    always_comb for (int i = 0; i < iwd; i++) iq_wena[i]  = i < 32'(iq_in);
+    always_comb for (int i = 0; i < iqsz; i++)
+        iq_ready[i] = iq_occ[i] & |(iq_fu[i] & fu_ready) &                           // related FU ready
+            ~iq_prsb_fwd[i][0] & (~iq_prsb_fwd[i][1] | iq_fu[i][1] & ~iq_resend[i]); // oprands ready
     always_comb begin
         iq_prsb_fwd = iq_prsb;
         for (int i = 0; i < iqsz; i++)
@@ -98,57 +105,25 @@ module issue #(
         end
     end
     always_ff @(posedge clk) if (rst | redir) iq_num <= 0; else iq_num <= iq_num + iq_in - iq_out;
-
-    /* memory fifo */
-    logic [mfsz-1:0][1:0][15:0] mf_prsa;  // pending physical register addresses
-    logic [mfsz-1:0][1:0]       mf_prsb;  // pending physical register busy bits
-    logic [$clog2(mfsz)-1:0]    mf_front; // memory fifo front index
-    logic        [iwd-1:0][$clog2(mfsz)-1:0] mf_raddr, mf_waddr;
-    iss_bundle_t [iwd-1:0]                   mf_rvalue;
-    logic        [iwd-1:0]                   mf_wena;
-    mwpram #(.width($bits(iss_bundle_t)), .depth(mfsz), .rports(iwd), .wports(iwd))
-        mf_inst(.clk(clk), .rst(rst),
-            .raddr(mf_raddr), .rvalue(mf_rvalue),
-            .waddr(mf_waddr), .wvalue(mf_in_data), .wena(mf_wena));
-    always_comb for (int i = 0; i < iwd; i++) mf_raddr[i] = mf_front + $clog2(mfsz)'(i);
-    always_comb for (int i = 0; i < iwd; i++) mf_waddr[i] = mf_raddr[i] + $clog2(mfsz)'(mf_num);
-    always_comb for (int i = 0; i < iwd; i++) mf_wena [i] = i < 32'(mf_in);
-    always_ff @(posedge clk) if (rst | redir) mf_prsb <= 0; else begin
-        for (int i = 0; i < mfsz; i++) // wakeup
-            for (int j = 0; j < ewd; j++) if (exe_bundle[j].opid[15]) begin
-                if (mf_prsa[i][0] == exe_bundle[j].prda) mf_prsb[i][0] <= 0;
-                if (mf_prsa[i][1] == exe_bundle[j].prda) mf_prsb[i][1] <= 0;
-            end
-        for (int i = 0; i < iwd; i++) if (mf_wena[i]) begin
-            mf_prsa[mf_waddr[i]] <= mf_in_data[i].prsa;
-            mf_prsb[mf_waddr[i]] <= mf_in_busy[i];
-        end
-    end
-    always_ff @(posedge clk) if (rst | redir) mf_front <= 0; else mf_front <= mf_front + $clog2(mfsz)'(mf_out);
-    always_ff @(posedge clk) if (rst | redir) mf_num <= 0; else mf_num <= mf_num + mf_in - mf_out;
+    /* if second oprand is not ready in store instruction, it can be issued once and
+       mark `iq_resend` to avoid duplication, and at last clear it when both ready */
+    always_ff @(posedge clk) if (rst | redir) iq_resend <= 0;
+        else for (int i = 0; i < iwd; i++)
+            if (iq_ready_pos[i][$clog2(iqsz)] & issue[i]) iq_resend[iq_raddr[i]] <= iss_bundle[i].prsb[1];
 
     /* issue arbiter */
-    logic [$clog2(iwd):0] mfvalid, mfissue;
     always_comb begin
-        mfvalid = 0; iss_bundle = 0;
-        /* currently only issue one memory operation in a single cycle */
-        if (fu_ready[1]) for (int i = 0; i < mwd; i++)
-            if (i < mf_num & ~|mf_prsb[mf_front + $clog2(mfsz)'(i)]) begin // MF ready
-                iss_bundle[i] = mf_rvalue[i];
-                mfvalid++;
-            end else break; // memory operations issue in-order
+        iss_bundle = 0;
         for (int i = 0; i < iwd; i++)
-            if (i + 32'(mfvalid) < iwd & iq_ready_pos[i][$clog2(iqsz)])
-                iss_bundle[i + 32'(mfvalid)] = iq_rvalue[i];
+            if (iq_ready_pos[i][$clog2(iqsz)]) begin
+                iss_bundle[i] = iq_rvalue[i];
+                iss_bundle[i].prsb = iq_prsb_fwd[iq_raddr[i]];
+            end
     end
     always_comb begin
-        mf_out = 0; iq_out = 0; mfissue = 0; iq_out_mask = 0;
-        if (fu_ready[1]) for (int i = 0; i < mwd; i++)
-            if (i < mf_num & ~|mf_prsb[mf_front + $clog2(mfsz)'(i)] & issue[i])
-                begin mf_out++; mfissue++; end
-            else break;
+        iq_out = 0; iq_out_mask = 0;
         for (int i = 0; i < iwd; i++)
-            if (i + 32'(mfissue) < iwd & iq_ready_pos[i][$clog2(iqsz)] & issue[i + 32'(mfissue)])
+            if (iq_ready_pos[i][$clog2(iqsz)] & ~iss_bundle[i].prsb[1] & issue[i])
                 begin iq_out++; iq_out_mask[iq_raddr[i]] = 1; end
     end
 endmodule

@@ -27,8 +27,10 @@ module execute #(
     /* read registers and send to function units */
     always_comb for (int i = 0; i < iwd; i++) begin
         reg_bundle[i].opid   = iss_bundle[i].opid;
-        reg_bundle[i].lsid   = iss_bundle[i].lsid;
+        reg_bundle[i].ldid   = iss_bundle[i].ldid;
+        reg_bundle[i].stid   = iss_bundle[i].stid;
         reg_bundle[i].ir     = iss_bundle[i].ir;
+        reg_bundle[i].pnpc   = iss_bundle[i].pnpc;
         reg_bundle[i].delta  = iss_bundle[i].delta;
         reg_bundle[i].fu     = iss_bundle[i].fu;
         reg_bundle[i].funct  = iss_bundle[i].funct;
@@ -38,6 +40,7 @@ module execute #(
         reg_bundle[i].b      = iss_bundle[i].b;
         reg_bundle[i].prs    = reg_resp[i];
         reg_bundle[i].prda   = iss_bundle[i].prda;
+        reg_bundle[i].prsb   = iss_bundle[i].prsb;
     end
 
     /* result arbiter */

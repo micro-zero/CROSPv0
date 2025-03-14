@@ -20,22 +20,29 @@ typedef struct packed {
 
 module vcore #(
     parameter pwd    = 4,
-    parameter mwd    = 2,
     parameter prnum  = 96,
     parameter rst_pc = 64'hc0000000,
     parameter tohost = 64'd0,
     parameter frhost = 64'd0,
     parameter dcbase = 64'h80000000,
-    parameter uart   = 64'h10000000
+    parameter uart   = 64'h10000000,
+    parameter clint  = 64'h2000000
 )(
     input  logic        clk,
     input  logic        rst,
-    input  logic        sync_rqst,
-    input  logic        sync_invl,
-    output logic        sync_done,
     input  logic [63:0] mip_ext,
     input  logic [63:0] mtime,
     /* interface propagation */
+    input  logic  [7:0] s_coh_rqst,
+    input  logic  [7:0] s_coh_trsc,
+    input  logic [63:0] s_coh_addr,
+    output logic  [7:0] s_coh_resp,
+    output logic  [7:0] s_coh_mesi,
+    output logic  [7:0] m_coh_rqst,
+    output logic  [7:0] m_coh_trsc,
+    output logic [63:0] m_coh_addr,
+    input  logic  [7:0] m_coh_resp,
+    input  logic  [7:0] m_coh_mesi,
     output logic  [7:0] m_axi_awid,
     output logic [63:0] m_axi_awaddr,
     output logic  [7:0] m_axi_awlen,
@@ -73,9 +80,6 @@ module vcore #(
     input  logic        m_axi_rlast,
     input  logic        m_axi_rvalid,
     output logic        m_axi_rready,
-    /* debug interface */
-    input  logic        read_mtime,      // mark the `mtime` memory response
-    input  logic [63:0] read_mtimeval,   // value of `mtime` memory response
     /* commit info */
     output logic        cmt       [3:0], // committing signals
     output logic  [1:0] cmt_level [3:0], // privilege level
@@ -108,9 +112,9 @@ module vcore #(
     output logic        del_csrw,        // CSR writing signal
     output logic [11:0] del_csra,        // CSR writing address
     output logic [63:0] del_csrv,        // CSR writing value
-    output logic  [7:0] del_memw [1:0],  // memory change signals
-    output logic [63:0] del_mema [1:0],  // memory change address
-    output logic [63:0] del_memv [1:0],  // memory change value
+    output logic  [7:0] del_memw,        // memory change signals
+    output logic [63:0] del_mema,        // memory change address
+    output logic [63:0] del_memv,        // memory change value
     /* stats */
     output logic [63:0] stallpc, // commit stalling position
     output logic [63:0] bmisp,   // back-end misprediction
@@ -124,13 +128,22 @@ module vcore #(
     output logic [63:0] itmiss,  // ITLB miss number
     output logic [63:0] dtmiss,  // DTLB miss number
     output logic [63:0] loads,   // load instruction number
-    output logic [63:0] stores   // store instruction number
+    output logic [63:0] stores,  // store instruction number
+    output logic [63:0] ldck1,   // load check result as 1
+    output logic [63:0] ldck2,   // load check result as 2
+    output logic [63:0] ldck3,   // load check result as 3
+    output logic [63:0] ldfwd,   // load forwarded
+    output logic [63:0] ldmisp   // load misprediction
 );
     /* instantiate core with direct memory interface */
-    logic [63:0] dp0, dp1, dp2;
-    crosplite #(.pwd(pwd), .mwd(mwd), .rst_pc(rst_pc), .dcbase(dcbase),
+    logic [63:0] dbg_cycle, dbg_pc0,dbg_pc1;
+    logic  [7:0] dbg_axi_stt, dbg_axi_req;
+    crosplite #(.pwd(pwd), .rst_pc(rst_pc), .dcbase(dcbase),
         .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
-        clk, rst, sync_rqst, sync_invl, sync_done, mip_ext, mtime, dp0, dp1, dp2,
+        clk, rst, mip_ext, mtime,
+        dbg_cycle, dbg_pc0, dbg_pc1, dbg_axi_stt, dbg_axi_req,
+        s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
+        m_coh_rqst, m_coh_trsc, m_coh_addr, m_coh_resp, m_coh_mesi,
         m_axi_awid, m_axi_awaddr, m_axi_awlen, m_axi_awsize, m_axi_awburst,
         m_axi_awlock, m_axi_awcache, m_axi_awprot, m_axi_awqos,
         m_axi_awvalid, m_axi_awready,
@@ -163,6 +176,9 @@ module vcore #(
 
     /* architectural states change */
     rob_csr_t rob_csr[127:0];
+    logic [7:0][63:0] st_addr, st_data;
+    logic [7:0] [7:0] st_size;
+    logic [5:0] st_offset;
     always_comb begin
         for (int i = 0; i < pwd; i++) begin
             cmt      [i] = inst.com_bundle[i].opid[15] & ~inst.com_bundle[i].redir &
@@ -210,17 +226,19 @@ module vcore #(
             del_csra = del_csra + 12'h200; // sstatus, sip, sie
         if (del_csra >= 12'hc00 && del_csra <= 12'hc02)
             del_csra = del_csra - 12'h100; // cycle, time, instret
-        del_memw[0] = 0;
-        del_mema[0] = inst.l1_inst.dset_padd;
-        del_memv[0] = inst.l1_inst.dset_wdat[63:0];
-        if (~inst.l1_inst.axi_dcw & ~inst.l1_inst.axi_dcr & inst.l1_inst.dset_rqst[7] &
-            inst.l1_inst.dset_hitpos[3] & inst.l1_inst.dset_wdat[64])
-            del_memw[0] = 8'(1 << inst.l1_inst.dset_bits[1:0]);
-        del_memw[1] = 0;
-        del_mema[1] = inst.l1_inst.m_axi_awaddr;
-        del_memv[1] = inst.l1_inst.m_axi_wdata;
-        if (inst.l1_inst.axi_stt == 35 & inst.l1_inst.m_axi_bvalid)
-            del_memw[1] = $countones(inst.l1_inst.m_axi_wstrb);
+        del_memw = inst.dc_resp[7:4] == 4'b1111 & ~|inst.dc_miss ? st_size[3'(inst.dc_resp)] : 0;
+        del_mema = st_addr[3'(inst.dc_resp)];
+        del_memv = st_data[3'(inst.dc_resp)];
+    end
+    /* address and write data stored with request */
+    always_comb begin
+        st_offset = 0;
+        for (int i = 63; i >= 0; i--) if (inst.dc_strb[i]) st_offset = 6'(i);
+    end
+    always_ff @(posedge clk) if (inst.dc_rqst[7:4] == 4'b1111) begin
+        st_addr[3'(inst.dc_rqst)] <= inst.dc_addr;
+        st_data[3'(inst.dc_rqst)] <= inst.dc_wdat >> 8 * st_offset;
+        st_size[3'(inst.dc_rqst)] <= $countones(inst.dc_strb);
     end
     /* extract CSR info after decode stage */
     always_ff @(posedge clk) for (int i = 0; i < pwd; i++) if (inst.dec_inst.decode[i]) begin
@@ -236,9 +254,10 @@ module vcore #(
         rob_csr[7'(inst.dec_bundle[i].opid)].stval <= inst.csr_inst.stval;
         rob_csr[7'(inst.dec_bundle[i].opid)].mip <= inst.csr_inst.mip;
     end
-    /* between execution and commit, `mcycle` and `minstret`
-       will change, so the state extraction will hold values
-       after execution for testbench checking */
+    /* between decoding and execution, `mcycle`, `minstret`
+       and `mtime` will change, so the state extraction will
+       hold values after execution for testbench checking */
+    logic read_mtime;
     always_ff @(posedge clk) if (rst) cmt_mcycle <= 0;
         else if (inst.csr_inst.rqst & (inst.csr_inst.addr == 12'hb00 | inst.csr_inst.addr == 12'hc00))
             cmt_mcycle   <= inst.csr_inst.eout ? inst.csr_inst.mcycle   : inst.csr_inst.wres;
@@ -248,33 +267,37 @@ module vcore #(
     always_ff @(posedge clk) if (rst) cmt_mtime <= 0;
         else if (inst.csr_inst.rqst & inst.csr_inst.addr == 12'hc01)
             cmt_mtime <= inst.csr_inst.eout ? cmt_mtime : inst.csr_inst.wres;
-        else if (read_mtime) cmt_mtime <= read_mtimeval;
+        else if (read_mtime & inst.m_axi_rvalid & inst.m_axi_rready) cmt_mtime <= inst.m_axi_rdata;
+    always_ff @(posedge clk) if (rst) read_mtime <= 0;
+        else if (inst.m_axi_arvalid & inst.m_axi_arready & inst.m_axi_araddr == clint + 64'hbff8) read_mtime <= 1;
+        else if (inst.m_axi_rvalid & inst.m_axi_rready) read_mtime <= 0;
 
     /* other stats */
     always_comb begin stallpc = 0; for (int i = pwd - 1; i >= 0; i--)
         if (|inst.com_inst.rob_num & ~|inst.com_inst.rob_out)
             stallpc = inst.com_inst.dec_rvalue[0].pc; end
     always_ff @(posedge clk) if (rst) {bmisp, brmisp, jmisp, jrmisp, fmisp} <= 0;
-        else if (inst.com_bundle[0].redir) begin
+        else if (inst.com_bundle[0].redir & inst.com_bundle[0].brid[7]) begin
             bmisp <= bmisp + 1;
             if (inst.com_inst.dec_last.branch) brmisp <= brmisp + 1;
             if (inst.com_inst.dec_last.jal)    jmisp  <= jmisp + 1;
             if (inst.com_inst.dec_last.jalr)   jrmisp <= jrmisp + 1;
-        end else if (|inst.fe_inst.redir)  fmisp  <= fmisp + 1;
-    always_ff @(posedge clk) if (rst) loads <= 0; else loads <= loads +
-        (inst.s_dcache_rqst[0][7] & ~inst.s_dcache_wena[0] ? 1 : 0) +
-        (inst.s_dcache_rqst[1][7] & ~inst.s_dcache_wena[1] ? 1 : 0);
-    always_ff @(posedge clk) if (rst) stores <= 0; else stores <= stores +
-        (inst.s_dcache_rqst[0][7] & inst.s_dcache_wena[0] ? 1 : 0) +
-        (inst.s_dcache_rqst[1][7] & inst.s_dcache_wena[1] ? 1 : 0);
-    always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (|inst.l1_inst.axi_done)  dcmiss <= dcmiss + 1;
-    always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.l1_inst.dc_done[9]) icmiss <= icmiss + 1;
-    always_ff @(posedge clk) if (rst) stmiss <= 0;
-        else if (inst.l1_inst.ptw_done & ~|inst.l1_inst.stlb_done) stmiss <= stmiss + 1;
-    always_ff @(posedge clk) if (rst) itmiss <= 0;
-        else if (inst.l1_inst.stlb_done[0] & ~inst.l1_inst.itlb_done[7]) itmiss <= itmiss + 1;
-    always_ff @(posedge clk) if (rst) dtmiss <= 0;
-        else if (inst.l1_inst.stlb_done[1] & ~inst.l1_inst.dtlb_done[7]) dtmiss <= dtmiss + 1;
+        end else if (inst.fe_inst.fredir)      fmisp  <= fmisp + 1;
+    always_ff @(posedge clk) if (rst) loads  <= 0; else if (|inst.dc_rqst & ~|inst.dc_strb) loads <= loads  + 1;
+    always_ff @(posedge clk) if (rst) stores <= 0; else if (|inst.dc_rqst & |inst.dc_strb) stores <= stores + 1;
+    always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.icache.mshr_out) icmiss <= icmiss + 1;
+    always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (inst.mmu_inst.dcache.mshr_out) dcmiss <= dcmiss + 1;
+    always_ff @(posedge clk) if (rst) itmiss <= 0; else if (inst.mmu_inst.itlb.fill)       itmiss <= itmiss + 1;
+    always_ff @(posedge clk) if (rst) dtmiss <= 0; else if (inst.mmu_inst.dtlb.fill)       dtmiss <= dtmiss + 1;
+    always_ff @(posedge clk) if (rst) stmiss <= 0; else if (inst.mmu_inst.stlb.fill)       stmiss <= stmiss + 1;
+    always_ff @(posedge clk) if (rst) {ldck1, ldck2, ldck3} <= 0; else if (|inst.lsu_inst.ck_resp[0])
+        if      (inst.lsu_inst.ck_rslt[0] == 1) ldck1 <= ldck1 + 1;
+        else if (inst.lsu_inst.ck_rslt[0] == 2) ldck2 <= ldck2 + 1;
+        else if (inst.lsu_inst.ck_rslt[0] == 3) ldck3 <= ldck3 + 1;
+    always_ff @(posedge clk) if (rst) ldfwd <= 0;
+        else if (|inst.lsu_inst.ck_resp[0] & inst.lsu_inst.ck_forw[0][64]) ldfwd <= ldfwd + 1;
+    always_ff @(posedge clk) if (rst) ldmisp <= 0;
+        else if (inst.com_inst.exe_last.retry) ldmisp <= ldmisp + 1;
 
     /* assertion */
     always_comb assert(inst.dec_inst.opnum <= inst.dec_inst.opsz);

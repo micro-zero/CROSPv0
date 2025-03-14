@@ -26,6 +26,17 @@ module socc #(
     output logic [3:0] sd_dat_o,
     output logic       sd_reset,
     output logic       sd_sclk,
+    /* coherence interface */
+    input  logic  [7:0] s_coh_rqst,
+    input  logic  [7:0] s_coh_trsc,
+    input  logic [63:0] s_coh_addr,
+    output logic  [7:0] s_coh_resp,
+    output logic  [7:0] s_coh_mesi,
+    output logic  [7:0] m_coh_rqst,
+    output logic  [7:0] m_coh_trsc,
+    output logic [63:0] m_coh_addr,
+    input  logic  [7:0] m_coh_resp,
+    input  logic  [7:0] m_coh_mesi,
     /* master interface for SOCC */
     output logic  [7:0] m_axi_awid,
     output logic [63:0] m_axi_awaddr,
@@ -292,6 +303,13 @@ module socc #(
         6: // bootloading finished, CPU running
             bl_stt <= 6;
     endcase
+
+    /* coherence interface (not used in single core) */
+    always_ff @(posedge clk) if (rst) s_coh_resp <= 0; else s_coh_resp <= s_coh_rqst;
+    always_ff @(posedge clk) if (rst) s_coh_mesi <= 0; else s_coh_mesi <= 1;
+    always_ff @(posedge clk) if (rst) m_coh_rqst <= 0; else m_coh_rqst <= 0;
+    always_ff @(posedge clk) if (rst) m_coh_trsc <= 0; else m_coh_trsc <= 0;
+    always_ff @(posedge clk) if (rst) m_coh_addr <= 0; else m_coh_addr <= 0;
 
     /* debug port */
     always_comb dp0 = 32'(bl_stt);

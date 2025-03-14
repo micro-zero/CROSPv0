@@ -38,24 +38,25 @@ module commit #(
     /* exception return signals */
     output logic  [2:0] eret,      // exception return bits (MSB is valid bit)
     /* ID control */
-    output logic  [7:0] nextlsid,  // next operation ID to commit
+    output logic [15:0] nextopid,  // next store ID to commit
     /* fences */
-    output logic fencei, // fence.i committed
-    output logic sfence  // sfence.vma committed
+    output logic fencei,           // fence.i committed
+    output logic sfence            // sfence.vma committed
 );
     /* pipeline redirect and rollback */
     logic redir, rollback, rollback_last;
     always_comb redir = com_bundle[0].redir;
 
     /* ROB entry */
-    logic [$clog2(usz)-1:0] rob_front;                // front index
-    logic [$clog2(usz):0]   rob_num, rob_in, rob_out; // ROB related numbers
-    logic     [cwd-1:0][$clog2(usz)-1:0] rob_raddr;   // ROB read addresses
-    logic [usz-1:0] dec, ren, exe, exe_fwd;           // ROB write-back status
+    logic [$clog2(usz)-1:0] rob_front;                    // front index
+    logic [$clog2(usz):0]   rob_num, rob_in, rob_out;     // ROB related numbers
+    logic     [cwd-1:0][$clog2(usz)-1:0] rob_raddr;       // ROB read addresses
+    logic [usz-1:0] dec, ren, exe, exe_fwd, spc, spc_fwd; // ROB write-back status
     always_ff @(posedge clk) if (rst | redir) rob_front <= 0;
         else rob_front <= rob_front + $clog2(usz)'(rob_out);
     always_ff @(posedge clk) if (rst | redir) rob_num <= 0;
-        else if (rollback & ~ren_bundle[0].opid[15]) rob_num <= 32'(rob_num) < cwd ? 0 : rob_num - $clog2(usz)'(cwd);
+        else if (rollback & ~ren_bundle[0].opid[15])
+            rob_num <= 32'(rob_num) < cwd ? 0 : rob_num - $clog2(usz)'(cwd);
         else rob_num <= rob_num + rob_in - rob_out;
     always_comb for (int i = 0; i < cwd; i++)
         if (rollback) rob_raddr[i] = rob_front + $clog2(usz)'(rob_num) - 1 - $clog2(usz)'(i);
@@ -70,7 +71,8 @@ module commit #(
         dec_waddr [i]      = $clog2(usz)'(dec_bundle[i].opid);
         dec_wena  [i]      = dec_bundle[i].opid[15];
         dec_wvalue[i].brid = dec_bundle[i].brid;
-        dec_wvalue[i].lsid = dec_bundle[i].lsid;
+        dec_wvalue[i].ldid = dec_bundle[i].ldid;
+        dec_wvalue[i].stid = dec_bundle[i].stid;
         dec_wvalue[i].pc   = dec_bundle[i].pc;
         dec_wvalue[i].pat  = dec_bundle[i].pat;
         dec_wvalue[i].ir   = dec_bundle[i].ir;
@@ -115,14 +117,16 @@ module commit #(
     rob_exe_t [ewd-1:0]                  exe_wvalue;     // writing values in ROB
     logic     [ewd-1:0]                  exe_wena;       // ROB write enable signals after EXE stage
     always_comb for (int i = 0; i < ewd; i++) begin
-        exe_waddr [i]        = $clog2(usz)'(exe_bundle[i].opid);
-        exe_wena  [i]        = exe_bundle[i].opid[15];
-        exe_wvalue[i].npc    = exe_bundle[i].npc & ~64'd1; // avoid misaligned fetch
-        exe_wvalue[i].cause  = exe_bundle[i].cause;
-        exe_wvalue[i].ret    = exe_bundle[i].ret;
-        exe_wvalue[i].flush  = exe_bundle[i].flush;
-        exe_wvalue[i].mem    = exe_bundle[i].mem;
-        exe_wvalue[i].csr    = exe_bundle[i].csr;
+        exe_waddr [i]       = $clog2(usz)'(exe_bundle[i].opid);
+        exe_wena  [i]       = exe_bundle[i].opid[15];
+        exe_wvalue[i].npc   = exe_bundle[i].npc & ~64'd1; // avoid misaligned fetch
+        exe_wvalue[i].cause = exe_bundle[i].cause;
+        exe_wvalue[i].ret   = exe_bundle[i].ret;
+        exe_wvalue[i].misp  = exe_bundle[i].misp;
+        exe_wvalue[i].flush = exe_bundle[i].flush;
+        exe_wvalue[i].retry = exe_bundle[i].retry;
+        exe_wvalue[i].mem   = exe_bundle[i].mem;
+        exe_wvalue[i].csr   = exe_bundle[i].csr;
     end
     always_comb for (int i = 0; i < cwd; i++) begin
         exe_rvalue_fwd[i] = exe_rvalue[i];
@@ -151,16 +155,20 @@ module commit #(
     end
     always_comb begin
         exe_fwd = exe;
+        spc_fwd = spc;
         for (int i = 0; i < ewd; i++) if (exe_wena[i]) exe_fwd[$clog2(usz)'(exe_waddr[i])] = 1;
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) spc_fwd[$clog2(usz)'(exe_waddr[i])] = exe_bundle[i].specul;
     end
-    always_ff @(posedge clk) if (rst | redir) {dec, ren, exe} <= 0; else begin
+    always_ff @(posedge clk) if (rst | redir) {dec, ren, exe, spc} <= 0; else begin
         for (int i = 0; i < dwd; i++) if (dec_wena[i]) dec[$clog2(usz)'(dec_waddr[i])] <= 1;
         for (int i = 0; i < rwd; i++) if (ren_wena[i]) ren[$clog2(usz)'(ren_waddr[i])] <= 1;
         for (int i = 0; i < ewd; i++) if (exe_wena[i]) exe[$clog2(usz)'(exe_waddr[i])] <= 1;
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) spc[$clog2(usz)'(exe_waddr[i])] <= exe_bundle[i].specul;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
             dec[$clog2(usz)'(com_bundle[i].opid)] <= 0;
             ren[$clog2(usz)'(com_bundle[i].opid)] <= 0;
             exe[$clog2(usz)'(com_bundle[i].opid)] <= 0;
+            spc[$clog2(usz)'(com_bundle[i].opid)] <= 0;
         end
     end
     always_ff @(posedge clk) if (rst | redir) eid_last  <= 0; else eid_last  <= eid_new;
@@ -173,32 +181,34 @@ module commit #(
     rob_ren_t ren_last;        // renaming part of last commited entry
     logic [cwd-1:0] com_redir; // redirection of `cwd` instructions to commit
     always_comb begin
-        nextlsid = dec_rvalue[0].lsid;
-        for (int i = 1; i < cwd; i++)
-            if (~com_redir[i] & com_bundle[i - 1].opid[15])
-                nextlsid = dec_rvalue[i].lsid;
-        if (com_bundle[cwd - 1].opid[15])
-            nextlsid = 0;
+        nextopid = {1'b1, 15'(rob_front)};
+        for (int i = 1; i < cwd; i++) if (~com_redir[i] & com_bundle[i - 1].opid[15])
+            nextopid = {1'b1, 15'(rob_front) + 15'(i)};
+        if (com_bundle[cwd - 1].opid[15]) nextopid = 0;
     end
     always_comb begin
         com_redir = 0;
-        com_redir[0] = |rob_num & dec_rvalue[0].pc != exe_last.npc | // misprediction
-                       exe_last.cause[7]                           | // exception
-                       exe_last.ret[2]                             | // return from exception
-                       exe_last.flush;                               // instructions requiring flush
+        com_redir[0] = exe_last.misp     | // misprediction
+                       exe_last.cause[7] | // exception
+                       exe_last.ret[2]   | // return from exception
+                       exe_last.flush    | // instructions requiring flush
+                       exe_last.retry;     // instructions requiring retry
         for (int i = 1; i < cwd; i++) if (i < 32'(rob_num))
-            com_redir[i] = dec_rvalue[i].pc != exe_rvalue_fwd[i - 1].npc | // misprediction
-                           exe_rvalue_fwd[i - 1].cause[7]                | // exception
-                           exe_rvalue_fwd[i - 1].ret[2]                  | // return from exception
-                           exe_rvalue_fwd[i - 1].flush;                    // instructions requiring flush
+            com_redir[i] = exe_rvalue_fwd[i - 1].misp     | // misprediction
+                           exe_rvalue_fwd[i - 1].cause[7] | // exception
+                           exe_rvalue_fwd[i - 1].ret[2]   | // return from exception
+                           exe_rvalue_fwd[i - 1].flush;     // instructions requiring flush
     end
-    always_comb rollback = (exe_last.cause[7] | exe_last.flush | exe_last.ret[2]) & (|rob_num | ~rollback_last);
+    always_comb rollback = (|rob_num | ~rollback_last) &
+        (exe_last.cause[7] | exe_last.ret[2] | exe_last.flush | exe_last.retry);
     always_comb begin
         {exception, epc, tval, cause, eret} = 0;
         /* make up commit bundle */
         for (int i = 0; i < cwd; i++) begin
             com_bundle[i].opid     = {1'b1, 15'(rob_raddr[i])};
             com_bundle[i].brid     = dec_rvalue[i].brid;
+            com_bundle[i].ldid     = dec_rvalue[i].ldid;
+            com_bundle[i].stid     = dec_rvalue[i].stid;
             com_bundle[i].pc       = dec_rvalue[i].pc;
             com_bundle[i].call     = dec_rvalue[i].call;
             com_bundle[i].ret      = dec_rvalue[i].ret;
@@ -221,7 +231,9 @@ module commit #(
             /* set redirection commit bundle */
             com_bundle = 0;
             com_bundle[0].redir = 1;
-            com_bundle[0].brid = exception ? 0 : dec_last.brid;
+            com_bundle[0].brid = exception | eret[2] | exe_last.flush | exe_last.retry ? 0 : dec_last.brid;
+            com_bundle[0].ldid = dec_last.ldid;
+            com_bundle[0].stid = dec_last.stid;
             com_bundle[0].pc = dec_last.pc;
             com_bundle[0].pat = dec_last.pat;
             com_bundle[0].comp = ~&dec_last.ir[1:0];
@@ -232,7 +244,8 @@ module commit #(
         /* set validation of commit */
         for (int i = 0; i < cwd; i++) if (i >= rob_num) com_bundle[i].opid = 0;           // exceeds size of queue
         for (int i = 0; i < cwd; i++) if (com_redir[i]) com_bundle[i].opid = 0;           // encounter redirection
-        for (int i = 0; i < cwd; i++) if (~exe_fwd[rob_raddr[i]]) com_bundle[i].opid = 0; // not ready
+        for (int i = 0; i < cwd; i++) if (~exe_fwd[rob_raddr[i]] | spc_fwd[rob_raddr[i]]) // not ready
+            com_bundle[i].opid = 0;
         for (int i = 1; i < cwd; i++)
             for (int j = 0; j < i; j++) begin
                 if ((com_bundle[i].call | com_bundle[i].ret) & (com_bundle[j].call | com_bundle[j].ret))
@@ -271,11 +284,14 @@ module commit #(
         exe_last <= exe_rvalue_fwd[32'(rob_out) - 1];
         ren_last <= ren_rvalue[32'(rob_out) - 1];
     end else if (com_bundle[0].redir) begin
-        exe_last.flush <= 0; // clear `flush`, `cause` and `ret` when redirection taken
+        exe_last.misp <= 0; // clear redirection bits when redirection taken
+        exe_last.flush <= 0;
+        exe_last.retry <= 0;
         exe_last.cause <= 0;
         exe_last.ret <= 0;
         exe_last.npc <= com_bundle[0].npc;
-    end
+    end else if (exe_fwd[rob_raddr[0]] & exe_rvalue_fwd[0].retry)
+        exe_last.retry <= 1;
     /* exception requires rollback of last committed instruction which causes exception */
     /* `rollback_last` will delay rollback for one cycle to roll back the last committed */
     always_ff @(posedge clk) if (rst) rollback_last <= 1;

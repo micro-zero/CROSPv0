@@ -9,20 +9,17 @@
  * @param fnvcd filename of waveform
  * @param fnsave filename of saved checkpoint
  */
-verifcore::verifcore(const char *fnvcd, const char *fnsave)
+verifcore::verifcore(const char *fnvcd)
 {
     st = cycle = 0;
     st = cycle = 0;
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
-    save = fnsave ? new (std::nothrow) VerilatedSave : NULL;
     if (vcd)
     {
         Verilated::traceEverOn(true);
         dut.trace(vcd, 5);
         vcd->open(fnvcd);
     }
-    if (save)
-        save->open(fnsave);
 }
 
 /**
@@ -32,10 +29,7 @@ verifcore::~verifcore()
 {
     if (vcd)
         vcd->close();
-    if (save)
-        save->close();
     delete vcd;
-    delete save;
 }
 
 /**
@@ -45,11 +39,13 @@ verifcore::~verifcore()
 verifcore::operator axiport_t() const
 {
     axiport_t ap;
+    ap.awid = dut.m_axi_awid;
     ap.awvalid = dut.m_axi_awvalid;
     ap.awaddr = dut.m_axi_awaddr;
     ap.awburst = dut.m_axi_awburst;
     ap.awlen = dut.m_axi_awlen;
     ap.awsize = dut.m_axi_awsize;
+    ap.arid = dut.m_axi_arid;
     ap.arvalid = dut.m_axi_arvalid;
     ap.araddr = dut.m_axi_araddr;
     ap.arburst = dut.m_axi_arburst;
@@ -74,10 +70,12 @@ axidev &verifcore::operator<=(const axiport_t &ap)
     dut.m_axi_awready = ap.awready;
     dut.m_axi_arready = ap.arready;
     dut.m_axi_wready = ap.wready;
+    dut.m_axi_rid = ap.rid;
     dut.m_axi_rvalid = ap.rvalid;
     dut.m_axi_rresp = ap.rresp;
     dut.m_axi_rdata = ap.rdata;
     dut.m_axi_rlast = ap.rlast;
+    dut.m_axi_bid = ap.bid;
     dut.m_axi_bvalid = ap.bvalid;
     dut.m_axi_bresp = ap.bresp;
     return *this;
@@ -130,9 +128,8 @@ verifcore &verifcore::operator>>(dels_t &dels)
     for (int i = 0; i < PWD; i++)
         if (dut.del_gprw[i])
             dels.gprs.push({.w = 1, .a = dut.del_gpra[i], .v = dut.del_gprv[i]});
-    for (int i = 0; i < MWD; i++)
-        if (dut.del_memw[i])
-            dels.mems.push({.w = dut.del_memw[i], .a = dut.del_mema[i], .v = dut.del_memv[i]});
+    if (dut.del_memw)
+        dels.mems.push({.w = dut.del_memw, .a = dut.del_mema, .v = dut.del_memv});
     if (dut.del_csrw)
         dels.csrs.push({.w = 1, .a = dut.del_csra, .v = dut.del_csrv});
     return *this;
@@ -152,6 +149,11 @@ verifcore &verifcore::operator>>(stat_t &stat)
     stat.stmiss = dut.stmiss;
     stat.itmiss = dut.itmiss;
     stat.dtmiss = dut.dtmiss;
+    stat.check[0] = dut.ldck1;
+    stat.check[1] = dut.ldck2;
+    stat.check[2] = dut.ldck3;
+    stat.fwd = dut.ldfwd;
+    stat.ldmisp = dut.ldmisp;
     return *this;
 }
 
@@ -180,6 +182,65 @@ void verifcore::record()
         vcd->dump(st);
 }
 
+/**
+ * @brief Save to checkpoint file
+ * @param fn filename of checkpoint
+ */
+void verifcore::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn filename of checkpoint
+ * @return -1 if error occurs
+ */
+int verifcore::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) < 0 ||
+        fread(&cycle, sizeof(cycle), 1, fp) < 0)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
+}
+
 /*-----------------------------------------------------------*\
 |*                   Interrupt controller                    *|
 \*-----------------------------------------------------------*/
@@ -189,20 +250,17 @@ void verifcore::record()
  * @param fnvcd filename of waveform
  * @param fnsave filename of saved checkpoint
  */
-intctl::intctl(const char *fnvcd, const char *fnsave)
+intctl::intctl(const char *fnvcd)
 {
     st = cycle = 0;
     wrec = {0, 0, 0};
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
-    save = fnsave ? new (std::nothrow) VerilatedSave : NULL;
     if (vcd)
     {
         Verilated::traceEverOn(true);
         dut.trace(vcd, 5);
         vcd->open(fnvcd);
     }
-    if (save)
-        save->open(fnsave);
 }
 
 /**
@@ -212,10 +270,7 @@ intctl::~intctl()
 {
     if (vcd)
         vcd->close();
-    if (save)
-        save->close();
     delete vcd;
-    delete save;
 }
 
 /**
@@ -225,6 +280,8 @@ intctl::~intctl()
 intctl::operator axiport_t() const
 {
     axiport_t ap;
+    ap.arid = dut.s_axi_arid;
+    ap.awid = dut.s_axi_awid;
     ap.awready = dut.s_axi_awready;
     ap.arready = dut.s_axi_arready;
     ap.wready = dut.s_axi_wready;
@@ -244,11 +301,13 @@ intctl::operator axiport_t() const
  */
 axidev &intctl::operator<<(const axiport_t &ap)
 {
+    dut.s_axi_awid = ap.awid;
     dut.s_axi_awvalid = ap.awvalid;
     dut.s_axi_awaddr = ap.awaddr;
     dut.s_axi_awburst = ap.awburst;
     dut.s_axi_awlen = ap.awlen;
     dut.s_axi_awsize = ap.awsize;
+    dut.s_axi_arid = ap.arid;
     dut.s_axi_arvalid = ap.arvalid;
     dut.s_axi_araddr = ap.araddr;
     dut.s_axi_arburst = ap.arburst;
@@ -307,9 +366,6 @@ void intctl::posedge()
     }
     if (dut.s_axi_arvalid && dut.s_axi_arready)
         raddr = dut.s_axi_araddr;
-    read_mtime = 0;
-    if (dut.s_axi_rvalid && dut.s_axi_rready && raddr == CLINT + 0xbff8)
-        read_mtime = 1, read_mtimeval = dut.s_axi_rdata;
     dut.clk = 1, dut.eval(), st++, cycle++;
 }
 
@@ -320,4 +376,67 @@ void intctl::record()
 {
     if (vcd)
         vcd->dump(st);
+}
+
+/**
+ * @brief Save to checkpoint file
+ * @param fn checkpoint file name
+ */
+void intctl::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fwrite(&wrec, sizeof(wrec), 1, fp);
+    fwrite(&raddr, sizeof(raddr), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn checkpoint file name
+ * @return -1 if error occurs
+ */
+int intctl::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) < 0 ||
+        fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
+        fread(&wrec, sizeof(wrec), 1, fp) < 0 ||
+        fread(&raddr, sizeof(raddr), 1, fp) < 0)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
 }

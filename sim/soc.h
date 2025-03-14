@@ -7,9 +7,6 @@
 #ifndef PWD
 #define PWD 4
 #endif
-#ifndef MWD
-#define MWD 2
-#endif
 #ifndef INITRD
 #define INITRD 0xfe60fe00
 #endif
@@ -66,6 +63,7 @@ typedef struct
     uint64_t icmiss, dcmiss;         // cache miss numbers
     uint64_t loads, stores;          // load/store numbers
     uint64_t stmiss, itmiss, dtmiss; // S/I/DTLB miss numbers
+    uint64_t check[3], fwd, ldmisp;  // load check result
 } stat_t;
 
 /**
@@ -76,21 +74,20 @@ typedef struct
 class verifcore : public axidev
 {
 private:
-    uint64_t st, cycle;  // simulation time and cycle
-    Vvcore dut;          // design under test
-    VerilatedVcdC *vcd;  // trace pointer
-    VerilatedSave *save; // checkpoint pointer
+    uint64_t st, cycle; // simulation time and cycle
+    Vvcore dut;         // design under test
+    VerilatedVcdC *vcd; // trace pointer
 
 public:
     uint8_t &rst = dut.rst;
-    uint8_t &sync_rqst = dut.sync_rqst;
-    uint8_t &sync_done = dut.sync_done;
-    uint8_t &sync_invl = dut.sync_invl;
-    uint64_t &mtime = dut.mtime;
+    uint64_t &mtime = dut.mtime; // interrupt controller ports
     uint64_t &mip_ext = dut.mip_ext;
-    uint8_t &read_mtime = dut.read_mtime;
-    uint64_t &read_mtimeval = dut.read_mtimeval;
-    verifcore(const char *fnvcd = 0, const char *fnsave = 0);
+    uint8_t &scrqst = dut.s_coh_rqst, &mcrqst = dut.m_coh_rqst; // coherence ports
+    uint8_t &sctrsc = dut.s_coh_trsc, &mctrsc = dut.m_coh_trsc;
+    uint8_t &scresp = dut.s_coh_resp, &mcresp = dut.m_coh_resp;
+    uint8_t &scmesi = dut.s_coh_mesi, &mcmesi = dut.m_coh_mesi;
+    uint64_t &scaddr = dut.s_coh_addr, &mcaddr = dut.m_coh_addr;
+    verifcore(const char *fnvcd = 0);
     ~verifcore();
     operator axiport_t() const;
     axidev &operator<=(const axiport_t &ap);
@@ -101,6 +98,8 @@ public:
     void negedge();
     void posedge();
     void record();
+    void checkpoint(const char *fn);
+    int restore(const char *fn);
 };
 
 /**
@@ -111,19 +110,16 @@ public:
 class intctl : public axidev
 {
 private:
-    uint64_t st, cycle;  // simulation time and cycle
-    del_t wrec;          // write transaction record
-    uint64_t raddr;      // read transaction address
-    Vintc dut;           // design under test
-    VerilatedVcdC *vcd;  // trace pointer
-    VerilatedSave *save; // checkpoint pointer
+    uint64_t st, cycle; // simulation time and cycle
+    del_t wrec;         // write transaction record
+    uint64_t raddr;     // read transaction address
+    Vintc dut;          // design under test
+    VerilatedVcdC *vcd; // trace pointer
 
 public:
     uint64_t &int_pend = dut.int_pend;
     uint64_t &int_time = dut.int_time;
-    uint8_t read_mtime; // additional ports
-    uint64_t read_mtimeval;
-    intctl(const char *fnvcd = 0, const char *fnsave = 0);
+    intctl(const char *fnvcd = 0);
     ~intctl();
     operator axiport_t() const;
     axidev &operator<<(const axiport_t &ap);
@@ -132,4 +128,6 @@ public:
     void negedge();
     void posedge();
     void record();
+    void checkpoint(const char *fn);
+    int restore(const char *fn);
 };
