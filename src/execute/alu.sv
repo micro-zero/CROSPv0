@@ -85,6 +85,7 @@ module alu #(
             result[g].npc   = jump ? jpc : in.base[63:0] + 63'(in.delta); // `base` is PC in common instructions
             result[g].ret   = f.ret;
             result[g].flush = f.fencei | f.sfence;
+            result[g].misp  = (f.j | |f.bmask) & in.pnpc != result[g].npc;
             result[g].prda  = in.prda[1];
             result[g].prdv  = res;
             /* some exception caused by instructions */
@@ -112,8 +113,7 @@ module alu #(
     always_ff @(posedge clk) if (rst | flush) eq_front <= 0; else eq_front <= eq_front + $clog2(eqsz)'(eq_out);
     always_ff @(posedge clk) if (rst | flush) eq_num <= 0; else eq_num <= eq_num + eq_in - eq_out;
     mwpram #(.width($bits(exe_bundle_t)), .depth(eqsz), .rports(ewd), .wports(ewd))
-        eq_inst(.clk(clk), .rst(rst),
-            .raddr(eq_raddr), .rvalue(eq_rvalue),
+        eq_inst(.clk(clk), .rst(rst), .raddr(eq_raddr), .rvalue(eq_rvalue),
             .waddr(eq_waddr), .wvalue(result), .wena(eq_wena));
     always_comb ready = ewd <= eqsz - 32'(eq_num); // ready when able to holding `ewd` operations
     always_comb for (int i = 0; i < ewd; i++) begin

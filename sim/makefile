@@ -125,14 +125,14 @@ main : verif.o soc.o main.o
 	$(CXX) -O2 verif.o soc.o main.o .vcore/libvcore.a .intc/libintc.a -o main
 
 rv : main
-	bash -c "$$RVTESTS_SCRIPT"
+	@bash -c "$$RVTESTS_SCRIPT"
 
 hex : main
-	bash -c "$$HEXTESTS_SCRIPT"
+	@bash -c "$$HEXTESTS_SCRIPT"
 
 pk : main
-	make -C ../util/dt
-	./main -s -dtb ../util/dt/spike.dtb $$RISCV/riscv64-unknown-elf/bin/pk $(PKARG)
+	@make -C ../util/dt >/dev/null
+	@./main -s -dtb ../util/dt/spike.dtb $$RISCV/riscv64-unknown-elf/bin/pk $(PKARG)
 
 sim : sim.o verif.o
 	$(CXX) -O2 sim.o verif.o -o sim

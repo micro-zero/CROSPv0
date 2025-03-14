@@ -60,12 +60,11 @@ module intc #(
     logic [63:0] mtime, mtimecmp; // memory-mapped CSR "mtime/mtimecmp"
     logic [63:0] timer;           // time counter
     logic [63:0] waddr, wdata;    // AXI write address and data
-    always_comb begin
-        int_pend = 0;
-        int_pend[3] = msip;             // MSIP
-        int_pend[7] = mtime > mtimecmp; // MTIP
-    end
     always_comb int_time = mtime; // to support extension "zicntr"
+    always_ff @(posedge clk) if (rst) int_pend <= 0; else begin
+        int_pend[3] <= msip;             // MSIP
+        int_pend[7] <= mtime > mtimecmp; // MTIP
+    end
     always_ff @(posedge clk) if (rst) begin
         s_axi_arready <= 1;
         s_axi_rvalid  <= 0;

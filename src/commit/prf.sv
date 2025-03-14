@@ -36,6 +36,8 @@ module prf #(
             if (ren_bundle[i].prsa[0] == ren_bundle[j].prda[1]) busy_resp[i][0] = 1;
             if (ren_bundle[i].prsa[1] == ren_bundle[j].prda[1]) busy_resp[i][1] = 1;
         end
+        if (~|ren_bundle[i].prsa[0]) busy_resp[i][0] = 0; // except zero forwarding
+        if (~|ren_bundle[i].prsa[1]) busy_resp[i][1] = 0;
         for (int j = 0; j < ewd; j++) begin // forward current write-back registers
             if (ren_bundle[i].prsa[0] == exe_bundle[j].prda) busy_resp[i][0] = 0;
             if (ren_bundle[i].prsa[1] == exe_bundle[j].prda) busy_resp[i][1] = 0;

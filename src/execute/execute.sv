@@ -30,6 +30,7 @@ module execute #(
         reg_bundle[i].ldid   = iss_bundle[i].ldid;
         reg_bundle[i].stid   = iss_bundle[i].stid;
         reg_bundle[i].ir     = iss_bundle[i].ir;
+        reg_bundle[i].pnpc   = iss_bundle[i].pnpc;
         reg_bundle[i].delta  = iss_bundle[i].delta;
         reg_bundle[i].fu     = iss_bundle[i].fu;
         reg_bundle[i].funct  = iss_bundle[i].funct;

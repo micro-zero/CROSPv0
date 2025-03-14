@@ -38,8 +38,7 @@ module commit #(
     /* exception return signals */
     output logic  [2:0] eret,      // exception return bits (MSB is valid bit)
     /* ID control */
-    output logic  [7:0] nextldid,  // next load ID to commit
-    output logic  [7:0] nextstid,  // next store ID to commit
+    output logic [15:0] nextopid,  // next store ID to commit
     /* fences */
     output logic fencei,           // fence.i committed
     output logic sfence            // sfence.vma committed
@@ -123,6 +122,7 @@ module commit #(
         exe_wvalue[i].npc   = exe_bundle[i].npc & ~64'd1; // avoid misaligned fetch
         exe_wvalue[i].cause = exe_bundle[i].cause;
         exe_wvalue[i].ret   = exe_bundle[i].ret;
+        exe_wvalue[i].misp  = exe_bundle[i].misp;
         exe_wvalue[i].flush = exe_bundle[i].flush;
         exe_wvalue[i].retry = exe_bundle[i].retry;
         exe_wvalue[i].mem   = exe_bundle[i].mem;
@@ -181,23 +181,23 @@ module commit #(
     rob_ren_t ren_last;        // renaming part of last commited entry
     logic [cwd-1:0] com_redir; // redirection of `cwd` instructions to commit
     always_comb begin
-        {nextldid, nextstid} = {dec_rvalue[0].ldid, dec_rvalue[0].stid};
+        nextopid = {1'b1, 15'(rob_front)};
         for (int i = 1; i < cwd; i++) if (~com_redir[i] & com_bundle[i - 1].opid[15])
-             {nextldid, nextstid} = {dec_rvalue[i].ldid, dec_rvalue[i].stid};
-        if (com_bundle[cwd - 1].opid[15]) {nextldid, nextstid} = 0;
+            nextopid = {1'b1, 15'(rob_front) + 15'(i)};
+        if (com_bundle[cwd - 1].opid[15]) nextopid = 0;
     end
     always_comb begin
         com_redir = 0;
-        com_redir[0] = |rob_num & dec_rvalue[0].pc != exe_last.npc | // misprediction
-                       exe_last.cause[7]                           | // exception
-                       exe_last.ret[2]                             | // return from exception
-                       exe_last.flush                              | // instructions requiring flush
-                       exe_last.retry;                               // instructions requiring retry
+        com_redir[0] = exe_last.misp     | // misprediction
+                       exe_last.cause[7] | // exception
+                       exe_last.ret[2]   | // return from exception
+                       exe_last.flush    | // instructions requiring flush
+                       exe_last.retry;     // instructions requiring retry
         for (int i = 1; i < cwd; i++) if (i < 32'(rob_num))
-            com_redir[i] = dec_rvalue[i].pc != exe_rvalue_fwd[i - 1].npc | // misprediction
-                           exe_rvalue_fwd[i - 1].cause[7]                | // exception
-                           exe_rvalue_fwd[i - 1].ret[2]                  | // return from exception
-                           exe_rvalue_fwd[i - 1].flush;                    // instructions requiring flush
+            com_redir[i] = exe_rvalue_fwd[i - 1].misp     | // misprediction
+                           exe_rvalue_fwd[i - 1].cause[7] | // exception
+                           exe_rvalue_fwd[i - 1].ret[2]   | // return from exception
+                           exe_rvalue_fwd[i - 1].flush;     // instructions requiring flush
     end
     always_comb rollback = (|rob_num | ~rollback_last) &
         (exe_last.cause[7] | exe_last.ret[2] | exe_last.flush | exe_last.retry);
@@ -284,7 +284,8 @@ module commit #(
         exe_last <= exe_rvalue_fwd[32'(rob_out) - 1];
         ren_last <= ren_rvalue[32'(rob_out) - 1];
     end else if (com_bundle[0].redir) begin
-        exe_last.flush <= 0; // clear `flush`, `cause` and `ret` when redirection taken
+        exe_last.misp <= 0; // clear redirection bits when redirection taken
+        exe_last.flush <= 0;
         exe_last.retry <= 0;
         exe_last.cause <= 0;
         exe_last.ret <= 0;

@@ -280,6 +280,7 @@ module decoder #(
             /* first result */
             result[g][0].opid[15] = fet_bundle[g].valid;
             result[g][0].pc    = fet_bundle[g].pc;
+            result[g][0].pnpc  = fet_bundle[g].pnpc;
             result[g][0].pat   = fet_bundle[g].pat;
             result[g][0].call  = fet_bundle[g].call;
             result[g][0].ret   = fet_bundle[g].ret;
@@ -325,6 +326,7 @@ module decoder #(
             result[g][1].opid[15] = fet_bundle[g].valid &
                 |{alu_funct[1], lsu_funct[1], fpu_funct[1], mul_funct[1], div_funct[1]};
             result[g][1].pc    = fet_bundle[g].pc;
+            result[g][1].pnpc  = fet_bundle[g].pnpc;
             result[g][1].pat   = fet_bundle[g].pat;
             result[g][1].call  = fet_bundle[g].call;
             result[g][1].ret   = fet_bundle[g].ret;
@@ -350,6 +352,7 @@ module decoder #(
             result[g][2].opid[15] = fet_bundle[g].valid &
                 |{alu_funct[2], lsu_funct[2], fpu_funct[2], mul_funct[2], div_funct[2]};
             result[g][2].pc    = fet_bundle[g].pc;
+            result[g][2].pnpc  = fet_bundle[g].pnpc;
             result[g][2].pat   = fet_bundle[g].pat;
             result[g][2].call  = fet_bundle[g].call;
             result[g][2].ret   = fet_bundle[g].ret;
@@ -426,10 +429,10 @@ module decoder #(
         for (int i = 0; i < fwd; i++) begin
             if (32'(dq_in) + 32'(result_num[i]) > dqsz - 32'(dq_num) |
                 32'(dq_in) + 32'(result_num[i]) > 32'(dwdin) |
-                16'(dq_in)   + 16'(result_num[i])   > opsz - opnum + opcom |
-                16'(dq_brin) + 16'(result_brnum[i]) > brsz - brnum + brcom |
-                16'(dq_ldin) + 16'(result_ldnum[i]) > ldsz - ldnum + ldcom |
-                16'(dq_stin) + 16'(result_stnum[i]) > stsz - stnum + stcom - 1) break;
+                16'(dq_in)   + 16'(result_num[i])   > opsz - opnum |
+                16'(dq_brin) + 16'(result_brnum[i]) > brsz - brnum |
+                16'(dq_ldin) + 16'(result_ldnum[i]) > ldsz - ldnum |
+                16'(dq_stin) + 16'(result_stnum[i]) > stsz - stnum - 1) break;
             for (int j = 0; j < 3; j++)
                 if (result[i][j].opid[15]) begin
                     dq_wvalue[32'(dq_in)] = result[i][j];

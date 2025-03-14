@@ -128,7 +128,12 @@ module vcore #(
     output logic [63:0] itmiss,  // ITLB miss number
     output logic [63:0] dtmiss,  // DTLB miss number
     output logic [63:0] loads,   // load instruction number
-    output logic [63:0] stores   // store instruction number
+    output logic [63:0] stores,  // store instruction number
+    output logic [63:0] ldck1,   // load check result as 1
+    output logic [63:0] ldck2,   // load check result as 2
+    output logic [63:0] ldck3,   // load check result as 3
+    output logic [63:0] ldfwd,   // load forwarded
+    output logic [63:0] ldmisp   // load misprediction
 );
     /* instantiate core with direct memory interface */
     logic [63:0] dbg_cycle, dbg_pc0,dbg_pc1;
@@ -272,12 +277,12 @@ module vcore #(
         if (|inst.com_inst.rob_num & ~|inst.com_inst.rob_out)
             stallpc = inst.com_inst.dec_rvalue[0].pc; end
     always_ff @(posedge clk) if (rst) {bmisp, brmisp, jmisp, jrmisp, fmisp} <= 0;
-        else if (inst.com_bundle[0].redir) begin
+        else if (inst.com_bundle[0].redir & inst.com_bundle[0].brid[7]) begin
             bmisp <= bmisp + 1;
             if (inst.com_inst.dec_last.branch) brmisp <= brmisp + 1;
             if (inst.com_inst.dec_last.jal)    jmisp  <= jmisp + 1;
             if (inst.com_inst.dec_last.jalr)   jrmisp <= jrmisp + 1;
-        end else if (|inst.fe_inst.redir)  fmisp  <= fmisp + 1;
+        end else if (inst.fe_inst.fredir)      fmisp  <= fmisp + 1;
     always_ff @(posedge clk) if (rst) loads  <= 0; else if (|inst.dc_rqst & ~|inst.dc_strb) loads <= loads  + 1;
     always_ff @(posedge clk) if (rst) stores <= 0; else if (|inst.dc_rqst & |inst.dc_strb) stores <= stores + 1;
     always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.icache.mshr_out) icmiss <= icmiss + 1;
@@ -285,6 +290,14 @@ module vcore #(
     always_ff @(posedge clk) if (rst) itmiss <= 0; else if (inst.mmu_inst.itlb.fill)       itmiss <= itmiss + 1;
     always_ff @(posedge clk) if (rst) dtmiss <= 0; else if (inst.mmu_inst.dtlb.fill)       dtmiss <= dtmiss + 1;
     always_ff @(posedge clk) if (rst) stmiss <= 0; else if (inst.mmu_inst.stlb.fill)       stmiss <= stmiss + 1;
+    always_ff @(posedge clk) if (rst) {ldck1, ldck2, ldck3} <= 0; else if (|inst.lsu_inst.ck_resp[0])
+        if      (inst.lsu_inst.ck_rslt[0] == 1) ldck1 <= ldck1 + 1;
+        else if (inst.lsu_inst.ck_rslt[0] == 2) ldck2 <= ldck2 + 1;
+        else if (inst.lsu_inst.ck_rslt[0] == 3) ldck3 <= ldck3 + 1;
+    always_ff @(posedge clk) if (rst) ldfwd <= 0;
+        else if (|inst.lsu_inst.ck_resp[0] & inst.lsu_inst.ck_forw[0][64]) ldfwd <= ldfwd + 1;
+    always_ff @(posedge clk) if (rst) ldmisp <= 0;
+        else if (inst.com_inst.exe_last.retry) ldmisp <= ldmisp + 1;
 
     /* assertion */
     always_comb assert(inst.dec_inst.opnum <= inst.dec_inst.opsz);

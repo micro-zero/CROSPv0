@@ -350,7 +350,7 @@ module crosplite #(
     logic exception;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
-    logic [7:0] nextldid, nextstid;
+    logic [15:0] nextopid;
     frontend #(.init(init), .rst_pc(rst_pc), .fwd(pwd), .cwd(pwd))
         fe_inst(clk, rst, com_bundle, dec_ready, fet_bundle,
             it_rqst, it_vadd, it_resp, it_perm, it_padd,
@@ -372,7 +372,7 @@ module crosplite #(
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (pwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(pwd), .rwd(pwd), .ewd(pwd), .cwd(pwd))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle,
-            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextldid, nextstid, fnci, fncv);
+            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextopid, fnci, fncv);
     alu #(.iwd(pwd), .ewd(pwd))
         alu_inst(clk, rst, dec_inst.redir, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
     fpu #(.iwd(pwd), .ewd(pwd))
@@ -382,7 +382,7 @@ module crosplite #(
     div #(.iwd(pwd), .ewd(pwd))
         div_inst(clk, rst, dec_inst.redir, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
     lsu #(.iwd(pwd), .ewd(pwd))
-        lsu_inst(clk, rst, dec_inst.redir, nextldid, nextstid, com_bundle,
+        lsu_inst(clk, rst, dec_inst.redir, nextopid, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
             flmask, flrqst, dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,

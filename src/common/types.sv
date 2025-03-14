@@ -10,20 +10,20 @@ package types;
 
 typedef struct packed {
     logic [7:0] id;        // FTQ id, MSB is valid bit
-    logic [7:0] br;        // instruction flow break signal, MSB is valid bit, the rest is hashed target
+    logic [64:0] br;       // instruction flow break signal, MSB is valid bit, the rest is target
     logic [63:0] pc;       // program counter
     logic [7:0] num;       // fetch number in half-word
     logic [15:0][1:0] pat; // branch pattern
 } pcg_bundle_t;
 
 typedef struct packed {
-    logic valid;     // valid signal
-    logic [63:0] pc; // program counter
-    logic [31:0] ir; // instruction before uncompression
-    logic [1:0] pat; // branch pattern
-    logic [1:0] pf;  // encountering instruction page fault
-    logic call, ret; // call/ret instruction (to update RAS)
-    logic branch, jal, jalr;
+    logic valid;           // valid signal
+    logic [63:0] pc, pnpc; // program counter and predicted next PC
+    logic [31:0] ir;       // instruction before uncompression
+    logic [1:0] pat;       // branch pattern
+    logic [1:0] pf;        // encountering instruction page fault
+    logic call, ret;       // call/ret instruction (to update RAS)
+    logic branch, jal, jalr; // jump/branch types (for debugging)
 } fet_bundle_t;
 
 typedef struct packed {
@@ -33,7 +33,7 @@ typedef struct packed {
     logic  [7:0] ldid, stid; // load ID and store ID (MSB is valid bit)
     logic [1:0] pf;          // instruction page fault (per 16-bit)
     logic call, ret;         // call/return instruction
-    logic [63:0] pc;         // program counter
+    logic [63:0] pc, pnpc;   // program counter and predicted next PC
     logic [31:0] ir;         // instruction
     logic [1:0] pat;         // branch pattern
     logic [2:0] delta;       // PC delta
@@ -59,6 +59,7 @@ typedef struct packed {
     /* propagation of decoder bundle */
     logic [15:0] opid;
     logic [7:0] ldid, stid;
+    logic [63:0] pnpc;
     logic [31:0] ir;
     logic [2:0] delta;
     logic [4:0] fu;
@@ -75,6 +76,7 @@ typedef struct packed {
     /* propagation of decoder bundle */
     logic [15:0] opid;
     logic [7:0] ldid, stid;
+    logic [63:0] pnpc;
     logic [31:0] ir;
     logic [2:0] delta;
     logic [4:0] fu;
@@ -93,6 +95,7 @@ typedef struct packed {
     logic [15:0] opid;
     logic [7:0] ldid, stid;
     logic [2:0] delta;
+    logic [63:0] pnpc;
     logic [31:0] ir;
     logic [4:0] fu;
     logic [63:0] funct;
@@ -114,6 +117,7 @@ typedef struct packed {
     logic  [2:0] ret;       // exception return, MSB is valid bit
     logic [63:0] tval;      // exception trap value
     logic specul;           // speculative mark to avoid committing
+    logic misp;             // misprediction of BRANCH and JALR instructions
     logic mem, csr;         // memory/CSR change
     logic flush, retry;     // force pipeline flush and retry
 } exe_bundle_t;
@@ -152,6 +156,7 @@ typedef struct packed {
     logic [7:0] cause;  // exception and cause (MSB is exception bit)
     logic [2:0] ret;    // exception return (MSB is return bit, `ret[1:0]` is privilege level)
     logic mem, csr;     // memory/CSR change
+    logic misp;         // misprediction of BRANCH and JALR instructions
     logic flush, retry; // force pipeline flush
 } rob_exe_t;
 

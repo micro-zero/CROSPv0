@@ -153,6 +153,7 @@ module rename #(
         rq_wvalue[i].ldid    = dec_bundle[i].ldid;
         rq_wvalue[i].stid    = dec_bundle[i].stid;
         rq_wvalue[i].ir      = dec_bundle[i].ir;
+        rq_wvalue[i].pnpc    = dec_bundle[i].pnpc;
         rq_wvalue[i].delta   = dec_bundle[i].delta;
         rq_wvalue[i].fu      = dec_bundle[i].fu;
         rq_wvalue[i].funct   = dec_bundle[i].funct;

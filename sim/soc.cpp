@@ -149,6 +149,11 @@ verifcore &verifcore::operator>>(stat_t &stat)
     stat.stmiss = dut.stmiss;
     stat.itmiss = dut.itmiss;
     stat.dtmiss = dut.dtmiss;
+    stat.check[0] = dut.ldck1;
+    stat.check[1] = dut.ldck2;
+    stat.check[2] = dut.ldck3;
+    stat.fwd = dut.ldfwd;
+    stat.ldmisp = dut.ldmisp;
     return *this;
 }
 

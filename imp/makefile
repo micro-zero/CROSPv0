@@ -171,10 +171,16 @@ define IMP_TCL
 	make_wrapper -files [get_files .imp/.imp.srcs/sources_1/bd/CROSPv0soc/CROSPv0soc.bd] -top
 	add_files .imp/.imp.gen/sources_1/bd/CROSPv0soc/hdl/CROSPv0soc_wrapper.v
 	add_files -fileset constrs_1 .imp/gs2.xdc
-	set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
-	set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt [get_runs impl_1]
-	set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
-	set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE NoTimingRelaxation [get_runs impl_1]
+	# # if no optimization is needed, uncomment these lines
+	# set_property STEPS.OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
+	# set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
+	# # end of cancelling optimization
+	# # if extra timing optimization is needed, uncomment these lines
+	# set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
+	# set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt [get_runs impl_1]
+	# set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
+	# set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE NoTimingRelaxation [get_runs impl_1]
+	# # end of extra optimization
 	launch_runs impl_1 -to_step write_bitstream -jobs 32
 endef
 export IMP_TCL

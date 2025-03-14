@@ -63,6 +63,7 @@ typedef struct
     uint64_t icmiss, dcmiss;         // cache miss numbers
     uint64_t loads, stores;          // load/store numbers
     uint64_t stmiss, itmiss, dtmiss; // S/I/DTLB miss numbers
+    uint64_t check[3], fwd, ldmisp;  // load check result
 } stat_t;
 
 /**

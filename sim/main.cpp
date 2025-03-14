@@ -565,6 +565,8 @@ int main(int argc, char *argv[])
             stat.stmiss, stat.itmiss, stat.dtmiss);
     fprintf(stderr, "[Info]        Misprediction(f/b/br/j/jr): %ld/%ld/%ld/%ld/%ld\n",
             stat.fmisp, stat.bmisp, stat.brmisp, stat.jmisp, stat.jrmisp);
+    fprintf(stderr, "[Info]        Speculative loads check (3-1/f/m): %ld/%ld/%ld/%ld/%ld\n",
+            stat.check[2], stat.check[1], stat.check[0], stat.fwd, stat.ldmisp);
     fprintf(stderr, "[Info]        CPI: %.3f  MPKI: %.3f\n",
             (float)cycle / (float)instret, (float)(stat.bmisp) * 1000.f / (float)instret);
     return exitcode;
