@@ -377,9 +377,10 @@ module crosplite #(
     /* verilator lint_off WIDTHTRUNC */
     logic [pwd-1:0] dis_st_valids_i, dis_ld_valids_i;
     lsu_funct_t [pwd-1:0] dis_uops_i, core_commit_uops_i;
-    logic [7:0] new_ldq_idx_o;
-    logic [7:0] new_stq_idx_o;
-    logic ldq_full_o, stq_full_o, lsu_fencei_rdy_o;
+    logic [pwd-1:0] [7:0] new_ldq_idx_o;
+    logic [pwd-1:0] [7:0] new_stq_idx_o;
+    logic [pwd-1:0] ldq_full_o, stq_full_o;
+    logic lsu_fencei_rdy_o;
     logic s1_kill_o;
     func_unit_resp_t exe_req_i;
     exe_unit_resp_t core_exe_iresp_o;
@@ -443,6 +444,7 @@ module crosplite #(
         .dmem_release_valid_i(0),
         .dmem_release_address_i(0),
         .dmem_resp_i(dmem_resp_i),
+        .dmem_req_ready_i(1),
         .dmem_nack_i(dmem_nack_i),
         .dmem_brupdate_o(dmem_brupdate_o),
         .dmem_exception_o(dmem_exception_o),

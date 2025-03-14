@@ -14,7 +14,7 @@ module LSU
     parameter LDQAddrSz = $clog2(numLDQEntries),
     parameter STQAddrSz = $clog2(numSTQEntries), 
     parameter LSUAddrSz = (LDQAddrSz > STQAddrSz)? LDQAddrSz : STQAddrSz,
-    parameter width     =  1,
+    parameter width     =  4,
     parameter blockOffBits = 6,
     parameter robAddrSz = 128
 )
@@ -23,13 +23,13 @@ module LSU
     input  logic                                                rst,
 
     //connect with Core
-    input  logic                                                dis_st_valids_i,//dispatch阶段发向LSU的store有效位信号
-    input  logic                                                dis_ld_valids_i,//dispatch阶段发向LSU的load有效位信号
-    input  lsu_funct_t                                          dis_uops_i,     //dispatch阶段发向LSU的uop
-    output logic[LDQAddrSz-1:0]                                 new_ldq_idx_o,  //当前ldq空表项首位
-    output logic[STQAddrSz-1:0]                                 new_stq_idx_o,  //当前stq空表项首位
-    output logic                                                ldq_full_o,     //ldq队列满，不能接受load指令
-    output logic                                                stq_full_o,     //stq队列满，不能接受store指令
+    input  logic [width-1:0]                                    dis_st_valids_i,//dispatch阶段发向LSU的store有效位信号
+    input  logic [width-1:0]                                    dis_ld_valids_i,//dispatch阶段发向LSU的load有效位信号
+    input  lsu_funct_t  [width-1:0]                             dis_uops_i,     //dispatch阶段发向LSU的uop
+    output logic [width-1:0] [LDQAddrSz-1:0]                    new_ldq_idx_o,  //当前ldq空表项首位
+    output logic [width-1:0] [STQAddrSz-1:0]                    new_stq_idx_o,  //当前stq空表项首位
+    output logic [width-1:0]                                    ldq_full_o,     //ldq队列满，不能接受load指令
+    output logic [width-1:0]                                    stq_full_o,     //stq队列满，不能接受store指令
     output logic                                                lsu_fencei_rdy_o,//可以fencei ，表示lsu stq空，才可以等待流水线空
     input  logic                                                core_exception_i,//core发进来的exception信号，lsu清空所有表项
 
@@ -84,24 +84,24 @@ module LSU
 
     logic[LDQAddrSz-1:0]              ldq_head_reg;      
     logic[LDQAddrSz-1:0]              ldq_tail_reg;      
-    logic[LDQAddrSz-1:0]              ld_enq_idx_wire;  
+    logic[LDQAddrSz-1:0]              ld_enq_idx_wire[width];  
     logic[STQAddrSz-1:0]              stq_head_reg;      // 当前stq头部（clearstore时加一，比如在commit后进行访存，访存成功）
     logic[STQAddrSz-1:0]              stq_tail_reg;      
-    logic[STQAddrSz-1:0]              st_enq_idx_wire;   
+    logic[STQAddrSz-1:0]              st_enq_idx_wire[width];   
     logic[STQAddrSz-1:0]              stq_commit_head_reg;   // 下一个要提交commit的stq表项
     logic[STQAddrSz-1:0]              stq_execute_head_reg;  // 下一个要执行execute的stq表项
     logic                             clear_store_wire;      // 是否要clearstore，即已经有store完成访存了该出队列了
     logic [numSTQEntries-1:0]         live_store_mask_reg;   // 现在stq中alive的stores
-    logic [numSTQEntries-1:0]         next_live_store_mask_wire;//之后stq中alive的stores
+    logic [numSTQEntries-1:0]         next_live_store_mask_wire[width];//之后stq中alive的stores
     logic                             ldq_full_wire;      
     logic                             stq_full_wire;      
     logic                             stq_nonempty_wire;  //判断stq当前不空
-    logic                             ld_valid_wire;      
-    logic                             st_valid_wire;      /
+    logic                             ld_valid_wire[width];      
+    logic                             st_valid_wire[width];      /
     logic                             lsu_fencei_rdy_wire;//是否可以执行fencei 
     logic[LDQAddrSz-1:0]              ldq_tail_plus1_wire ;
     logic[STQAddrSz-1:0]              stq_tail_plus1_wire ;
-    logic[numSTQEntries-1:0]          next_live_store_mask_judge1_wire ; 
+    logic[numSTQEntries-1:0]          next_live_store_mask_init_wire; 
     logic                             mem_xcpt_valid_wire; //  mem阶段快速判断异常/当前不需要 有ma pf ae：
     mxcpt_t                           mem_xcpt_cause_wire; //   1、ma（misalignment access）：从地址计算单元发现的地址非对齐异常；
     lsu_funct_t                       mem_xcpt_uop_wire;   //   2、pf（page fault）：来自TLB的页面错误异常，违反了页的读写属性、或访问地址违法；                                    
@@ -307,10 +307,69 @@ module LSU
     logic[numSTQEntries-1:0]              st_exception_killed_mask;
     logic                                 spec_ld_succeed_wire;
 
+    generate
+      for(genvar w = 0; w < width; w++)begin
+        always_ff @( posedge clk or negedge rst  ) begin : multi_dispatch
 
-    assign                ld_enq_idx_wire = ldq_tail_reg;
-    assign                st_enq_idx_wire = stq_tail_reg; 
+          // ldq_full_o[w] <= (ld_enq_idx_wire[w] + 1 )%numLDQEntries == ldq_head_reg ;
+          // new_ldq_idx_o[w] <= ld_enq_idx_wire[w] ;
+          // stq_full_o[w] <= (st_enq_idx_wire[w] + 1 )%numSTQEntries == stq_head_reg ;
+          // new_stq_idx_o[w] <= st_enq_idx_wire[w] ;
+          // if(ld_valid_wire[w])begin
+          //     ldq[ld_enq_idx_wire[w]].entry_valid                   <=         1;
+          //     ldq[ld_enq_idx_wire[w]].entry.uop                     <=         dis_uops_i[w];
+          //     ldq[ld_enq_idx_wire[w]].entry.youngest_stq_idx        <=         st_enq_idx_wire;
+          //     ldq[ld_enq_idx_wire[w]].entry.st_dep_mask             <=         next_live_store_mask_wire[width-1];
 
+          //     ldq[ld_enq_idx_wire[w]].entry.addr_valid              <=         0;
+          //     ldq[ld_enq_idx_wire[w]].entry.executed                <=         0;
+          //     ldq[ld_enq_idx_wire[w]].entry.succeeded               <=         0;
+          //     ldq[ld_enq_idx_wire[w]].entry.order_fail              <=         0;
+          //     ldq[ld_enq_idx_wire[w]].entry.observed                <=         0;
+          //     ldq[ld_enq_idx_wire[w]].entry.forward_std_val         <=         0;
+          // end
+          // else if(st_valid_wire[w])begin
+          //     stq[ld_enq_idx_wire[w]].entry_valid                   <=         1;
+          //     stq[ld_enq_idx_wire[w]].entry.uop                     <=         dis_uops_i[w];
+          //     stq[ld_enq_idx_wire[w]].entry.addr_valid              <=         0;
+          //     stq[ld_enq_idx_wire[w]].entry.data_valid              <=         0;
+          //     stq[ld_enq_idx_wire[w]].entry.committed               <=         0;
+          //     stq[ld_enq_idx_wire[w]].entry.succeeded               <=         0;
+          // end
+        end
+        always_comb begin
+          if(w ==0)begin
+            ld_enq_idx_wire[w] = ldq_tail_reg;
+            if(ld_valid_wire[w]) begin
+              ld_enq_idx_wire[w] = (ld_enq_idx_wire[w] +1) % numLDQEntries;
+            end  
+            st_enq_idx_wire[w] = stq_tail_reg;
+            if(st_valid_wire[w]) begin
+              st_enq_idx_wire[w] = (st_enq_idx_wire[w] +1) % numSTQEntries;
+            end
+            next_live_store_mask_wire[w] = next_live_store_mask_init_wire;
+            if(st_valid_wire[w])begin
+              next_live_store_mask_wire[w] = next_live_store_mask_init_wire | (1 << stq_tail_reg);
+            end
+          end
+          else begin
+            ld_enq_idx_wire[w] = ld_enq_idx_wire[w-1];
+            if(ld_valid_wire[w]) begin
+              ld_enq_idx_wire[w] = (ld_enq_idx_wire[w] +1) % numLDQEntries;
+            end  
+            st_enq_idx_wire[w] = st_enq_idx_wire[w-1];
+            if(st_valid_wire[w]) begin
+              st_enq_idx_wire[w] = (st_enq_idx_wire[w] +1) % numSTQEntries;
+            end
+            next_live_store_mask_wire[w] = next_live_store_mask_wire[w-1];
+            if(st_valid_wire[w])begin
+              next_live_store_mask_wire[w] = next_live_store_mask_init_wire | (1 << stq_tail_reg);
+            end
+          end
+          next_live_store_mask_init_wire = clear_store_wire ? live_store_mask_reg &  ~( 1 << stq_head_reg) : live_store_mask_reg;
+        end
+      end
+    endgenerate
 
     always_comb begin : stq_nonempty_logic
         logic stq_valid_or_wire;
@@ -327,13 +386,14 @@ module LSU
     assign stq_tail_plus1_wire = stq_tail_reg +1;
     assign ldq_full_wire = ldq_tail_plus1_wire == ldq_head_reg;
     assign stq_full_wire = stq_tail_plus1_wire == stq_head_reg;
-    assign ld_valid_wire = dis_ld_valids_i & dis_uops_i.load & ~dis_uops_i.exception;
-    assign st_valid_wire = dis_st_valids_i & dis_uops_i.store & ~dis_uops_i.exception;
-
+    for(genvar w =0;w<width;++w)begin
+      assign ld_valid_wire[w] = dis_ld_valids_i[w] & dis_uops_i[w].load & ~dis_uops_i[w].exception;
+      assign st_valid_wire[w] = dis_st_valids_i[w] & dis_uops_i[w].store & ~dis_uops_i[w].exception;
+    end
     assign lsu_fencei_rdy_wire = ~stq_nonempty_wire & dmem_ordered_i;
 
-    assign next_live_store_mask_judge1_wire = clear_store_wire ? live_store_mask_reg &  ~( 1 << stq_head_reg) : live_store_mask_reg;
-    assign next_live_store_mask_wire = st_valid_wire ? next_live_store_mask_judge1_wire | (1 << stq_tail_reg) : next_live_store_mask_judge1_wire ;
+    // assign next_live_store_mask_judge1_wire = clear_store_wire ? live_store_mask_reg &  ~( 1 << stq_head_reg) : live_store_mask_reg;
+    // assign next_live_store_mask_wire = st_valid_wire ? next_live_store_mask_judge1_wire | (1 << stq_tail_reg) : next_live_store_mask_judge1_wire ;
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------
@@ -880,40 +940,74 @@ module LSU
             end
             
             //dispatch stage 中，有新的指令进来就分配表项
-            ldq_full_o             <=            ldq_full_wire;
-            new_ldq_idx_o          <=            ld_enq_idx_wire;
-            stq_full_o             <=            stq_full_wire;
-            new_stq_idx_o          <=            st_enq_idx_wire;
-            if(ld_valid_wire)begin
-                ldq[ld_enq_idx_wire].entry_valid                   <=         1;
-                ldq[ld_enq_idx_wire].entry.uop                     <=         dis_uops_i;
-                ldq[ld_enq_idx_wire].entry.youngest_stq_idx        <=         st_enq_idx_wire;
-                ldq[ld_enq_idx_wire].entry.st_dep_mask             <=         next_live_store_mask_wire;
+            //配置成了width发射dispatch
+            for(int w = 0; w < width;w++)begin
+              ldq_full_o[w] <= (ld_enq_idx_wire[w] + 1 )%numLDQEntries == ldq_head_reg ;
+              new_ldq_idx_o[w] <= ld_enq_idx_wire[w] ;
+              stq_full_o[w] <= (st_enq_idx_wire[w] + 1 )%numSTQEntries == stq_head_reg ;
+              new_stq_idx_o[w] <= st_enq_idx_wire[w] ;
+              if(ld_valid_wire[w])begin
+                  ldq[ld_enq_idx_wire[w]].entry_valid                   <=         1;
+                  ldq[ld_enq_idx_wire[w]].entry.uop                     <=         dis_uops_i[w];
+                  ldq[ld_enq_idx_wire[w]].entry.youngest_stq_idx        <=         st_enq_idx_wire[width-1];
+                  ldq[ld_enq_idx_wire[w]].entry.st_dep_mask             <=         next_live_store_mask_wire[width-1];
 
-                ldq[ld_enq_idx_wire].entry.addr_valid              <=         0;
-                ldq[ld_enq_idx_wire].entry.executed                <=         0;
-                ldq[ld_enq_idx_wire].entry.succeeded               <=         0;
-                ldq[ld_enq_idx_wire].entry.order_fail              <=         0;
-                ldq[ld_enq_idx_wire].entry.observed                <=         0;
-                ldq[ld_enq_idx_wire].entry.forward_std_val         <=         0;
+                  ldq[ld_enq_idx_wire[w]].entry.addr_valid              <=         0;
+                  ldq[ld_enq_idx_wire[w]].entry.executed                <=         0;
+                  ldq[ld_enq_idx_wire[w]].entry.succeeded               <=         0;
+                  ldq[ld_enq_idx_wire[w]].entry.order_fail              <=         0;
+                  ldq[ld_enq_idx_wire[w]].entry.observed                <=         0;
+                  ldq[ld_enq_idx_wire[w]].entry.forward_std_val         <=         0;
+              end
+              else if(st_valid_wire[w])begin
+                  stq[st_enq_idx_wire[w]].entry_valid                   <=         1;
+                  stq[st_enq_idx_wire[w]].entry.uop                     <=         dis_uops_i[w];
+                  stq[st_enq_idx_wire[w]].entry.addr_valid              <=         0;
+                  stq[st_enq_idx_wire[w]].entry.data_valid              <=         0;
+                  stq[st_enq_idx_wire[w]].entry.committed               <=         0;
+                  stq[st_enq_idx_wire[w]].entry.succeeded               <=         0;
+              end
+            end
+
+            ldq_tail_reg  <= ld_enq_idx_wire[width-1];
+            stq_tail_reg  <= st_enq_idx_wire[width-1];
+            // for(int w = 0;w < width;++w)begin
+              
+            // end
+            // ldq_full_o             <=            ldq_full_wire;
+            // new_ldq_idx_o          <=            ld_enq_idx_wire;
+            // stq_full_o             <=            stq_full_wire;
+            // new_stq_idx_o          <=            st_enq_idx_wire;
+            // if(ld_valid_wire)begin
+            //     ldq[ld_enq_idx_wire].entry_valid                   <=         1;
+            //     ldq[ld_enq_idx_wire].entry.uop                     <=         dis_uops_i;
+            //     ldq[ld_enq_idx_wire].entry.youngest_stq_idx        <=         st_enq_idx_wire;
+            //     ldq[ld_enq_idx_wire].entry.st_dep_mask             <=         next_live_store_mask_wire;
+
+            //     ldq[ld_enq_idx_wire].entry.addr_valid              <=         0;
+            //     ldq[ld_enq_idx_wire].entry.executed                <=         0;
+            //     ldq[ld_enq_idx_wire].entry.succeeded               <=         0;
+            //     ldq[ld_enq_idx_wire].entry.order_fail              <=         0;
+            //     ldq[ld_enq_idx_wire].entry.observed                <=         0;
+            //     ldq[ld_enq_idx_wire].entry.forward_std_val         <=         0;
                 
 
-                ldq_tail_reg                                      <=         ldq_tail_plus1_wire;
+            //     ldq_tail_reg                                      <=         ldq_tail_plus1_wire;
 
 
-            end
-            else if(st_valid_wire)begin
-                stq[st_enq_idx_wire].entry_valid                   <=         1;
-                stq[st_enq_idx_wire].entry.uop                     <=         dis_uops_i;
-                stq[st_enq_idx_wire].entry.addr_valid              <=         0;
-                stq[st_enq_idx_wire].entry.data_valid              <=         0;
-                stq[st_enq_idx_wire].entry.committed               <=         0;
-                stq[st_enq_idx_wire].entry.succeeded               <=         0;
+            // end
+            // else if(st_valid_wire)begin
+            //     stq[st_enq_idx_wire].entry_valid                   <=         1;
+            //     stq[st_enq_idx_wire].entry.uop                     <=         dis_uops_i;
+            //     stq[st_enq_idx_wire].entry.addr_valid              <=         0;
+            //     stq[st_enq_idx_wire].entry.data_valid              <=         0;
+            //     stq[st_enq_idx_wire].entry.committed               <=         0;
+            //     stq[st_enq_idx_wire].entry.succeeded               <=         0;
 
 
-                stq_tail_reg                                      <=         stq_tail_plus1_wire;
+            //     stq_tail_reg                                      <=         stq_tail_plus1_wire;
 
-            end
+            // end
 
             lsu_fencei_rdy_o   <= lsu_fencei_rdy_wire;
 
@@ -1233,7 +1327,7 @@ module LSU
   // Live Store Mask
   // track a bit-array of stores that are alive
   // (could maybe be re-produced from the stq_head/stq_tail, but need to know include spec_killed entries)
-            live_store_mask_reg  <=  next_live_store_mask_wire &
+            live_store_mask_reg  <=  next_live_store_mask_wire[width-1] &
                                 ~$unsigned(st_brkilled_mask) &
                                 ~$unsigned(st_exception_killed_mask);
 
