@@ -381,7 +381,7 @@ module crosplite #(
         mul_inst(clk, rst, dec_inst.redir, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
     div #(.iwd(pwd), .ewd(pwd))
         div_inst(clk, rst, dec_inst.redir, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
-    lsu #(.iwd(pwd), .ewd(pwd))
+    lsu #(.iwd(pwd), .ewd(pwd), .cwd(pwd))
         lsu_inst(clk, rst, dec_inst.redir, nextopid, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,

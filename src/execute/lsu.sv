@@ -311,7 +311,7 @@ module lsu #(
     logic        [mwd-1:0][$clog2(lqsz)-1:0] lq_vadd_raddr;  // virtual address read index
     logic        [mwd-1:0]            [63:0] lq_vadd_rvalue; // virtual address read value
     logic        [iwd-1:0]            [63:0] lq_vadd_wvalue; // virtual address write value
-    logic      [2*mwd-1:0][$clog2(sqsz)-1:0] lq_rdat_waddr;  // write data read address
+    logic      [2*mwd-1:0][$clog2(lqsz)-1:0] lq_rdat_waddr;  // write data read address
     logic        [ewd-1:0]            [63:0] lq_rdat_rvalue; // read data read value
     logic      [2*mwd-1:0]                   lq_rdat_wena;   // read data write enable
     logic      [2*mwd-1:0]            [63:0] lq_rdat_wvalue; // read data write value
@@ -415,9 +415,9 @@ module lsu #(
                     func_load[i].bits[1:0] == 2'b01 & lq_vadd_wvalue[i][0] |
                     func_load[i].bits[1:0] == 2'b10 & |lq_vadd_wvalue[i][1:0] |
                     func_load[i].bits[1:0] == 2'b11 & |lq_vadd_wvalue[i][2:0]) begin
-                    lq_misa [$clog2(sqsz)'(req_load[i].ldid)] <= 1;
-                    lq_trans[$clog2(sqsz)'(req_load[i].ldid)] <= 1;
-                    lq_accsd[$clog2(sqsz)'(req_load[i].ldid)] <= 1;
+                    lq_misa [$clog2(lqsz)'(req_load[i].ldid)] <= 1;
+                    lq_trans[$clog2(lqsz)'(req_load[i].ldid)] <= 1;
+                    lq_accsd[$clog2(lqsz)'(req_load[i].ldid)] <= 1;
                 end
             end
             /* translate load entries */
@@ -425,8 +425,8 @@ module lsu #(
                 lq_trans[$clog2(lqsz)'(dt_resp[i])] <= 1;
                 /* load permission:  -A----RV */
                 if ((dt_perm[i] | 8'b01000011) != dt_perm[i]) begin
-                    lq_pgft [$clog2(sqsz)'(dt_resp[i])] <= 1;
-                    lq_accsd[$clog2(sqsz)'(dt_resp[i])] <= 1;
+                    lq_pgft [$clog2(lqsz)'(dt_resp[i])] <= 1;
+                    lq_accsd[$clog2(lqsz)'(dt_resp[i])] <= 1;
                 end
             end
             /* check relevance */
@@ -676,7 +676,7 @@ module lsu #(
             eq_in = 1;
         end
         for (int i = 0; i < ewd; i++) if (lq_pos_exect[i][$clog2(lqsz)]) begin
-            if (eq_in >= ewd | 32'(eq_in) >= eqsz - 32'(eq_num)) break;
+            if (32'(eq_in) >= ewd | 32'(eq_in) >= eqsz - 32'(eq_num)) break;
             eq_wvalue[eq_in]        = lq_rvalue[i];
             eq_wvalue[eq_in].specul = lq_chck[$clog2(lqsz)'(lq_pos_exect[i])] == 2'b10;
             eq_wvalue[eq_in].prdv   = lq_rdat_rvalue[i];
