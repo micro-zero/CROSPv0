@@ -407,13 +407,13 @@ module crosplite #(
     prf_id_t core_spec_ld_wakeup_o;
     logic core_load_miss_o;
     always_comb for (int i = 0; i < pwd; i++) begin
-        dis_st_valids_i[i] = dec_bundle[i].opid & ~dec_bundle[i].ldid[7] & dec_bundle[i].stid[7];
-        dis_ld_valids_i[i] = dec_bundle[i].opid & dec_bundle[i].ldid[7];
+        dis_st_valids_i[i] = dec_bundle[i].opid[15] & ~dec_bundle[i].ldid[7] & dec_bundle[i].stid[7];
+        dis_ld_valids_i[i] = dec_bundle[i].opid[15] & dec_bundle[i].ldid[7];
         dis_uops_i[i] = $bits(lsu_funct_t)'(dec_bundle[i].funct[i]);
     end
     always_comb begin
         exe_req_i = 0;
-        for (int i = 0; i < pwd; i++) if (fu_req[i].fu[1]) begin
+        for (int i = 0; i < pwd; i++) if (fu_req[i].fu[1] == 1) begin
             exe_req_i.data = fu_req[i].prs[1];
             exe_req_i.addr = fu_req[i].prs[0];
             exe_req_i.offset = fu_req[i].b[63:0];
