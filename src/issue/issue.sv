@@ -91,6 +91,7 @@ module issue #(
     always_ff @(posedge clk) if (rst | redir) iq_num <= 0; else iq_num <= iq_num + iq_in - iq_out;
 
     /* issue arbiter */
+    lsu_funct_t lsu_funct;
     always_comb begin
         iss_bundle = 0;
         iq_out = 0; iq_out_mask = 0;
@@ -100,6 +101,25 @@ module issue #(
             if (issue[i])
                 begin iq_out++; iq_out_mask[iq_raddr[i]] = 1; end
             if (iss_bundle[i].fu[1]) break;
+        end
+        /* verilator lint_off WIDTHEXPAND */
+        /* verilator lint_off WIDTHTRUNC */
+        for (int i = 0; i < iwd; i++) begin
+            lsu_funct = $bits(lsu_funct_t)'(iss_bundle[i].funct);
+            lsu_funct.is_sta = 1;
+            lsu_funct.is_std = 1;
+            lsu_funct.is_amo = 0;
+            lsu_funct.is_fence = 0;
+            lsu_funct.rob_idx = 6'(iss_bundle[i].opid);
+            lsu_funct.br_mask = 0;
+            lsu_funct.br_tag = 0;
+            lsu_funct.taken = 0;
+            lsu_funct.pdst = iss_bundle[i].prda;
+            lsu_funct.exception = 0;
+            lsu_funct.ldq_idx = 6'(iss_bundle[i].ldid);
+            lsu_funct.stq_idx = 6'(iss_bundle[i].stid);
+            lsu_funct.mem_size = 0;
+            iss_bundle[i].funct = 64'(lsu_funct);
         end
     end
 endmodule
