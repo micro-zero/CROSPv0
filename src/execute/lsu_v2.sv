@@ -99,7 +99,7 @@ module LSU
     st_idx_t                         stq_execute_head_reg;  // 下一个要执行execute的stq表项
     logic                                        clear_store_wire;      // 是否要clearstore，即已经有store完成访存了该出队列了
     logic [numSTQEntries-1:0]                    live_store_mask_reg;   // 现在stq中alive的stores
-    stq_entry_num_t [width-1:0]                  next_live_store_mask_wire;//之后stq中alive的stores
+    stq_entry_num_t                              next_live_store_mask_wire;//之后stq中alive的stores
     logic[width-1:0]                             ldq_almost_full_wire;      
     logic[width-1:0]                             stq_almost_full_wire;      
     logic                                        stq_nonempty_wire;  //判断stq当前不空
@@ -314,7 +314,7 @@ module LSU
     logic[numSTQEntries-1:0]              st_exception_killed_mask;
     logic                                 spec_ld_succeed_wire;
 
-    assign next_live_store_mask_init_wire = clear_store_wire ? live_store_mask_reg &  ~( 1 << stq_head_reg) : live_store_mask_reg;
+    
     generate
       for(genvar w = 0; w < width; w++)begin
         always_comb begin
@@ -340,15 +340,24 @@ module LSU
             end
           end
           //新的store进来了，更新live_store_mask
-          next_live_store_mask_wire[w] = next_live_store_mask_init_wire;
-          if(st_valid_wire[w])begin
-            for(int i = 0;i<w;i++)begin
-              next_live_store_mask_wire[w] = next_live_store_mask_wire[w] | (1 << (st_enq_idx_wire[i]-1));
-            end
-          end
+          // next_live_store_mask_wire[w] = next_live_store_mask_init_wire;
+          // if(st_valid_wire[w])begin
+          //   for(int i = 0;i<w;i++)begin
+          //     next_live_store_mask_wire[w] = next_live_store_mask_wire[w] | ($unsigned(1) << (stq_tail_reg));
+          //   end
+          // end
         end
       end
     endgenerate
+  assign next_live_store_mask_init_wire = clear_store_wire ? live_store_mask_reg &  ~( 1 << stq_head_reg) : live_store_mask_reg;
+  always_comb begin
+    next_live_store_mask_wire = next_live_store_mask_init_wire;
+    for(int i = 0;i<width;i++)begin
+      if(st_valid_wire[i])begin
+        next_live_store_mask_wire = next_live_store_mask_wire | 1<<stq_tail_reg;
+      end
+    end
+  end
 
     always_comb begin : stq_nonempty_logic
         logic stq_valid_or_wire;
@@ -881,7 +890,7 @@ module LSU
   // store has been committed AND successfully sent data to memory
     // Exception / Reset  
   
-    
+
     always_ff @( posedge clk or negedge rst )begin
         if(!rst)begin
           ldq_head_reg   <=  0;
@@ -930,7 +939,7 @@ module LSU
                   ldq[ld_enq_idx_wire[w]].entry_valid                   <=         1;
                   ldq[ld_enq_idx_wire[w]].entry.uop                     <=         dis_uops_i[w];
                   ldq[ld_enq_idx_wire[w]].entry.youngest_stq_idx        <=         st_enq_idx_wire[width-1];
-                  ldq[ld_enq_idx_wire[w]].entry.st_dep_mask             <=         next_live_store_mask_wire[width-1];
+                  ldq[ld_enq_idx_wire[w]].entry.st_dep_mask             <=         next_live_store_mask_wire;
 
                   ldq[ld_enq_idx_wire[w]].entry.addr_valid              <=         0;
                   ldq[ld_enq_idx_wire[w]].entry.executed                <=         0;
@@ -1270,7 +1279,7 @@ module LSU
   // Live Store Mask
   // track a bit-array of stores that are alive
   // (could maybe be re-produced from the stq_head/stq_tail, but need to know include spec_killed entries)
-            live_store_mask_reg  <=  next_live_store_mask_wire[width-1] &
+            live_store_mask_reg  <=  next_live_store_mask_wire&
                                 ~$unsigned(st_brkilled_mask) &
                                 ~$unsigned(st_exception_killed_mask);
 

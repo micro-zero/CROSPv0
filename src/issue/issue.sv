@@ -104,7 +104,8 @@ module issue #(
         end
         /* verilator lint_off WIDTHEXPAND */
         /* verilator lint_off WIDTHTRUNC */
-        for (int i = 0; i < iwd; i++) begin
+        lsu_funct = 0;
+        for (int i = 0; i < iwd; i++) if(iss_bundle[i].fu[1]) begin
             lsu_funct = $bits(lsu_funct_t)'(iss_bundle[i].funct);
             lsu_funct.is_sta = 1;
             lsu_funct.is_std = 1;
