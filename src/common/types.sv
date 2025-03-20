@@ -219,8 +219,8 @@ typedef struct packed {
     // exception
     logic                          exception;
     //LSU need
-    logic [63:0]          ldq_idx; // if is_load , where the index is
-    logic [63:0]          stq_idx; // if is_store, where the index is
+    logic [2:0]          ldq_idx; // if is_load , where the index is
+    logic [2:0]          stq_idx; // if is_store, where the index is
     logic [1:0]                    mem_size; 
 
 } lsu_funct_t;

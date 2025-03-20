@@ -14,7 +14,7 @@ module LSU
     parameter LDQAddrSz = $clog2(numLDQEntries),
     parameter STQAddrSz = $clog2(numSTQEntries), 
     parameter LSUAddrSz = (LDQAddrSz > STQAddrSz)? LDQAddrSz : STQAddrSz,
-    parameter width     =  1,
+    parameter width     =  4,
     parameter blockOffBits = 6,
     parameter robAddrSz = 7,
     parameter MAX_BR_COUNT = 4,
@@ -881,7 +881,7 @@ module LSU
   // store has been committed AND successfully sent data to memory
     // Exception / Reset  
   
-
+    
     always_ff @( posedge clk or negedge rst )begin
         if(!rst)begin
           ldq_head_reg   <=  0;

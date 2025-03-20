@@ -372,13 +372,14 @@ module crosplite #(
         mul_inst(clk, rst, dec_inst.redir, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
     div #(.iwd(pwd), .ewd(pwd))
         div_inst(clk, rst, dec_inst.redir, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
+    always_comb fu_ready[1] = 1;
 
     /* verilator lint_off WIDTHEXPAND */
     /* verilator lint_off WIDTHTRUNC */
     logic [pwd-1:0] dis_st_valids_i, dis_ld_valids_i;
     lsu_funct_t [pwd-1:0] dis_uops_i, core_commit_uops_i;
-    logic [pwd-1:0] [7:0] new_ldq_idx_o;
-    logic [pwd-1:0] [7:0] new_stq_idx_o;
+    logic [7:0] new_ldq_idx_o;
+    logic [7:0] new_stq_idx_o;
     logic [pwd-1:0] ldq_full_o, stq_full_o;
     logic lsu_fencei_rdy_o;
     logic s1_kill_o;
@@ -409,7 +410,7 @@ module crosplite #(
     always_comb for (int i = 0; i < pwd; i++) begin
         dis_st_valids_i[i] = dec_bundle[i].opid[15] & ~dec_bundle[i].ldid[7] & dec_bundle[i].stid[7];
         dis_ld_valids_i[i] = dec_bundle[i].opid[15] & dec_bundle[i].ldid[7];
-        dis_uops_i[i] = $bits(lsu_funct_t)'(dec_bundle[i].funct[i]);
+        dis_uops_i[i] = $bits(lsu_funct_t)'(dec_bundle[i].funct);
     end
     always_comb begin
         exe_req_i = 0;
@@ -425,7 +426,7 @@ module crosplite #(
     end
     LSU lsu_inst(
         .clk(clk),
-        .rst(rst),
+        .rst(~rst),
         .dis_st_valids_i(dis_st_valids_i),
         .dis_ld_valids_i(dis_ld_valids_i),
         .dis_uops_i(dis_uops_i),
