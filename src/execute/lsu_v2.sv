@@ -14,26 +14,27 @@ module LSU
     parameter LDQAddrSz = $clog2(numLDQEntries),
     parameter STQAddrSz = $clog2(numSTQEntries), 
     parameter LSUAddrSz = (LDQAddrSz > STQAddrSz)? LDQAddrSz : STQAddrSz,
-    parameter width     =  4,
     parameter blockOffBits = 6,
     parameter robAddrSz = 7,
     parameter MAX_BR_COUNT = 4,
-    parameter ADDR_WIDTH = 64
+    parameter ADDR_WIDTH = 64,
+    parameter dispatch_width     =  4,
+    parameter commit_width       =  2
 )
 (
     input  logic                                                clk,
     input  logic                                                rst,
 
     //connect with Core
-    input  logic [width-1:0]                                    dis_st_valids_i,//dispatch阶段发向LSU的store有效位信号
-    input  logic [width-1:0]                                    dis_ld_valids_i,//dispatch阶段发向LSU的load有效位信号
-    input  lsu_funct_t  [width-1:0]                             dis_uops_i,     //dispatch阶段发向LSU的uop
-    output logic [LDQAddrSz-1:0]                                new_ldq_idx_o,  //当前ldq空表项首位
-    output logic [STQAddrSz-1:0]                                new_stq_idx_o,  //当前stq空表项首位
-    output logic [width-1:0]                                    ldq_almost_full_o,     //ldq队列要满，注意接受load指令
-    output logic [width-1:0]                                    stq_almost_full_o,     //stq队列要满，注意接受store指令
-    output logic                                                lsu_fencei_rdy_o,//可以fencei ，表示lsu stq空，才可以等待流水线空
-    input  logic                                                core_exception_i,//core发进来的exception信号，lsu清空所有表项
+    input  logic [dispatch_width-1:0]                                    dis_st_valids_i,//dispatch阶段发向LSU的store有效位信号
+    input  logic [dispatch_width-1:0]                                    dis_ld_valids_i,//dispatch阶段发向LSU的load有效位信号
+    input  lsu_funct_t  [dispatch_width-1:0]                             dis_uops_i,     //dispatch阶段发向LSU的uop
+    output logic [LDQAddrSz-1:0]                                         new_ldq_idx_o,  //当前ldq空表项首位
+    output logic [STQAddrSz-1:0]                                         new_stq_idx_o,  //当前stq空表项首位
+    output logic [dispatch_width-1:0]                                    ldq_almost_full_o,     //ldq队列要满，注意接受load指令
+    output logic [dispatch_width-1:0]                                    stq_almost_full_o,     //stq队列要满，注意接受store指令
+    output logic                                                         lsu_fencei_rdy_o,//可以fencei ，表示lsu stq空，才可以等待流水线空
+    input  logic                                                         core_exception_i,//core发进来的exception信号，lsu清空所有表项
 
 
     //connect with Execution Unit
@@ -62,9 +63,9 @@ module LSU
     //connect with ROB (经过core)
     input  logic [robAddrSz-1:0]                                core_rob_head_idx_i,     // rob表头
     input  logic [robAddrSz-1:0]                                core_rob_pnr_idx_i,      // rob pnr指针
-    input  logic                                                commit_load_at_rob_head_i,//rob当前commit表头为load指令  
-    input  logic                                                core_commit_valids_i,    // 当前commit有效位
-    input  lsu_funct_t                                          core_commit_uops_i,      // 当前commit的uop
+    input  logic [commit_width-1:0]                             commit_load_at_rob_head_i,//rob当前commit表头为load指令  
+    input  logic [commit_width-1:0]                             core_commit_valids_i,    // 当前commit有效位
+    input  lsu_funct_t[commit_width-1:0]                        core_commit_uops_i,      // 当前commit的uop //规定一周期可以commit多条load 但是只能commit一条store
     output logic                                                core_clr_bsy_valid_o,    // 清除rob对应busy位信号的有效位
     output logic [robAddrSz:0]                                  core_clr_bsy_rob_idx_o,  // 需要清除对应busy位的rob表项
     output logic                                                core_clr_rob_unsafe_valid_o,//清除rob对应unsafe位信号的有效位     
@@ -91,20 +92,20 @@ module LSU
     ld_idx_t                                     ldq_head_reg;      
     ld_idx_t                                     ldq_tail_reg;
         
-    ld_idx_t[width-1:0]                          ld_enq_idx_wire;  
+    ld_idx_t[dispatch_width-1:0]                          ld_enq_idx_wire;  
     st_idx_t                         stq_head_reg;      // 当前stq头部（clearstore时加一，比如在commit后进行访存，访存成功）
     st_idx_t                         stq_tail_reg;      
-    st_idx_t[width-1:0]              st_enq_idx_wire;   
+    st_idx_t[dispatch_width-1:0]              st_enq_idx_wire;   
     st_idx_t                         stq_commit_head_reg;   // 下一个要提交commit的stq表项
     st_idx_t                         stq_execute_head_reg;  // 下一个要执行execute的stq表项
     logic                                        clear_store_wire;      // 是否要clearstore，即已经有store完成访存了该出队列了
     logic [numSTQEntries-1:0]                    live_store_mask_reg;   // 现在stq中alive的stores
     stq_entry_num_t                              next_live_store_mask_wire;//之后stq中alive的stores
-    logic[width-1:0]                             ldq_almost_full_wire;      
-    logic[width-1:0]                             stq_almost_full_wire;      
+    logic[dispatch_width-1:0]                             ldq_almost_full_wire;      
+    logic[dispatch_width-1:0]                             stq_almost_full_wire;      
     logic                                        stq_nonempty_wire;  //判断stq当前不空
-    logic[width-1:0]                             ld_valid_wire;      
-    logic[width-1:0]                             st_valid_wire;      
+    logic[dispatch_width-1:0]                             ld_valid_wire;      
+    logic[dispatch_width-1:0]                             st_valid_wire;      
     logic                                        lsu_fencei_rdy_wire;//是否可以执行fencei 
     logic[LDQAddrSz-1:0]                         ldq_tail_plus1_wire ;
     logic[STQAddrSz-1:0]                         stq_tail_plus1_wire ;
@@ -303,20 +304,20 @@ module LSU
   // Handle Memory Responses and nacks
   //----------------------------------
 
-    logic                                 dmem_resp_fired;
-    logic[LDQAddrSz-1:0]                  ldq_idx_dmem_resp_wire;
-    logic[numSTQEntries-1:0]              st_brkilled_mask;
-    logic[STQAddrSz-1 : 0]                temp_stq_commit_head_wire;
-    logic[LDQAddrSz-1 : 0]                temp_ldq_head_wire;
-    logic                                 commit_store_wire;
-    logic                                 commit_load_wire;
-    logic[LSUAddrSz-1 : 0]                commit_idx_wire;
-    logic[numSTQEntries-1:0]              st_exception_killed_mask;
-    logic                                 spec_ld_succeed_wire;
+    logic                                     dmem_resp_fired;
+    logic[LDQAddrSz-1:0]                      ldq_idx_dmem_resp_wire;
+    logic[numSTQEntries-1:0]                  st_brkilled_mask;
+    logic[commit_width-1:0][STQAddrSz-1 : 0]  temp_stq_commit_head_wire;
+    logic[commit_width-1:0][LDQAddrSz-1 : 0]  temp_ldq_head_wire;
+    logic[commit_width-1:0]                   commit_store_wire;
+    logic[commit_width-1:0]                   commit_load_wire;
+    logic[commit_width-1:0][LSUAddrSz-1 : 0]  commit_idx_wire;
+    logic[numSTQEntries-1:0]                  st_exception_killed_mask;
+    logic                                     spec_ld_succeed_wire;
 
     
     generate
-      for(genvar w = 0; w < width; w++)begin
+      for(genvar w = 0; w < dispatch_width; w++)begin
         always_comb begin
           //每个w都初始化为ldq_tail_reg
           //循环查0到w-1 看是否有dispatch，是就加一
@@ -352,7 +353,7 @@ module LSU
   assign next_live_store_mask_init_wire = clear_store_wire ? live_store_mask_reg &  ~( 1 << stq_head_reg) : live_store_mask_reg;
   always_comb begin
     next_live_store_mask_wire = next_live_store_mask_init_wire;
-    for(int i = 0;i<width;i++)begin
+    for(int i = 0;i<dispatch_width;i++)begin
       if(st_valid_wire[i])begin
         next_live_store_mask_wire = next_live_store_mask_wire | 1<<stq_tail_reg;
       end
@@ -374,7 +375,7 @@ module LSU
     // assign stq_tail_plus1_wire = stq_tail_reg +1;
     // assign ldq_full_wire = ldq_tail_plus1_wire == ldq_head_reg;
     // assign stq_full_wire = stq_tail_plus1_wire == stq_head_reg;
-    for(genvar w =0;w<width;++w)begin
+    for(genvar w =0;w<dispatch_width;++w)begin
       assign ld_valid_wire[w] = dis_ld_valids_i[w] & dis_uops_i[w].load & ~dis_uops_i[w].exception;
       assign st_valid_wire[w] = dis_st_valids_i[w] & dis_uops_i[w].store & ~dis_uops_i[w].exception;
     end
@@ -447,7 +448,7 @@ module LSU
                                           ~p2_block_load_mask_reg[ldq_wakeup_idx_r0_reg]            &
                                           ~store_needs_order_reg                             &
                                           ~block_load_wakeup_wire                             &
-                                          (~ldq_wakeup_entryline_wire.entry.addr_is_uncacheable | (commit_load_at_rob_head_i     & 
+                                          (~ldq_wakeup_entryline_wire.entry.addr_is_uncacheable | (|commit_load_at_rob_head_i     & 
                                                                                               ldq_head_reg == ldq_wakeup_idx_r0_reg  &
                                                                                               ldq_wakeup_entryline_wire.entry.st_dep_mask == 0))  ;                                      
 
@@ -873,12 +874,28 @@ module LSU
   // dequeue old entries on commit
   //-------------------------------------------------------------
   //-------------------------------------------------------------
-    assign temp_stq_commit_head_wire = (core_commit_valids_i & core_commit_uops_i.store) ? (stq_commit_head_reg + 1) & (numSTQEntries-1) : stq_commit_head_reg;
-    assign temp_ldq_head_wire = (core_commit_valids_i & core_commit_uops_i.load) ? (ldq_head_reg + 1)&(numLDQEntries -1) :ldq_head_reg;
+  generate
+    for(genvar w = 0; w < commit_width ; w++)begin : multiple_commit
+      commit_store_wire[w] = core_commit_valids_i[w] && core_commit_uops_i[w].store;
+      commit_load_wire[w]  = core_commit_valids_i[w] && core_commit_uops_i[w].load;
+      commit_idx_wire[w] = commit_store_wire[w] ? stq_commit_head_reg : ldq_head_reg;
+      temp_stq_commit_head_wire[w] =  stq_commit_head_reg;
+      temp_ldq_head_wire[w]        =  ldq_head_reg;
+      if(commit_store_wire[w]) for(int i = 0; i<w ;i++)begin
+        if(commit_store_wire[i]) begin
+          commit_idx_wire[w] = commit_idx_wire[w] +1;
+          temp_stq_commit_head_wire[w] = temp_stq_commit_head_wire[w] +1;
+        end
+      end
+      if(commit_load_wire[w]) for(int i = 0; i<w ;i++)begin
+        if(commit_load_wire[i]) begin
+          commit_idx_wire[w] = commit_idx_wire[w] +1;
+          temp_ldq_head_wire[w] = temp_ldq_head_wire[w] +1;
+        end
+      end
 
-    assign commit_store_wire = core_commit_valids_i && core_commit_uops_i.store;
-    assign commit_load_wire  = core_commit_valids_i && core_commit_uops_i.load;
-    assign commit_idx_wire = commit_store_wire ? stq_commit_head_reg : ldq_head_reg;
+    end
+  endgenerate
 
     always_comb begin
       clear_store_wire = 0;
@@ -929,16 +946,16 @@ module LSU
             
             //dispatch stage 中，有新的指令进来就分配表项
             //配置成了width发射dispatch
-            new_ldq_idx_o  <=  ld_enq_idx_wire[width-1];
-            new_stq_idx_o  <=  st_enq_idx_wire[width-1];
+            new_ldq_idx_o  <=  ld_enq_idx_wire[dispatch_width-1];
+            new_stq_idx_o  <=  st_enq_idx_wire[dispatch_width-1];
 
-            for(int w = 0; w < width;w++)begin
+            for(int w = 0; w < dispatch_width;w++)begin
               ldq_almost_full_o[w] <= ldq_almost_full_wire[w];          
               stq_almost_full_o[w] <= stq_almost_full_wire[w];
               if(ld_valid_wire[w])begin
                   ldq[ld_enq_idx_wire[w]].entry_valid                   <=         1;
                   ldq[ld_enq_idx_wire[w]].entry.uop                     <=         dis_uops_i[w];
-                  ldq[ld_enq_idx_wire[w]].entry.youngest_stq_idx        <=         st_enq_idx_wire[width-1];
+                  ldq[ld_enq_idx_wire[w]].entry.youngest_stq_idx        <=         st_enq_idx_wire[dispatch_width-1];
                   ldq[ld_enq_idx_wire[w]].entry.st_dep_mask             <=         next_live_store_mask_wire;
 
                   ldq[ld_enq_idx_wire[w]].entry.addr_valid              <=         0;
@@ -958,8 +975,8 @@ module LSU
               end
             end
 
-            ldq_tail_reg  <= ld_enq_idx_wire[width-1];
-            stq_tail_reg  <= st_enq_idx_wire[width-1];
+            ldq_tail_reg  <= ld_enq_idx_wire[dispatch_width-1];
+            stq_tail_reg  <= st_enq_idx_wire[dispatch_width-1];
 
             lsu_fencei_rdy_o   <= lsu_fencei_rdy_wire;
 
@@ -1213,21 +1230,21 @@ module LSU
   // dequeue old entries on commit
   //-------------------------------------------------------------
   //-------------------------------------------------------------
-            if(commit_store_wire)begin
-                stq[commit_idx_wire].entry.committed     <=   1;
+            for(int w = 0; w < commit_width;w++)begin
+              if(commit_store_wire[w]) stq[commit_idx_wire].entry.committed     <=   1;
+              else if(commit_load_wire[w])begin
+                  ldq[commit_idx_wire[w]].entry_valid           <=  0;
+                  ldq[commit_idx_wire[w]].entry.addr_valid      <=  0;
+                  ldq[commit_idx_wire[w]].entry.executed        <=  0;
+                  ldq[commit_idx_wire[w]].entry.succeeded       <=  0;
+                  ldq[commit_idx_wire[w]].entry.order_fail      <=  0;
+                  ldq[commit_idx_wire[w]].entry.forward_std_val <=  0;
+                  
+              end
+            end
 
-            end
-            else if(commit_load_wire)begin
-                ldq[commit_idx_wire].entry_valid           <=  0;
-                ldq[commit_idx_wire].entry.addr_valid      <=  0;
-                ldq[commit_idx_wire].entry.executed        <=  0;
-                ldq[commit_idx_wire].entry.succeeded       <=  0;
-                ldq[commit_idx_wire].entry.order_fail      <=  0;
-                ldq[commit_idx_wire].entry.forward_std_val <=  0;
-                
-            end
-            stq_commit_head_reg                           <=   temp_stq_commit_head_wire;
-            ldq_head_reg                                  <=   temp_ldq_head_wire;
+            stq_commit_head_reg                           <=   temp_stq_commit_head_wire[commit_width-1];
+            ldq_head_reg                                  <=   temp_ldq_head_wire[commit_width-1];
 
 
   // store has been committed AND successfully sent data to memory
