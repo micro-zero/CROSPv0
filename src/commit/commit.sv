@@ -210,6 +210,7 @@ module commit #(
             com_bundle[i].ldid     = dec_rvalue[i].ldid;
             com_bundle[i].stid     = dec_rvalue[i].stid;
             com_bundle[i].pc       = dec_rvalue[i].pc;
+            com_bundle[i].lsu_funct = $bts(lsu_funct_t)'(exe_rvalue_fwd[i].funct);
             com_bundle[i].call     = dec_rvalue[i].call;
             com_bundle[i].ret      = dec_rvalue[i].ret;
             com_bundle[i].pat      = dec_rvalue[i].pat;

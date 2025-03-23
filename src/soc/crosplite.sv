@@ -377,6 +377,7 @@ module crosplite #(
     /* verilator lint_off WIDTHEXPAND */
     /* verilator lint_off WIDTHTRUNC */
     logic [pwd-1:0] dis_st_valids_i, dis_ld_valids_i;
+    logic [pwd-1:0] core_commit_valids_i;
     lsu_funct_t [pwd-1:0] dis_uops_i, core_commit_uops_i;
     logic [7:0] new_ldq_idx_o;
     logic [7:0] new_stq_idx_o;
@@ -422,6 +423,14 @@ module crosplite #(
             exe_req_i.sfence = 0;
             exe_req_i.uop = fu_req[i].funct;
             exe_req_i.valid = fu_req[i].opid[15];
+        end
+    end
+    always_comb begin
+        core_commit_valids_i = 0;
+        core_commit_uops_i = 0;
+        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
+            core_commit_valids_i[i] = 1;
+            core_commit_uops_i[i] = $bits(lsu_funct_t)'(com_bundle[i].lsu_funct);
         end
     end
     LSU lsu_inst(
