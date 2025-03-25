@@ -428,7 +428,7 @@ module crosplite #(
     always_comb begin
         core_commit_valids_i = 0;
         core_commit_uops_i = 0;
-        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
+        for (int i = 0; i < pwd; i++) if (com_bundle[i].opid[15]) begin
             core_commit_valids_i[i] = 1;
             core_commit_uops_i[i] = $bits(lsu_funct_t)'(com_bundle[i].lsu_funct);
         end
