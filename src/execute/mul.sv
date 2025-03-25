@@ -11,22 +11,36 @@ import types::*;
 module mul #(
     parameter iwd = 4,  // issue width
     parameter ewd = 4,  // execution width
-    parameter eqsz = 8  // execution queue size
+    parameter eqsz = 8, // execution queue size
+    parameter opsz = 64 // operation ID size
 )(
     input  logic clk,
     input  logic rst,
-    input  logic flush,
+    input  red_bundle_t redir,           // redirect bundle
     output logic ready,                  // ready for receiving at most `iwd` requests
     input  reg_bundle_t [iwd-1:0] req,   // requests after register read
     input  logic        [ewd-1:0] claim, // claim signals (fetch execution results)
     output exe_bundle_t [ewd-1:0] resp   // execution results
 );
+    /* order calculation function */
+    function logic succeed(input logic [15:0] opid);
+        succeed = redir.opid[15] & opid[15] &
+            $clog2(opsz)'(opid)       - $clog2(opsz)'(redir.topid) >=
+            $clog2(opsz)'(redir.opid) - $clog2(opsz)'(redir.topid) + $clog2(opsz)'(1);
+    endfunction
+
     /* register read buffer */
     logic [$clog2(eqsz)-1:0] rr_front;
     logic [$clog2(eqsz):0] rr_num, rr_in, rr_out;
+    logic [eqsz-1:0][15:0] rr_opid;
+    logic [eqsz-1:0]       rr_bubble;
     logic        [ewd-1:0][$clog2(eqsz)-1:0] rr_raddr, rr_waddr;
     reg_bundle_t [ewd-1:0]                   rr_rvalue, rr_wvalue;
     logic        [ewd-1:0]                   rr_wena;
+    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(ewd), .wports(ewd))
+        rr_inst(.clk(clk), .rst(rst),
+            .raddr(rr_raddr), .rvalue(rr_rvalue),
+            .waddr(rr_waddr), .wvalue(rr_wvalue), .wena(rr_wena));
     always_comb begin
         rr_in = 0; rr_wvalue = 0;
         for (int i = 0; i < iwd; i++)
@@ -38,15 +52,17 @@ module mul #(
     always_comb for (int i = 0; i < ewd; i++) rr_raddr[i] = rr_front + $clog2(eqsz)'(i);
     always_comb for (int i = 0; i < ewd; i++) rr_waddr[i] = rr_raddr[i] + $clog2(eqsz)'(rr_num);
     always_comb for (int i = 0; i < ewd; i++) rr_wena [i] = i < 32'(rr_in);
-    always_ff @(posedge clk) if (rst | flush) rr_front <= 0; else rr_front <= rr_front + $clog2(eqsz)'(rr_out);
-    always_ff @(posedge clk) if (rst | flush) rr_num <= 0; else rr_num <= rr_num + rr_in - rr_out;
-    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(ewd), .wports(ewd))
-        rr_inst(.clk(clk), .rst(rst),
-            .raddr(rr_raddr), .rvalue(rr_rvalue),
-            .waddr(rr_waddr), .wvalue(rr_wvalue), .wena(rr_wena));
+    always_ff @(posedge clk) if (rst) rr_opid <= 0;
+        else for (int i = 0; i < ewd; i++) if (rr_wena[i]) rr_opid[rr_waddr[i]] <= rr_wvalue[i].opid;
+    always_ff @(posedge clk) if (rst) rr_bubble <= 0; else begin
+        for (int i = 0; i < eqsz; i++) if (succeed(rr_opid[i])) rr_bubble[i] <= 1;
+        for (int i = 0; i < ewd; i++) if (rr_wena[i]) rr_bubble[rr_waddr[i]] <= 0;
+    end
+    always_ff @(posedge clk) if (rst) rr_front <= 0; else rr_front <= rr_front + $clog2(eqsz)'(rr_out);
+    always_ff @(posedge clk) if (rst) rr_num <= 0; else rr_num <= rr_num + rr_in - rr_out;
 
     /* multiplier pipeline */
-    exe_bundle_t [`MULLAT-1:0] rq; // result queue
+    exe_bundle_t [`MULLAT-1:0] rq, rq_next; // result queue
     exe_bundle_t result;
     logic [127:0] r, a, b;
     mul_funct_t f;
@@ -63,13 +79,24 @@ module mul #(
     always_comb begin
         result = 0;
         if (|rr_num) result.opid = rr_rvalue[0].opid;
+        if (succeed(rr_opid[rr_raddr[0]]) | rr_bubble[rr_raddr[0]]) result.opid = 0;
+        result.brid = rr_rvalue[0].brid;
+        result.ldid = rr_rvalue[0].ldid;
+        result.stid = rr_rvalue[0].stid;
+        result.delta = rr_rvalue[0].delta;
+        result.pat = rr_rvalue[0].pat;
+        result.pc = rr_rvalue[0].pc;
         result.npc = rr_rvalue[0].base[63:0] + 63'(rr_rvalue[0].delta);
         result.prda = rr_rvalue[0].prda[1];
         result.prdv = r[63:0];
     end
     always_comb rr_out = |rr_num & (claim[0] | ~rq[0].opid[15]) ? 1 : 0;
-    always_ff @(posedge clk) if (rst | flush) rq <= 0;
-        else if (claim[0] | ~rq[0].opid[15]) rq <= {result, rq[`MULLAT-1:1]};
+    always_comb begin
+        rq_next = rq;
+        if (claim[0] | ~rq[0].opid[15]) rq_next = {result, rq[`MULLAT-1:1]};
+        for (int i = 0; i < `MULLAT; i++) if (succeed(rq_next[i].opid)) rq_next[i].opid = 0;
+    end
+    always_ff @(posedge clk) if (rst) rq <= 0; else rq <= rq_next;
 
     /* assign response */
     always_comb ready = ewd <= eqsz - 32'(rr_num); // ready when able to holding `ewd` operations

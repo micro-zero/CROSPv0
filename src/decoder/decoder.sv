@@ -45,6 +45,7 @@ module decoder #(
     input logic [6:0] interrupt,
     input logic [63:0] mstatus,
     input  com_bundle_t [cwd-1:0] com_bundle,
+    input  red_bundle_t           red_bundle,
     output logic        [fwd-1:0] ready,
     input  fet_bundle_t [fwd-1:0] fet_bundle,
     input  logic        [dwd-1:0] decode,
@@ -164,7 +165,7 @@ module decoder #(
             alu_funct[0].sfence = op[`SYSTEM] & ir[31:25] == 7'b0001001;
             alu_funct[0].ecall  = ir == 32'h00000073;
             alu_funct[0].ebreak = ir == 32'h00100073;
-            alu_funct[0].ret = (ir & ~(32'd3 << 28)) == 32'h00200073 ? {1'b1, ir[29:28]} : 0;
+            alu_funct[0].eret = (ir & ~(32'd3 << 28)) == 32'h00200073 ? {1'b1, ir[29:28]} : 0;
             alu_funct[0].wfi = ir == 32'h10500073;
             if (|alu_funct[0]) begin
                 alu_funct[0].iword =  op[`OP_32] | op[`OP_IMM_32];
@@ -375,6 +376,15 @@ module decoder #(
             /* set PC delta of instruction with multiple operations */
             if (result[g][2].opid[15]) result[g][1].delta = 0;
             if (result[g][1].opid[15]) result[g][0].delta = 0;
+
+            /* safety judgement */
+            for (int i = 0; i < 3; i++)
+            if  (|fpu_funct[i] | |mul_funct[i] | |div_funct[i] | |alu_funct[i] &
+                    ~|alu_funct[i].bmask & ~|alu_funct[i].eret & ~alu_funct[i].j &
+                    ~|alu_funct[i].pf & ~|alu_funct[i].interrupt & ~alu_funct[i].fencei &
+                    ~alu_funct[i].sfence & ~alu_funct[i].ecall & ~alu_funct[i].ebreak &
+                    ~alu_funct[i].wfi & ~alu_funct[i].inv
+                ) result[g][i].safe = 1;
         end
         always_comb begin
             result_num  [g] = 0;
@@ -389,35 +399,51 @@ module decoder #(
         end
     end
 
-    /* pipeline redirect */
+    /* ID generation */
     logic redir;
-    always_comb redir = com_bundle[0].redir | com_bundle[0].rollback;
-
-    /* assign operation ID */
-    logic [$clog2(opsz)-1:0] opid; // operation ID
-    logic [$clog2(brsz)-1:0] brid; // branch ID
-    logic [$clog2(ldsz)-1:0] ldid; // load ID
-    logic [$clog2(stsz)-1:0] stid; // store ID
-    logic [15:0] opnum, opcom;     // numbers of operation IDs
-    logic [15:0] brnum, brcom;     // numbers of branch operation IDs
-    logic [15:0] ldnum, ldcom;     // numbers of load operation IDs
-    logic [15:0] stnum, stcom;     // numbers of store operation IDs
+    logic [$clog2(opsz)-1:0] opid;    // operation ID
+    logic [$clog2(brsz)-1:0] brid;    // branch ID
+    logic [$clog2(ldsz)-1:0] ldid;    // load ID
+    logic [$clog2(stsz)-1:0] stid;    // store ID
+    logic [15:0] opnum, opcom, opred; // numbers of operation IDs
+    logic [15:0] brnum, brcom, brred; // numbers of branch operation IDs
+    logic [15:0] ldnum, ldcom, ldred; // numbers of load operation IDs
+    logic [15:0] stnum, stcom, stred; // numbers of store operation IDs
+    always_comb redir = red_bundle.opid[15];
     always_comb begin
         opcom = 0; brcom = 0; ldcom = 0; stcom = 0;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) opcom++;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].brid[7]) brcom++;
         for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) ldcom++;
-        for (int i = 0; i < ewd; i++)
-            if (com_bundle[i].opid[15] & ~com_bundle[i].ldid[7] & com_bundle[i].stid[7]) stcom++;
+        for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].stid[7]) stcom++;
     end
-    always_ff @(posedge clk) if (rst | redir) opid <= 0; else opid <= opid + $clog2(opsz)'(dq_in);
-    always_ff @(posedge clk) if (rst | redir) brid <= 0; else brid <= brid + $clog2(brsz)'(dq_brin);
-    always_ff @(posedge clk) if (rst | redir) ldid <= 0; else ldid <= ldid + $clog2(ldsz)'(dq_ldin);
-    always_ff @(posedge clk) if (rst | redir) stid <= 0; else stid <= stid + $clog2(stsz)'(dq_stin);
-    always_ff @(posedge clk) if (rst | redir) opnum <= 0; else opnum <= opnum - opcom + 16'(dq_in);
-    always_ff @(posedge clk) if (rst | redir) brnum <= 0; else brnum <= brnum - brcom + 16'(dq_brin);
-    always_ff @(posedge clk) if (rst | redir) ldnum <= 0; else ldnum <= ldnum - ldcom + 16'(dq_ldin);
-    always_ff @(posedge clk) if (rst | redir) stnum <= 0; else stnum <= stnum - stcom + 16'(dq_stin);
+    always_comb begin
+        opred = 0; brred = 0; ldred = 0; stred = 0;
+        opred[$clog2(opsz)-1:0] = opid - $clog2(opsz)'(red_bundle.opid) - $clog2(opsz)'(1);
+        brred[$clog2(brsz)-1:0] = brid - $clog2(brsz)'(red_bundle.brid) - $clog2(brsz)'(red_bundle.brid[7]);
+        ldred[$clog2(ldsz)-1:0] = ldid - $clog2(ldsz)'(red_bundle.ldid) - $clog2(ldsz)'(red_bundle.ldid[7]);
+        stred[$clog2(stsz)-1:0] = stid - $clog2(stsz)'(red_bundle.stid) - $clog2(stsz)'(red_bundle.stid[7]);
+    end
+    always_ff @(posedge clk) if (rst) opid <= 0;
+        else if (redir) opid <= $clog2(opsz)'(red_bundle.opid) + $clog2(opsz)'(1);
+        else            opid <= opid + $clog2(opsz)'(dq_in);
+    always_ff @(posedge clk) if (rst) brid <= 0;
+        else if (redir) brid <= $clog2(brsz)'(red_bundle.brid) + $clog2(brsz)'(red_bundle.brid[7]);
+        else            brid <= brid + $clog2(brsz)'(dq_brin);
+    always_ff @(posedge clk) if (rst) ldid <= 0;
+        else if (redir) ldid <= $clog2(ldsz)'(red_bundle.ldid) + $clog2(ldsz)'(red_bundle.ldid[7]);
+        else            ldid <= ldid + $clog2(ldsz)'(dq_ldin);
+    always_ff @(posedge clk) if (rst) stid <= 0;
+        else if (redir) stid <= $clog2(stsz)'(red_bundle.stid) + $clog2(stsz)'(red_bundle.stid[7]);
+        else            stid <= stid + $clog2(stsz)'(dq_stin);
+    always_ff @(posedge clk) if (rst) opnum <= 0;
+        else if (redir) opnum <= opnum - opred - opcom; else opnum <= opnum - opcom + 16'(dq_in);
+    always_ff @(posedge clk) if (rst) brnum <= 0;
+        else if (redir) brnum <= brnum - brred - brcom; else brnum <= brnum - brcom + 16'(dq_brin);
+    always_ff @(posedge clk) if (rst) ldnum <= 0;
+        else if (redir) ldnum <= ldnum - ldred - ldcom; else ldnum <= ldnum - ldcom + 16'(dq_ldin);
+    always_ff @(posedge clk) if (rst) stnum <= 0;
+        else if (redir) stnum <= stnum - stred - stcom; else stnum <= stnum - stcom + 16'(dq_stin);
 
     /* flatten results */
     lsu_funct_t [dwd-1:0][2:0] f;
@@ -429,32 +455,31 @@ module decoder #(
         for (int i = 0; i < fwd; i++) begin
             if (32'(dq_in) + 32'(result_num[i]) > dqsz - 32'(dq_num) |
                 32'(dq_in) + 32'(result_num[i]) > 32'(dwdin) |
-                16'(dq_in)   + 16'(result_num[i])   > opsz - opnum |
-                16'(dq_brin) + 16'(result_brnum[i]) > brsz - brnum |
-                16'(dq_ldin) + 16'(result_ldnum[i]) > ldsz - ldnum |
+                16'(dq_in)   + 16'(result_num[i])   > opsz - opnum - 1 |
+                16'(dq_brin) + 16'(result_brnum[i]) > brsz - brnum - 1 |
+                16'(dq_ldin) + 16'(result_ldnum[i]) > ldsz - ldnum - 1 |
                 16'(dq_stin) + 16'(result_stnum[i]) > stsz - stnum - 1) break;
             for (int j = 0; j < 3; j++)
                 if (result[i][j].opid[15]) begin
                     dq_wvalue[32'(dq_in)] = result[i][j];
                     dq_wvalue[32'(dq_in)].opid[14:0] = 0;
                     dq_wvalue[32'(dq_in)].opid[$clog2(opsz)-1:0] = opid + $clog2(opsz)'(dq_in);
+                    /* MSB indicates types, lower bits indicate latest LQ/SQ/BR index */
+                    dq_wvalue[32'(dq_in)].ldid[$clog2(ldsz)-1:0] = ldid + $clog2(ldsz)'(dq_ldin);
+                    dq_wvalue[32'(dq_in)].stid[$clog2(stsz)-1:0] = stid + $clog2(stsz)'(dq_stin);
+                    dq_wvalue[32'(dq_in)].brid[$clog2(brsz)-1:0] = brid + $clog2(brsz)'(dq_brin);
                     if (result_brnum[i] == 1) begin
                         dq_wvalue[32'(dq_in)].brid[7] = 1;
-                        dq_wvalue[32'(dq_in)].brid[$clog2(brsz)-1:0] = brid + $clog2(brsz)'(dq_brin);
                         dq_brin++;
                     end
-                    if (result[i][j].fu[1])
-                        if (f[i][j].load) begin
-                            dq_wvalue[32'(dq_in)].ldid[7] = 1;
-                            dq_wvalue[32'(dq_in)].stid[7] = 1; // to mark relative store position
-                            dq_wvalue[32'(dq_in)].ldid[$clog2(ldsz)-1:0] = ldid + $clog2(ldsz)'(dq_ldin);
-                            dq_wvalue[32'(dq_in)].stid[$clog2(stsz)-1:0] = stid + $clog2(stsz)'(dq_stin);
-                            dq_ldin++;
-                        end else begin
-                            dq_wvalue[32'(dq_in)].stid[7] = 1;
-                            dq_wvalue[32'(dq_in)].stid[$clog2(stsz)-1:0] = stid + $clog2(stsz)'(dq_stin);
-                            dq_stin++;
-                        end
+                    if (result[i][j].fu[1] & f[i][j].load) begin
+                        dq_wvalue[32'(dq_in)].ldid[7] = 1;
+                        dq_ldin++;
+                    end
+                    if (result[i][j].fu[1] & f[i][j].store) begin
+                        dq_wvalue[32'(dq_in)].stid[7] = 1;
+                        dq_stin++;
+                    end
                     dq_in++;
                 end
             ready[i] = 1;
@@ -464,8 +489,9 @@ module decoder #(
     /* decoder queue operation */
     always_comb begin
         dec_bundle = dq_rvalue;
-        for (int i = 0; i < dwd; i++)
-            if (i >= dq_num | redir) dec_bundle[i].opid = 0;
+        /* redirection will invalidate output, for map table will not be
+           simply flushed and making output clean here is convenient */
+        for (int i = 0; i < dwd; i++) if (i >= dq_num | redir) dec_bundle[i].opid = 0;
     end
     always_comb begin
         dq_out = 0;
@@ -473,5 +499,5 @@ module decoder #(
             if (decode[i] & dec_bundle[i].opid[15]) dq_out++;
     end
     always_ff @(posedge clk) if (rst | redir) dq_front <= 0; else dq_front <= dq_front + $clog2(dqsz)'(dq_out);
-    always_ff @(posedge clk) if (rst | redir) dq_num <= 0; else dq_num <= dq_num - dq_out + dq_in;
+    always_ff @(posedge clk) if (rst | redir) dq_num   <= 0; else dq_num   <= dq_num - dq_out + dq_in;
 endmodule

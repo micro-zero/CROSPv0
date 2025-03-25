@@ -10,12 +10,11 @@ module mmu #(
     parameter frhost = 64'h0,       // bypassed fromhost address
     parameter dcbase = 64'h80000000 // base address of cacheable memory
 )(
-    input  logic       clk,
-    input  logic       rst,
-    input  logic       fnci,   // fence.i committed
-    input  logic       fncv,   // sfence.vma committed
-    output logic [7:0] flmask, // flush mask
-    output logic [7:0] flrqst, // flush request
+    input  logic         clk,
+    input  logic         rst,
+    input  logic         fnci,  // fence.i committed
+    input  logic         fncv,  // sfence.vma committed
+    input  logic [255:0] flush, // flush bitmap
     /* ITLB interface */
     input  logic  [7:0] s_it_rqst, // instruction TLB request ID
     input  logic [63:0] s_it_vadd, // instruction TLB virtual address
@@ -31,13 +30,11 @@ module mmu #(
     output logic  [7:0] s_dt_perm, // data TLB access permission
     output logic [63:0] s_dt_padd, // data TLB physical address
     /* ICACHE interface */
-    input  logic        s_ic_flsh, // instruction cache flush signal
     input  logic  [7:0] s_ic_rqst, // instruction cache request ID
     input  logic [63:0] s_ic_addr, // instruction cache physical address
     output logic  [7:0] s_ic_resp, // instruction cache response ID
     output logic [63:0] s_ic_rdat, // instruction cache read data
     /* DCACHE interface */
-    input  logic        s_dc_flsh, // data cache flush signal
     input  logic  [7:0] s_dc_rqst, // data cache request ID
     input  logic [63:0] s_dc_addr, // data cache physical address
     input  logic  [7:0] s_dc_strb, // data cache write strobe
@@ -111,15 +108,6 @@ module mmu #(
      * to support LQ/SQ of more than 16 entries, ID width needs extension
      */
 
-    /* flush function (see cache.sv) */
-    function logic fl(input logic [7:0] req); fl = |req & (req & ~flmask) == (flrqst & ~flmask); endfunction
-    always_comb case ({s_dc_flsh, s_ic_flsh})
-        2'b00: {flmask, flrqst} = {8'b0000_0000, 8'b0000_0000};
-        2'b01: {flmask, flrqst} = {8'b0011_1111, 8'b1000_0000};
-        2'b10: {flmask, flrqst} = {8'b0011_1111, 8'b1100_0000};
-        2'b11: {flmask, flrqst} = {8'b0111_1111, 8'b1000_0000};
-    endcase
-
     /* ITLB */
     logic  [7:0] it_rqst_m;
     logic [63:0] it_vadd_m;
@@ -128,8 +116,7 @@ module mmu #(
     logic  [7:0] it_perm_m;
     logic [63:0] it_padd_m;
     tlb #(.chn(1), .set(2), .way(8)) itlb (
-        .clk(clk), .rst(rst | fncv),
-        .flmask(flmask), .flrqst(flrqst),
+        .clk(clk), .rst(rst | fncv), .flush(flush),
         .s_rqst(s_it_rqst), .m_rqst(it_rqst_m),
         .s_vadd(s_it_vadd), .m_vadd(it_vadd_m),
         .s_satp(s_it_satp), .m_satp(it_satp_m),
@@ -146,8 +133,7 @@ module mmu #(
     logic  [7:0] dt_perm_m;
     logic [63:0] dt_padd_m;
     tlb #(.init(init), .chn(1), .set(2), .way(16)) dtlb (
-        .clk(clk), .rst(rst | fncv),
-        .flmask(flmask), .flrqst(flrqst),
+        .clk(clk), .rst(rst | fncv), .flush(flush),
         .s_rqst(s_dt_rqst), .m_rqst(dt_rqst_m),
         .s_vadd(s_dt_vadd), .m_vadd(dt_vadd_m),
         .s_satp(s_dt_satp), .m_satp(dt_satp_m),
@@ -167,8 +153,7 @@ module mmu #(
     logic       [7:0] st_rqst_b, st_rqst_f;
     logic      [63:0] st_vadd_b, st_vadd_f;
     tlb #(.init(init), .chn(2), .set(64), .way(8)) stlb (
-        .clk(clk), .rst(rst | fncv),
-        .flmask(flmask), .flrqst(flrqst),
+        .clk(clk), .rst(rst | fncv), .flush(flush),
         .s_rqst({dt_rqst_m, it_rqst_m}), .m_rqst(st_rqst_m),
         .s_vadd({dt_vadd_m, it_vadd_m}), .m_vadd(st_vadd_m),
         .s_satp({dt_satp_m, it_satp_m}), .m_satp(st_satp_m),
@@ -179,7 +164,7 @@ module mmu #(
     always_comb st_ready = ~|st_rqst_b | st_rqst_b == st_resp_m;
     always_comb st_rqst_f = st_ready ? st_rqst_m : st_rqst_b;
     always_comb st_vadd_f = st_ready ? st_vadd_m : st_vadd_b;
-    always_ff @(posedge clk) st_rqst_b <= rst | fl(st_rqst_f) ? 0 : st_rqst_f;
+    always_ff @(posedge clk) st_rqst_b <= rst | flush[st_rqst_f] ? 0 : st_rqst_f;
     always_ff @(posedge clk) st_vadd_b <= st_vadd_f;
 
     /* cache definitions */
@@ -222,8 +207,7 @@ module mmu #(
 
     /* instruction cache */
     cache #(.init(init), .chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
-        .clk(clk), .rst(rst | fnci), .rid(0),
-        .flmask(flmask), .flrqst(flrqst),
+        .clk(clk), .rst(rst | fnci), .rid(0), .flush(flush),
         .s_trsc(ic_trsc_s), .m_trsc(ic_trsc_m),
         .s_rqst(ic_rqst_s), .m_rqst(ic_rqst_m),
         .s_strb(ic_strb_s), .m_strb(ic_strb_m),
@@ -251,14 +235,13 @@ module mmu #(
     always_comb ic_miss_m = dc_miss_s;
     always_comb ic_ofst_m = dc_ofst_s;
     always_comb ic_rdat_m = dc_rdat_s;
-    always_ff @(posedge clk) ic_rqst_b <= rst | fl(ic_rqst_f) ? 0 : ic_rqst_f;
+    always_ff @(posedge clk) ic_rqst_b <= rst | flush[ic_rqst_f] ? 0 : ic_rqst_f;
     always_ff @(posedge clk) ic_addr_b <= ic_addr_f;
     always_ff @(posedge clk) ic_offset <= ic_addr_s[5:0];
 
     /* data cache */
     cache #(.init(init), .chn(1), .set(64), .way(8), .blk(64), .mshrsz(4)) dcache (
-        .clk(clk), .rst(rst), .rid(8'b0000_0010),
-        .flmask(flmask), .flrqst(flrqst),
+        .clk(clk), .rst(rst), .rid(8'b0000_0010), .flush(flush),
         .s_trsc(dc_trsc_s), .m_trsc(dc_trsc_m),
         .s_rqst(dc_rqst_s), .m_rqst(dc_rqst_m),
         .s_strb(dc_strb_s), .m_strb(dc_strb_m),
@@ -275,7 +258,7 @@ module mmu #(
     always_comb dc_addr_f = dc_ready ? s_dc_addr : dc_addr_b;
     always_comb dc_strb_f = dc_ready ?  64'(s_dc_strb) << (6'(s_dc_addr[5:3]) << 3) : dc_strb_b;
     always_comb dc_wdat_f = dc_ready ? 512'(s_dc_wdat) << (9'(s_dc_addr[5:3]) << 6) : dc_wdat_b;
-    always_ff @(posedge clk) dc_rqst_b <= rst | fl(dc_rqst_f) ? 0 : dc_rqst_f;
+    always_ff @(posedge clk) dc_rqst_b <= rst | flush[dc_rqst_f] ? 0 : dc_rqst_f;
     always_ff @(posedge clk) dc_strb_b <= dc_strb_f;
     always_ff @(posedge clk) dc_addr_b <= dc_addr_f;
     always_ff @(posedge clk) dc_wdat_b <= dc_wdat_f;
@@ -292,12 +275,12 @@ module mmu #(
     always_comb st_resp_m = ptw_stt == 4 ? ptw_req : 0;
     always_comb st_perm_m = ptw_prm;
     always_comb st_padd_m = {52'(ptw_ppn), 12'd0};
-    always_ff @(posedge clk) if (rst | fl(ptw_req)) {ptw_req, ptw_stt} <= 0;
+    always_ff @(posedge clk) if (rst | flush[ptw_req]) {ptw_req, ptw_stt} <= 0;
         else case (ptw_stt)
             0: // waiting for STLB request
                 if (|st_rqst_f) begin
-                    ptw_stt <= fl(st_rqst_f) ? 0 : 1;
-                    ptw_req <= fl(st_rqst_f) ? 0 : st_rqst_f;
+                    ptw_stt <= flush[st_rqst_f] ? 0 : 1;
+                    ptw_req <= flush[st_rqst_f] ? 0 : st_rqst_f;
                     ptw_vpn <= st_vadd_f[56:12];
                     ptw_ppn <= st_satp_m[43:0];
                     if      (st_satp_m[63:60] == 4'd8)  ptw_num <= 2;
@@ -331,7 +314,7 @@ module mmu #(
         endcase
 
     /* AXI state machine */
-    logic             axi_fls;          // flush and cancel signal
+    logic             axi_fls;          // flush signal
     logic       [7:0] axi_stt, axi_cnt; // AXI state and counter
     logic       [7:0] axi_req, axi_thr; // AXI request and through ID
     logic [63:0][7:0] axi_buf;          // buffer of cache line
@@ -347,10 +330,10 @@ module mmu #(
         m_axi_wvalid  <= 0;
         m_axi_bready  <= 0;
     end else begin
-        if (|coh_takn_mb & fl(axi_req)) coh_takn_mb <= 0;
+        if (|coh_takn_mb & flush[axi_req]) coh_takn_mb <= 0;
         case (axi_stt)
             0: // initial state
-                if (|coh_resp_sb & ~fl(coh_resp_sb)) begin
+                if (|coh_resp_sb & ~flush[coh_resp_sb]) begin
                     if (coh_trsc_sb == 1 & coh_mesi_sb == 1) // other GetV and valid => data response
                         {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
                     else {m_axi_arvalid, axi_stt} <= {1'd0, 8'd6};
@@ -361,7 +344,7 @@ module mmu #(
                     axi_buf      <= coh_rdat_sb;
                     m_axi_araddr <= coh_addr_sb & ~64'h3f;
                     m_axi_arlen  <= 7;
-                end else if (|coh_resp_mb & ~coh_flsh_mb & ~fl(coh_resp_mb)) begin
+                end else if (|coh_resp_mb & ~coh_flsh_mb & ~flush[coh_resp_mb]) begin
                     if (coh_mesi_mb == 1) {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
                     /* todo: different transactions from cache can be distinguished */
                     else {m_axi_arvalid, axi_stt} <= {1'd0, 8'd6};
@@ -373,7 +356,7 @@ module mmu #(
                     m_axi_araddr  <= coh_addr_mb;
                     m_axi_arlen   <= 7;
                     coh_takn_mb   <= 1;
-                end else if (|dc_rqst_f & dc_byps_f & ~fl(dc_rqst_f)) begin
+                end else if (|dc_rqst_f & dc_byps_f & ~flush[dc_rqst_f]) begin
                     axi_stt       <= 1;
                     axi_cnt       <= 0;
                     axi_req       <= 0;
@@ -432,12 +415,12 @@ module mmu #(
             5: // waiting for B handshake
                 if (m_axi_bvalid) {m_axi_bready, axi_stt} <= 6;
             6: // transaction done, ready for response
-                if (~|axi_thr | axi_thr == s_dc_resp | fl(axi_req) | fl(axi_thr) | axi_fls)
+                if (~|axi_thr | axi_thr == s_dc_resp | flush[axi_req] | flush[axi_thr] | axi_fls)
                     {coh_takn_mb, axi_stt} <= 0;
         endcase
     end
-    always_ff @(posedge clk) if (rst | axi_stt == 6)     axi_fls <= 0;
-        else if (|axi_stt & (fl(axi_req) | fl(axi_thr))) axi_fls <= 1;
+    always_ff @(posedge clk) if (rst | axi_stt == 6)           axi_fls <= 0;
+        else if (|axi_stt & (flush[axi_req] | flush[axi_thr])) axi_fls <= 1;
     always_comb m_axi_arid    = 0;
     always_comb m_axi_arburst = 'b01;  // INCR burst
     always_comb m_axi_arsize  = 'b011; // 8 bytes
@@ -459,10 +442,10 @@ module mmu #(
     always_comb s_coh_resp = axi_stt == 6 & axi_req == coh_rqst_sb ? coh_resp_sb : 0;
     always_comb s_coh_mesi = axi_stt == 6 & axi_req == coh_rqst_sb ? coh_mesi_sb : 0;
     always_ff @(posedge clk) begin
-        if (rst | |coh_resp_mb & fl(coh_resp_mb)) {m_coh_rqst, coh_rqst_mb, coh_resp_mb} <= 0;
+        if (rst | |coh_resp_mb & flush[coh_resp_mb]) {m_coh_rqst, coh_rqst_mb, coh_resp_mb} <= 0;
         else if (~|coh_rqst_mb) begin // buffer vacant
-            m_coh_rqst  <= ~fl(dc_rqst_m) ? dc_rqst_m : 0;
-            coh_rqst_mb <= ~fl(dc_rqst_m) ? dc_rqst_m : 0;
+            m_coh_rqst  <= ~flush[dc_rqst_m] ? dc_rqst_m : 0;
+            coh_rqst_mb <= ~flush[dc_rqst_m] ? dc_rqst_m : 0;
             coh_addr_mb <= dc_addr_m & ~64'h3f;
             coh_strb_mb <= dc_strb_m;
             coh_wdat_mb <= dc_wdat_m;
@@ -470,7 +453,7 @@ module mmu #(
         end else if (m_coh_resp == coh_rqst_mb) begin // coherence request responsed
             coh_resp_mb <= m_coh_resp;
             coh_mesi_mb <= m_coh_mesi;
-            if (coh_flsh_mb | fl(m_coh_resp)) {coh_rqst_mb, coh_resp_mb} <= 0;
+            if (coh_flsh_mb | flush[m_coh_resp]) {coh_rqst_mb, coh_resp_mb} <= 0;
         end else if (dc_resp_m == coh_rqst_mb) begin // cache responsed
             coh_rqst_mb <= 0;
             coh_resp_mb <= 0;
@@ -478,7 +461,7 @@ module mmu #(
         if (|m_coh_rqst) m_coh_rqst <= 0; // hold for one cycle for port
     end
     always_ff @(posedge clk) if (rst | |m_coh_resp | |coh_resp_mb) coh_flsh_mb <= 0;
-        else if (fl(coh_rqst_mb) & ~coh_takn_mb)                   coh_flsh_mb <= 1;
+        else if (flush[coh_rqst_mb] & ~coh_takn_mb)                coh_flsh_mb <= 1;
     always_ff @(posedge clk)
         if (rst) {coh_rqst_sb, coh_resp_sb} <= 0;
         else if (~|coh_rqst_sb) begin // buffer vacant
@@ -493,8 +476,8 @@ module mmu #(
             coh_rqst_sb <= 0;
             coh_resp_sb <= 0;
         end
-    always_ff @(posedge clk) if (rst | fl(coh_lock_sb)) coh_lock_sb <= 0;
-        else if (|m_coh_resp & ~coh_flsh_mb & ~fl(m_coh_resp) & coh_trsc_mb == 1)
+    always_ff @(posedge clk) if (rst | flush[coh_lock_sb]) coh_lock_sb <= 0;
+        else if (|m_coh_resp & ~coh_flsh_mb & ~flush[m_coh_resp] & coh_trsc_mb == 1)
             coh_lock_sb <= m_coh_resp;
         /* todo: use AXI handshake to confirm may be better than `dc_resp_s`,
            for not all requests must have a data cache response */

@@ -9,19 +9,27 @@
 import types::*;
 
 module alu #(
-    parameter iwd = 4,  // issue width
-    parameter ewd = 4,  // execution width
-    parameter eqsz = 8  // execution queue size
+    parameter iwd  = 4, // issue width
+    parameter ewd  = 4, // execution width
+    parameter eqsz = 8, // execution queue size
+    parameter opsz = 64 // operation ID size
 )(
     input  logic clk,
     input  logic rst,
-    input  logic flush,
+    input  red_bundle_t redir,           // redirect bundle
     output logic ready,                  // ready for receiving at most `iwd` requests
     input  reg_bundle_t [iwd-1:0] req,   // requests after register read
     input  logic        [ewd-1:0] claim, // claim signals (fetch execution results)
     output exe_bundle_t [ewd-1:0] resp,  // execution results
     input  logic [1:0] level             // privilege level
 );
+    /* order calculation function */
+    function logic succeed(input logic [15:0] opid);
+        succeed = redir.opid[15] & opid[15] &
+            $clog2(opsz)'(opid)       - $clog2(opsz)'(redir.topid) >=
+            $clog2(opsz)'(redir.opid) - $clog2(opsz)'(redir.topid) + $clog2(opsz)'(1);
+    endfunction
+
     /* request selector */
     reg_bundle_t [ewd-1:0] req_alu;
     logic [$clog2(eqsz):0] num_alu;
@@ -80,14 +88,23 @@ module alu #(
         always_comb jpc = (in.base[64] ? req_alu[g].prs[0] : in.base[63:0]) + in.offset;
         always_comb jump = f.j | |f.bmask & f.bneg != |(f.bmask & bflag);
         always_comb begin
-            result[g]       = 0;
-            result[g].opid  = in.opid;
-            result[g].npc   = jump ? jpc : in.base[63:0] + 63'(in.delta); // `base` is PC in common instructions
-            result[g].ret   = f.ret;
-            result[g].flush = f.fencei | f.sfence;
-            result[g].misp  = (f.j | |f.bmask) & in.pnpc != result[g].npc;
-            result[g].prda  = in.prda[1];
-            result[g].prdv  = res;
+            result[g]        = 0;
+            result[g].opid   = in.opid;
+            result[g].brid   = in.brid;
+            result[g].ldid   = in.ldid;
+            result[g].stid   = in.stid;
+            result[g].npc    = jump ? jpc : in.base[63:0] + 63'(in.delta); // `base` is PC in common instructions
+            result[g].delta  = in.delta;
+            result[g].pat    = in.pat;
+            result[g].pc     = in.pc;
+            result[g].branch = in.branch;
+            result[g].jal    = in.jal;
+            result[g].jalr   = in.jalr;
+            result[g].eret   = f.eret;
+            result[g].flush  = f.fencei | f.sfence;
+            result[g].misp   = (f.j | |f.bmask) & in.pnpc != result[g].npc;
+            result[g].prda   = in.prda[1];
+            result[g].prdv   = res;
             /* some exception caused by instructions */
             if (f.ecall)        result[g].cause = {2'b10, 4'd2, level};
             if (f.ebreak)       result[g].cause = {2'b10, 6'd3};
@@ -95,6 +112,7 @@ module alu #(
             if (f.interrupt[6]) result[g].cause = {2'b11, f.interrupt[5:0]};
             if (f.inv)    result[g].tval  = 64'(in.ir);
             if (f.pf[0] | f.pf[1] & &in.ir[1:0]) begin
+                result[g].prda  = 0;
                 result[g].cause = {2'b10, 6'd12};
                 result[g].tval  = 64'(in.base) + (f.pf[0] ? 0 : 2);
             end
@@ -107,23 +125,37 @@ module alu #(
     logic [ewd-1:0][$clog2(eqsz)-1:0] eq_raddr, eq_waddr;
     logic [ewd-1:0]                   eq_wena;
     exe_bundle_t [ewd-1:0] eq_rvalue;
-    always_comb for (int i = 0; i < ewd; i++) eq_raddr[i] = eq_front + $clog2(eqsz)'(i);
-    always_comb for (int i = 0; i < ewd; i++) eq_waddr[i] = eq_raddr[i] + $clog2(eqsz)'(eq_num);
-    always_comb for (int i = 0; i < ewd; i++) eq_wena [i] = i < 32'(eq_in);
-    always_ff @(posedge clk) if (rst | flush) eq_front <= 0; else eq_front <= eq_front + $clog2(eqsz)'(eq_out);
-    always_ff @(posedge clk) if (rst | flush) eq_num <= 0; else eq_num <= eq_num + eq_in - eq_out;
+    logic [eqsz-1:0][15:0] eq_opid;   // operation ID of each entry
+    logic [eqsz-1:0]       eq_bubble; // bubble marks
     mwpram #(.width($bits(exe_bundle_t)), .depth(eqsz), .rports(ewd), .wports(ewd))
         eq_inst(.clk(clk), .rst(rst), .raddr(eq_raddr), .rvalue(eq_rvalue),
             .waddr(eq_waddr), .wvalue(result), .wena(eq_wena));
+    always_comb for (int i = 0; i < ewd; i++) eq_raddr[i] = eq_front + $clog2(eqsz)'(i);
+    always_comb for (int i = 0; i < ewd; i++) eq_waddr[i] = eq_raddr[i] + $clog2(eqsz)'(eq_num);
+    always_comb for (int i = 0; i < ewd; i++) eq_wena [i] = i < 32'(eq_in);
     always_comb ready = ewd <= eqsz - 32'(eq_num); // ready when able to holding `ewd` operations
     always_comb for (int i = 0; i < ewd; i++) begin
         resp[i] = eq_rvalue[i];
-        if (i >= 32'(eq_num)) resp[i].opid = 0;
+        /* at the cycle of flushing it will output without bubble mark,
+           otherwise there will be circular combinational logic though
+           `redir` so that modules accepting EXE bundles must consider
+           redirection such as commit module and PRF or just solve this
+           pseudo circular logic caused by packing up different signals */
+        if (eq_bubble[eq_raddr[i]]) resp[i].opid = 0;
+        if (i >= 32'(eq_num))       resp[i].opid = 0;
     end
     always_comb eq_in = num_alu;
     always_comb begin
         eq_out = 0;
         for (int i = 0; i < ewd; i++)
-            if (i < eq_num & claim[i]) eq_out++;
+            if (i < 32'(eq_num) & (claim[i] | eq_bubble[eq_raddr[i]])) eq_out++; else break;
+    end
+    always_ff @(posedge clk) if (rst) eq_front <= 0; else eq_front <= eq_front + $clog2(eqsz)'(eq_out);
+    always_ff @(posedge clk) if (rst) eq_num   <= 0; else eq_num   <= eq_num + eq_in - eq_out;
+    always_ff @(posedge clk) if (rst) eq_opid <= 0;
+        else for (int i = 0; i < ewd; i++) if (eq_wena[i]) eq_opid[eq_waddr[i]] <= result[i].opid;
+    always_ff @(posedge clk) if (rst) eq_bubble <= 0; else begin
+        for (int i = 0; i < eqsz; i++) if (succeed(eq_opid[i])) eq_bubble[i] <= 1;
+        for (int i = 0; i < ewd; i++) if (eq_wena[i]) eq_bubble[eq_waddr[i]] <= 0;
     end
 endmodule

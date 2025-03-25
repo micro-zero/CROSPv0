@@ -11,11 +11,10 @@ module cache #(
     parameter blk    = 64, // block size in bytes
     parameter mshrsz = 4   // number of MSHRs
 )(
-    input  logic       clk,    // clock signal
-    input  logic       rst,    // reset signal
-    input  logic [7:0] rid,    // replacement ID
-    input  logic [7:0] flmask, // flush ignore mask
-    input  logic [7:0] flrqst, // flush request ID
+    input  logic         clk,   // clock signal
+    input  logic         rst,   // reset signal
+    input  logic   [7:0] rid,   // replacement ID
+    input  logic [255:0] flush, // flush bitmap
     /* slave interface */
     input  logic [chn-1:0]         [7:0] s_rqst, // request ID
     input  logic [chn-1:0]         [7:0] s_trsc, // coherency transaction
@@ -37,20 +36,6 @@ module cache #(
     input  logic         [63:0] m_ofst, // offset in cache line
     input  logic [blk-1:0][7:0] m_rdat  // read data
 );
-    /* flush function */
-    function logic fl(input logic [7:0] req);
-        /* flush function description:
-         *   this function will return 1 if the request is a flush request,
-         *   which indicates the request ID is same with `flrqst` except
-         *   bits that masked and ignored by `flmask`
-         * some specific cases:
-         *   1. flmask = 8'b0000_0000, flrqst = 8'b0000_0000: flush no request
-         *   2. flmask = 8'b0001_1111, flrqst = 8'b1010_0000: flush 101x_xxxx
-         *   3. flmask = 8'b1111_1111, flrqst = 8'b1111_1111: flush all requests
-         */
-        fl = |req & (req & ~flmask) == (flrqst & ~flmask);
-    endfunction
-
     /* buffered and forwarded requests for each channel */
     logic [chn-1:0]         [7:0] b_rqst, f_rqst;
     logic [chn-1:0]         [7:0] b_trsc, f_trsc;
@@ -72,12 +57,12 @@ module cache #(
     end
     always_ff @(posedge clk) if (rst) b_rqst <= 0;
         else for (int i = 0; i < chn; i++) begin
-            if (fl(b_rqst[i]))  b_rqst[i] <= 0;
+            if (flush[b_rqst[i]])  b_rqst[i] <= 0;
             if (|s_resp[i])     b_rqst[i] <= 0;
             if (i == 0 & |b_strb[0]     & reading & read) b_strb[0] <= 0;
             if (i == 0 & b_trsc[0] == 1 & reading & read) b_trsc[0] <= 0; // other GetV
             /* only one request can be buffered until response in a channel */
-            if (|s_rqst[i] & b_ready[i] & ~fl(s_rqst[i])) begin
+            if (|s_rqst[i] & b_ready[i] & ~flush[s_rqst[i]]) begin
                 b_rqst[i] <= s_rqst[i];
                 b_trsc[i] <= s_trsc[i];
                 b_strb[i] <= s_strb[i];
@@ -108,9 +93,9 @@ module cache #(
     end
     always_ff @(posedge clk) if (rst) mshr_valid <= 0;
         else begin
-            for (int i = 0; i < mshrsz; i++) if (fl(mshr_rqst[i])) mshr_valid[i] <= 0;
+            for (int i = 0; i < mshrsz; i++) if (flush[mshr_rqst[i]]) mshr_valid[i] <= 0;
             for (int i = 0; i < chn; i++) if (|s_resp[i] & |s_miss[i] & ~|b_trsc[i] & ~miss_under_miss[i]) begin
-                mshr_valid[$clog2(mshrsz)'(mshr_in[i])] <= ~fl(b_rqst[i]);
+                mshr_valid[$clog2(mshrsz)'(mshr_in[i])] <= ~flush[b_rqst[i]];
                 mshr_ready[$clog2(mshrsz)'(mshr_in[i])] <= 0;
                 mshr_rqst[$clog2(mshrsz)'(mshr_in[i])] <= b_rqst[i];
                 mshr_miss[$clog2(mshrsz)'(mshr_in[i])] <= 0;
@@ -122,9 +107,9 @@ module cache #(
             for (int i = 0; i < mshrsz; i++) if (mshr_valid[i] & |m_resp) begin
                 if (~|m_miss & (mshr_rqst[i] == m_resp | mshr_miss[i] == m_resp))
                     {mshr_ready[i], mshr_rdat[i]} <= {1'b1, m_rdat};
-                if (|m_miss & mshr_rqst[i] == m_resp) mshr_miss[i] <= fl(m_miss) ? 0 : m_miss;
+                if (|m_miss & mshr_rqst[i] == m_resp) mshr_miss[i] <= flush[m_miss] ? 0 : m_miss;
             end
-            for (int i = 0; i < mshrsz; i++) if (fl(mshr_miss[i])) mshr_miss[i] <= 0;
+            for (int i = 0; i < mshrsz; i++) if (flush[mshr_miss[i]]) mshr_miss[i] <= 0;
         end
 
     /* cache entity */

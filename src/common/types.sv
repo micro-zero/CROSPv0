@@ -40,6 +40,7 @@ typedef struct packed {
     /* micro-operation */
     logic [4:0] fu;          // function unit mask, [4]div/[3]mul/[2]fpu/[1]lsu/[0]alu
     logic [63:0] funct;      // functional code
+    logic safe;              // indication of safe instruction
     /* oprands */
     logic [64:0] base;       // branch and jump address base (MSB means reading from register)
     logic [63:0] offset;     // branch and jump address offset
@@ -58,8 +59,10 @@ typedef struct packed {
 typedef struct packed {
     /* propagation of decoder bundle */
     logic [15:0] opid;
+    logic [7:0] brid;
     logic [7:0] ldid, stid;
-    logic [63:0] pnpc;
+    logic [1:0] pat;
+    logic [63:0] pc, pnpc;
     logic [31:0] ir;
     logic [2:0] delta;
     logic [4:0] fu;
@@ -70,13 +73,16 @@ typedef struct packed {
     /* newly added physical registers number */
     logic [1:0][15:0] prsa; // physical source register number (first and second)
     logic [1:0][15:0] prda; // physical destination register number (previous and current)
+    logic branch, jal, jalr;
 } ren_bundle_t;
 
 typedef struct packed {
     /* propagation of decoder bundle */
     logic [15:0] opid;
+    logic [7:0] brid;
     logic [7:0] ldid, stid;
-    logic [63:0] pnpc;
+    logic [1:0] pat;
+    logic [63:0] pc, pnpc;
     logic [31:0] ir;
     logic [2:0] delta;
     logic [4:0] fu;
@@ -86,16 +92,18 @@ typedef struct packed {
     logic [64:0] a, b;
     logic [1:0][15:0] prsa;
     logic [1:0][15:0] prda;
-    /* busy bit used for early address translation */
     logic [1:0] prsb; // physical register busy bit
+    logic branch, jal, jalr;
 } iss_bundle_t;
 
 typedef struct packed {
     /* propagation of issue bundle */
     logic [15:0] opid;
+    logic [7:0] brid;
     logic [7:0] ldid, stid;
     logic [2:0] delta;
-    logic [63:0] pnpc;
+    logic [1:0] pat;
+    logic [63:0] pc, pnpc;
     logic [31:0] ir;
     logic [4:0] fu;
     logic [63:0] funct;
@@ -105,46 +113,60 @@ typedef struct packed {
     logic [1:0]       prsb;
     logic [1:0][63:0] prs; // convert register addresses to values
     logic [1:0][15:0] prda;
+    logic branch, jal, jalr;
 } reg_bundle_t;
 
 typedef struct packed {
     logic [15:0] opid;      // operation ID
+    logic [7:0] brid;       // branch ID
     logic [7:0] ldid, stid; // load and store ID
-    logic [63:0] npc;       // next PC
+    logic [2:0] delta;      // PC delta, 2 or 4
+    logic [63:0] pc, npc;   // PC and next PC
     logic [15:0] prda;      // physical destination register number
     logic [63:0] prdv;      // physical destination register value
     logic  [7:0] cause;     // exception cause, MSB is exception bit, the next is interrupt bit
-    logic  [2:0] ret;       // exception return, MSB is valid bit
+    logic  [2:0] eret;      // exception return, MSB is valid bit
     logic [63:0] tval;      // exception trap value
-    logic specul;           // speculative mark to avoid committing
+    logic  [1:0] pat;       // branch pattern for updating frontend
+    logic specul;           // speculative mark
     logic misp;             // misprediction of BRANCH and JALR instructions
     logic mem, csr;         // memory/CSR change
     logic flush, retry;     // force pipeline flush and retry
+    logic branch, jal, jalr;
 } exe_bundle_t;
 
 typedef struct packed {
     logic [15:0] opid;      // operation ID
     logic [7:0] brid;       // branch ID
     logic [7:0] ldid, stid; // load/store ID
-    logic comp;             // compressed instruction
+    logic [2:0] delta;      // compressed instruction
     logic call, ret;        // call/ret instruction
-    logic [1:0] pat;        // branch pattern
-    logic redir;            // redirect (use `brid` to reinforce)
-    logic [63:0] pc, npc;   // PC and next PC
+    logic [63:0] pc;        // PC and next PC
     logic rollback;         // rollback signal
     logic       [6:0] lrda; // rollback logical register number
     logic [1:0][15:0] prda; // old and new physical register number
 } com_bundle_t;
 
 typedef struct packed {
+    logic [15:0] opid, topid;     // operation ID
+    logic [7:0] brid, ldid, stid; // branch/load/store ID
+    logic [2:0] delta;            // PC delta if not branch
+    logic [1:0] pat;              // pattern of branch predictor
+    logic [63:0] pc, npc;         // PC and next PC
+    logic rollback;               // rollback signal
+    logic branch, jal, jalr;      // jump type (for debugging)
+} red_bundle_t;
+
+typedef struct packed {
+    logic [15:0] opid;
     logic [7:0] brid, ldid, stid;
     logic [63:0] pc;
     logic [31:0] ir;
+    logic [2:0] delta;
     logic [1:0] pat;
     logic call, ret;
     logic [1:0][6:0] lrsa;
     logic [6:0] lrda;
-    logic branch, jal, jalr; // for debugging
 } rob_dec_t;
 
 typedef struct packed {
@@ -152,18 +174,16 @@ typedef struct packed {
 } rob_ren_t;
 
 typedef struct packed {
-    logic [63:0] npc;   // next PC
     logic [7:0] cause;  // exception and cause (MSB is exception bit)
-    logic [2:0] ret;    // exception return (MSB is return bit, `ret[1:0]` is privilege level)
+    logic [2:0] eret;   // exception return (MSB is return bit, `eret[1:0]` is privilege level)
     logic mem, csr;     // memory/CSR change
-    logic misp;         // misprediction of BRANCH and JALR instructions
     logic flush, retry; // force pipeline flush
 } rob_exe_t;
 
 typedef struct packed {
     logic iword, isign;    // 32-bit integer operation mode
     logic [2:0] bmask;     // functional code and branch mask
-    logic [2:0] ret;       // exception return bits (MSB is valid bit, the next is interrupt bit)
+    logic [2:0] eret;      // exception return bits (MSB is valid bit, the next is interrupt bit)
     logic bneg, j;         // branch negation and jump bit
     logic [1:0] pf;        // page fault HINT instruction
     logic [6:0] interrupt; // pending interrupt

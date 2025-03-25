@@ -9,10 +9,9 @@ module tlb #(
     parameter set  = 64, // number of sets
     parameter way  = 8   // number of ways
 )(
-    input  logic       clk,    // clock signal
-    input  logic       rst,    // reset signal
-    input  logic [7:0] flmask, // flush ignore mask
-    input  logic [7:0] flrqst, // flush request ID
+    input  logic         clk,   // clock signal
+    input  logic         rst,   // reset signal
+    input  logic [255:0] flush, // flush bitmap
     /* slave interface with lower-level TLB or pipeline */
     input  logic [chn-1:0] [7:0] s_rqst, // request ID
     input  logic [chn-1:0][63:0] s_vadd, // virtual address
@@ -28,16 +27,13 @@ module tlb #(
     input  logic  [7:0] m_perm, // access permission, 0 indicates page fault
     input  logic [63:0] m_padd  // physical address
 );
-    /* flush function (see cache.sv) */
-    function logic fl(input logic [7:0] req); fl = |req & (req & ~flmask) == (flrqst & ~flmask); endfunction
-
     /* request buffer */
     logic [chn-1:0] [7:0] b_rqst;
     logic [chn-1:0][63:0] b_vadd;
     logic [chn-1:0][63:0] b_satp;
     always_ff @(posedge clk) for (int i = 0; i < chn; i++)
         if (rst) b_rqst[i] <= 0; else begin
-            b_rqst[i] <= fl(s_rqst[i]) ? 0 : s_rqst[i];
+            b_rqst[i] <= flush[s_rqst[i]] ? 0 : s_rqst[i];
             b_vadd[i] <= s_vadd[i];
             b_satp[i] <= s_satp[i];
         end
@@ -99,14 +95,14 @@ module tlb #(
     end
     always_ff @(posedge clk) if (rst) fill <= 0; // also includes page fault
         else if (|m_resp) fill <= 1; else fill <= 0;
-    always_ff @(posedge clk) if (rst | fl(mis_req)) {miss, mis_req} <= 0;
+    always_ff @(posedge clk) if (rst | flush[mis_req]) {miss, mis_req} <= 0;
         else begin
             if (|m_resp) mis_req <= 0; // master interface handled
             if (fill)    miss    <= 0; // filling handled
             if (~miss) for (int i = 0; i < chn; i++)
                 if (|b_rqst[i] & ~set_hitpos[i][$clog2(way)]) begin
-                    miss    <= fl(b_rqst[i]) ? 0 : 1;
-                    mis_req <= fl(b_rqst[i]) ? 0 : b_rqst[i];
+                    miss    <= flush[b_rqst[i]] ? 0 : 1;
+                    mis_req <= flush[b_rqst[i]] ? 0 : b_rqst[i];
                     mis_add <= b_vadd[i];
                     mis_csr <= b_satp[i];
                     mis_vld <= set_vld[i];

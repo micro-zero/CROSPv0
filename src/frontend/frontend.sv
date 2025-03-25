@@ -23,8 +23,11 @@ module frontend #(
     input  logic clk,
     input  logic rst,
     input  com_bundle_t [cwd-1:0] com_bundle, // frontend update information
+    input  red_bundle_t           red_bundle, // redirect bundle
     input  logic        [fwd-1:0] fetch,      // fetch/ready signal
     output fet_bundle_t [fwd-1:0] fet_bundle, // frontend output bundle
+    /* flush interface */
+    output logic [255:0] fl_inst, // instruction request flush bitmap
     /* ITLB interface */
     output logic  [7:0] it_rqst, // ITLB request ID
     output logic [63:0] it_vadd, // ITLB virtual address
@@ -32,7 +35,6 @@ module frontend #(
     input  logic  [7:0] it_perm, // ITLB access permission
     input  logic [63:0] it_padd, // ITLB physical address
     /* ICACHE interface */
-    output logic               ic_flsh, // instruction cache flush signal
     output logic         [7:0] ic_rqst, // instruction cache request ID
     output logic        [63:0] ic_addr, // instruction cache physical address
     input  logic         [7:0] ic_resp, // instruction cache response ID
@@ -42,45 +44,30 @@ module frontend #(
     logic reinf, fredir, bredir, iredir, dredir;       // reinforcement and redirection
     logic [63:0] upc, dpc, ipc, fpc, unpc, dnpc, fnpc; // updating PC/NPC
     logic [1:0] upat, dpat, fpat;                      // updating branch pattern
-    com_bundle_t com_last;                             // last committed bundle for pending reinforcement
     always_comb begin
         upc = 0; unpc = 0; upat = 0;
         bredir = 0; reinf = 0;
-        /* look for bundle requiring reinforcement */
-        for (int i = cwd - 2; i >= 0; i--)
-            /* reinforcing bundle should not be the last one */
-            /* should also be a branch instruction and have weak pattern */
-            if (com_bundle[i + 1].opid[15] & com_bundle[i].brid[7] &
-                (com_bundle[i].pat[0] ^ com_bundle[i].pat[1])) begin
-                reinf = 1;
-                upc = com_bundle[i].pc + (com_bundle[i].comp ? 0 : 2);
-                unpc = com_bundle[i].npc;
-                upat = com_bundle[i].pat;
-            end
-        if (com_bundle[0].opid[15] & com_last.brid[7] & (com_last.pat[0] ^ com_last.pat[1])) begin
+        if (~red_bundle.opid[15] & red_bundle.brid[7]) begin
             reinf = 1;
-            upc = com_last.pc + (com_last.comp ? 0 : 2);
-            unpc = com_last.npc;
-            upat = com_last.pat;
+            upc = red_bundle.pc + (red_bundle.delta == 2 ? 0 : 2);
+            unpc = red_bundle.npc;
+            upat = red_bundle.pat;
         end
         /* frontend redirection, buffered for timing issue */
         if (fredir) {reinf, upc, unpc, upat} = {1'b0, fpc, fnpc, fpat};
         /* backend redirection, commit bundles include a redirection bundle */
-        if (com_bundle[0].redir) begin
+        if (red_bundle.opid[15]) begin
             bredir = 1;
             reinf = 0;
-            upc = com_bundle[0].pc + (com_bundle[0].comp ? 0 : 2);
-            unpc = com_bundle[0].npc;
-            upat = com_bundle[0].pat;
+            upc = red_bundle.pc + (red_bundle.delta == 2 ? 0 : 2);
+            unpc = red_bundle.npc;
+            upat = red_bundle.pat;
         end
     end
     always_ff @(posedge clk) if (rst | bredir) {fredir, fpc, fnpc, fpat} <= 0;
         else if (dredir) {fredir, fpc, fnpc, fpat} <= {1'b1, dpc, dnpc, dpat}; // pre-decoder checking failure
         else if (iredir) {fredir, fpc, fnpc, fpat} <= {1'b1, ipc, ipc, 2'b10}; // incomplete fetch
         else              fredir <= 0;                                         // hold for one cycle
-    always_ff @(posedge clk) if (rst | bredir) com_last.brid <= 0;
-        else for (int i = 0; i < cwd; i++)
-            if (com_bundle[i].opid[15]) com_last <= com_bundle[i];
 
     /* instruction fetch queue */
     logic [$clog2(fqsz)-1:0] fq_front;              // fetch queue front index
@@ -176,7 +163,7 @@ module frontend #(
     always_comb it_vadd = ftq_trn + (itresp ? 1 : 0) < ftq_num ? ftq_vpc[next_trn] : pcg_bundle.pc;
     always_comb ic_rqst = ftq_acc + (icresp ? 1 : 0) < ftq_trn + (itresp ? 1 : 0) ? icrqst : 0;
     always_comb ic_addr = ftq_acc + (icresp ? 1 : 0) < ftq_trn ? ftq_ppc[next_acc] : it_padd;
-    always_comb ic_flsh = fredir | bredir;
+    always_comb fl_inst = fredir | bredir ? 256'd1 << itrqst | 256'd1 << icrqst : 0;
     always_ff @(posedge clk) begin
         if (ftq_num < ftqsz & pcg_bundle.id[7]) begin // PC generated and to start translation
             ftq_vpc [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pc;
@@ -239,7 +226,6 @@ module frontend #(
         else                                                  br[i] = 0;
     always_comb begin
         result = 0;
-        incomp = 0;
         for (int i = 0; i < fwd; i++) begin
             result[i].valid = valid[i];
             result[i].ir    = ir[i];
@@ -249,15 +235,19 @@ module frontend #(
             result[i].pat   = fet_pos[i + 1] <= f0size ?
                 ftq_pat[ftq_front]                    [fet_pos[i + 1] + ftq_cur - 1] :
                 ftq_pat[ftq_front + $clog2(ftqsz)'(1)][fet_pos[i + 1] - f0size - 1];
-            if (fet_pos[i] == f0size - 1 & &fdata[f0size - 1][1:0] &
-                ftq_vpc[ftq_front] + 64'({ftq_size[ftq_front], 1'b0}) != ftq_vpc[ftq_front + $clog2(ftqsz)'(1)])
-                /* breaking into two lines and discontinuous address */
-                incomp[i] = 1;
             if (br[i][64]) result[i].pnpc = br[i][63:0]; // predict as a branch
             else           result[i].pnpc = pc[i + 1];   // predict as continuous fetch
         end
         if (dredir) result[32'(fq_in) - 1].pnpc = dnpc;
         ipc = ftq_vpc[ftq_front] + 64'({ftq_size[ftq_front] - 8'd1, 1'b0});
+    end
+    always_comb begin
+        incomp = 0;
+        for (int i = 0; i < fwd; i++)
+            if (fet_pos[i] == f0size - 1 & &fdata[f0size - 1][1:0] &
+                ftq_vpc[ftq_front] + 64'({ftq_size[ftq_front], 1'b0}) != ftq_vpc[ftq_front + $clog2(ftqsz)'(1)])
+                /* breaking into two lines and discontinuous address */
+                incomp[i] = 1;
     end
 
     /* return address stack */
@@ -288,7 +278,7 @@ module frontend #(
             if (com_bundle[i].call) begin
                 ras_top <= com_bundle[i].ret ? ras_top : ras_top + 1;
                 ras_num <= com_bundle[i].ret ? ras_num : (ras_num == rassz ? rassz : ras_num + 1);
-                ras[ras_top] <= com_bundle[i].pc + (com_bundle[i].comp ? 2 : 4);
+                ras[ras_top] <= com_bundle[i].pc + (com_bundle[i].delta == 2 ? 2 : 4);
             end
         end
     always_ff @(posedge clk) if (rst | bredir) call_num <= 0; else call_num <= call_num + call_in - call_out;

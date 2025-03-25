@@ -17,6 +17,7 @@ module rename #(
     input  logic clk,
     input  logic rst,
     input  com_bundle_t [cwd-1:0] com_bundle, // commit bundle
+    input  red_bundle_t           red_bundle, // redirect bundle
     output logic        [dwd-1:0] ready,      // ready signal
     input  dec_bundle_t [dwd-1:0] dec_bundle, // decoder bundle
     input  logic        [rwd-1:0] rename,     // rename signal
@@ -25,13 +26,9 @@ module rename #(
     /* pipeline redirect */
     logic redir, rollback, rq_empty;
     logic [7:0] redir_brid;
-    always_comb begin
-        redir = com_bundle[0].redir;
-        rollback = com_bundle[0].rollback & rq_empty; // rollback after rename queue empty
-        redir_brid = 0;
-        for (int i = cwd - 1; i >= 0; i--)
-            if (com_bundle[i].redir) redir_brid = com_bundle[i].brid;
-    end
+    always_comb redir      = red_bundle.opid[15];
+    always_comb redir_brid = red_bundle.brid;
+    always_comb rollback = red_bundle.rollback & rq_empty; // rollback after rename queue empty
 
     /* rename queue */
     logic [$clog2(rqsz)-1:0] rq_front;            // front index of rename queue
@@ -84,9 +81,11 @@ module rename #(
         for (int i = 0; i < rwd; i++) if (branch[i]) fl_snapshots[brid[i]] <= fl_step[i + 1];
     end
     always_ff @(posedge clk)
-        if      (rst)                   fl <= (prnum)'(-1);
-        else if (redir & redir_brid[7]) fl <= fl_snapshots[$clog2(brsz)'(redir_brid)];
-        else                            fl <= fl_step[rwd];
+        if (rst) fl <= (prnum)'(-1);
+        else if (redir & redir_brid[7]) begin
+            fl <= fl_snapshots[$clog2(brsz)'(redir_brid)];
+            for (int i = 0; i < rwd; i++) if (|dealloc[i]) fl[dealloc[i]] <= 1;
+        end else fl <= fl_step[rwd];
 
     /* map table */
     logic        [64:0][$clog2(prnum)-1:0] mt, mt_snapshot; // map table and branch snapshot
@@ -150,10 +149,13 @@ module rename #(
     /* assign rename queue input and output */
     always_comb for (int i = 0; i < rwd; i++) begin
         rq_wvalue[i].opid    = dec_bundle[i].opid;
+        rq_wvalue[i].brid    = dec_bundle[i].brid;
         rq_wvalue[i].ldid    = dec_bundle[i].ldid;
         rq_wvalue[i].stid    = dec_bundle[i].stid;
         rq_wvalue[i].ir      = dec_bundle[i].ir;
+        rq_wvalue[i].pc      = dec_bundle[i].pc;
         rq_wvalue[i].pnpc    = dec_bundle[i].pnpc;
+        rq_wvalue[i].pat     = dec_bundle[i].pat;
         rq_wvalue[i].delta   = dec_bundle[i].delta;
         rq_wvalue[i].fu      = dec_bundle[i].fu;
         rq_wvalue[i].funct   = dec_bundle[i].funct;
@@ -161,6 +163,9 @@ module rename #(
         rq_wvalue[i].offset  = dec_bundle[i].offset;
         rq_wvalue[i].a       = dec_bundle[i].a;
         rq_wvalue[i].b       = dec_bundle[i].b;
+        rq_wvalue[i].branch  = dec_bundle[i].branch;
+        rq_wvalue[i].jal     = dec_bundle[i].jal;
+        rq_wvalue[i].jalr    = dec_bundle[i].jalr;
         rq_wvalue[i].prsa[0] = 16'(mt_rvalue[i][1]);
         rq_wvalue[i].prsa[1] = 16'(mt_rvalue[i][2]);
         rq_wvalue[i].prda[0] = 16'(mt_rvalue[i][0]); // old value for recovering
@@ -169,16 +174,17 @@ module rename #(
     always_comb begin
         rq_in = 0;
         ready = 0;
-        for (int i = 0; i < dwd; i++)
-            if (dec_bundle[i].opid[15] & alloc_valid[i] & rq_in < rqsz - rq_num) begin
-                rq_in++;
-                ready[i] = 1;
-            end else break;
+        if (~red_bundle.rollback)
+            for (int i = 0; i < dwd; i++)
+                if (dec_bundle[i].opid[15] & alloc_valid[i] & rq_in < rqsz - rq_num) begin
+                    rq_in++;
+                    ready[i] = 1;
+                end else break;
     end
     always_comb begin
         rq_out = 0;
         for (int i = 0; i < rwd; i++)
-            if ((rename[i] | com_bundle[0].rollback) & ren_bundle[i].opid[15]) rq_out++;
+            if ((rename[i] | red_bundle.rollback) & ren_bundle[i].opid[15]) rq_out++;
         if (redir) rq_out = 0;
     end
     always_comb begin

@@ -176,27 +176,30 @@ module vcore #(
 
     /* architectural states change */
     rob_csr_t rob_csr[127:0];
-    logic [7:0][63:0] st_addr, st_data;
-    logic [7:0] [7:0] st_size;
+    logic [15:0][63:0] st_addr, st_data;
+    logic [15:0] [7:0] st_size;
     logic [5:0] st_offset;
+    logic [pwd-1:0][15:0] cmt_opid;
     always_comb begin
         for (int i = 0; i < pwd; i++) begin
-            cmt      [i] = inst.com_bundle[i].opid[15] & ~inst.com_bundle[i].redir &
+            cmt      [i] = inst.com_bundle[i].opid[15] &
                           ~inst.com_inst.dec_rvalue[i].lrda[6] &
-                          ~inst.com_inst.exe_rvalue_fwd[i].cause[7] & ~inst.com_inst.exe_rvalue_fwd[i].ret[2];
+                          ~inst.com_inst.exe_rvalue[i].cause[7] & ~inst.com_inst.exe_rvalue[i].eret[2];
+            cmt_opid [i] = inst.com_bundle[i].opid;
             cmt_level[i] = inst.csr_inst.level;
             cmt_pc   [i] = inst.com_inst.dec_rvalue[i].pc;
             cmt_ir   [i] = inst.com_inst.dec_rvalue[i].ir;
             cmt_gpr  [i] = |inst.com_inst.dec_rvalue[i].lrda[5:0];
-            cmt_csr  [i] = inst.com_inst.exe_rvalue_fwd[i].csr;
-            cmt_mem  [i] = inst.com_inst.exe_rvalue_fwd[i].mem;
+            cmt_csr  [i] = inst.com_inst.exe_rvalue[i].csr;
+            cmt_mem  [i] = inst.com_inst.exe_rvalue[i].mem;
             del_gprw [i] = cmt[i] & cmt_gpr[i];
             del_gpra [i] = inst.com_inst.dec_rvalue[i].lrda[5:0];
             del_gprv [i] = pregs[inst.com_inst.ren_rvalue[i].prda[1]];
         end
-        /* commit of exception instructions will sync with taking exception (after rollback) */
-        if ((inst.com_inst.exe_last.cause[7] | inst.com_inst.exe_last.ret[2]) & ~inst.com_inst.rollback) begin
+        /* commit of exception instructions will sync with CSR taking exception (after rollback) */
+        if ((inst.com_inst.exe_last.cause[7] | inst.com_inst.exe_last.eret[2]) & ~inst.com_inst.rollback) begin
             cmt[0] = 1;
+            cmt_opid[0] = inst.com_inst.dec_last.opid;
             cmt_pc[0] = inst.com_inst.dec_last.pc;
             cmt_ir[0] = inst.com_inst.dec_last.ir;
             cmt_gpr[0] = 0;
@@ -209,16 +212,16 @@ module vcore #(
         cmt_mip = inst.csr_inst.mip;
         /* the CSRs at commit refer to the status before the committed instruction,
             which also reflects the result of last committed instruction */
-        cmt_mstatus = rob_csr[7'(inst.com_bundle[0].opid)].mstatus;
-        cmt_misa    = rob_csr[7'(inst.com_bundle[0].opid)].misa;
-        cmt_mtvec   = rob_csr[7'(inst.com_bundle[0].opid)].mtvec;
-        cmt_mcause  = rob_csr[7'(inst.com_bundle[0].opid)].mcause;
-        cmt_mepc    = rob_csr[7'(inst.com_bundle[0].opid)].mepc;
-        cmt_mtval   = rob_csr[7'(inst.com_bundle[0].opid)].mtval;
-        cmt_stvec   = rob_csr[7'(inst.com_bundle[0].opid)].stvec;
-        cmt_scause  = rob_csr[7'(inst.com_bundle[0].opid)].scause;
-        cmt_sepc    = rob_csr[7'(inst.com_bundle[0].opid)].sepc;
-        cmt_stval   = rob_csr[7'(inst.com_bundle[0].opid)].stval;
+        cmt_mstatus = rob_csr[7'(cmt_opid[0])].mstatus;
+        cmt_misa    = rob_csr[7'(cmt_opid[0])].misa;
+        cmt_mtvec   = rob_csr[7'(cmt_opid[0])].mtvec;
+        cmt_mcause  = rob_csr[7'(cmt_opid[0])].mcause;
+        cmt_mepc    = rob_csr[7'(cmt_opid[0])].mepc;
+        cmt_mtval   = rob_csr[7'(cmt_opid[0])].mtval;
+        cmt_stvec   = rob_csr[7'(cmt_opid[0])].stvec;
+        cmt_scause  = rob_csr[7'(cmt_opid[0])].scause;
+        cmt_sepc    = rob_csr[7'(cmt_opid[0])].sepc;
+        cmt_stval   = rob_csr[7'(cmt_opid[0])].stval;
         del_csrw = inst.csr_inst.we;
         del_csra = inst.csr_inst.addr;
         del_csrv = inst.csr_inst.wres;
@@ -226,9 +229,9 @@ module vcore #(
             del_csra = del_csra + 12'h200; // sstatus, sip, sie
         if (del_csra >= 12'hc00 && del_csra <= 12'hc02)
             del_csra = del_csra - 12'h100; // cycle, time, instret
-        del_memw = inst.dc_resp[7:4] == 4'b1111 & ~|inst.dc_miss ? st_size[3'(inst.dc_resp)] : 0;
-        del_mema = st_addr[3'(inst.dc_resp)];
-        del_memv = st_data[3'(inst.dc_resp)];
+        del_memw = inst.dc_resp[7:4] == 4'b1111 & ~|inst.dc_miss ? st_size[4'(inst.dc_resp)] : 0;
+        del_mema = st_addr[4'(inst.dc_resp)];
+        del_memv = st_data[4'(inst.dc_resp)];
     end
     /* address and write data stored with request */
     always_comb begin
@@ -236,9 +239,9 @@ module vcore #(
         for (int i = 63; i >= 0; i--) if (inst.dc_strb[i]) st_offset = 6'(i);
     end
     always_ff @(posedge clk) if (inst.dc_rqst[7:4] == 4'b1111) begin
-        st_addr[3'(inst.dc_rqst)] <= inst.dc_addr;
-        st_data[3'(inst.dc_rqst)] <= inst.dc_wdat >> 8 * st_offset;
-        st_size[3'(inst.dc_rqst)] <= $countones(inst.dc_strb);
+        st_addr[4'(inst.dc_rqst)] <= inst.dc_addr;
+        st_data[4'(inst.dc_rqst)] <= inst.dc_wdat >> 8 * st_offset;
+        st_size[4'(inst.dc_rqst)] <= $countones(inst.dc_strb);
     end
     /* extract CSR info after decode stage */
     always_ff @(posedge clk) for (int i = 0; i < pwd; i++) if (inst.dec_inst.decode[i]) begin
@@ -277,14 +280,14 @@ module vcore #(
         if (|inst.com_inst.rob_num & ~|inst.com_inst.rob_out)
             stallpc = inst.com_inst.dec_rvalue[0].pc; end
     always_ff @(posedge clk) if (rst) {bmisp, brmisp, jmisp, jrmisp, fmisp} <= 0;
-        else if (inst.com_bundle[0].redir & inst.com_bundle[0].brid[7]) begin
+        else if (inst.com_inst.mis_bundle.opid[15] & inst.com_inst.mis_bundle.brid[7]) begin
             bmisp <= bmisp + 1;
-            if (inst.com_inst.dec_last.branch) brmisp <= brmisp + 1;
-            if (inst.com_inst.dec_last.jal)    jmisp  <= jmisp + 1;
-            if (inst.com_inst.dec_last.jalr)   jrmisp <= jrmisp + 1;
+            if (inst.com_inst.mis_bundle.branch) brmisp <= brmisp + 1;
+            if (inst.com_inst.mis_bundle.jal)    jmisp  <= jmisp + 1;
+            if (inst.com_inst.mis_bundle.jalr)   jrmisp <= jrmisp + 1;
         end else if (inst.fe_inst.fredir)      fmisp  <= fmisp + 1;
-    always_ff @(posedge clk) if (rst) loads  <= 0; else if (|inst.dc_rqst & ~|inst.dc_strb) loads <= loads  + 1;
-    always_ff @(posedge clk) if (rst) stores <= 0; else if (|inst.dc_rqst & |inst.dc_strb) stores <= stores + 1;
+    always_ff @(posedge clk) if (rst) loads  <= 0; else if (inst.dc_resp[7:4] == 4'b1110)  loads  <= loads  + 1;
+    always_ff @(posedge clk) if (rst) stores <= 0; else if (inst.dc_resp[7:4] == 4'b1111)  stores <= stores + 1;
     always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.icache.mshr_out) icmiss <= icmiss + 1;
     always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (inst.mmu_inst.dcache.mshr_out) dcmiss <= dcmiss + 1;
     always_ff @(posedge clk) if (rst) itmiss <= 0; else if (inst.mmu_inst.itlb.fill)       itmiss <= itmiss + 1;

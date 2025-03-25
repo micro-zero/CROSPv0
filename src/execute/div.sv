@@ -9,22 +9,36 @@ import types::*;
 module div #(
     parameter iwd = 4,  // issue width
     parameter ewd = 4,  // execution width
-    parameter eqsz = 8  // execution queue size
+    parameter eqsz = 8, // execution queue size
+    parameter opsz = 64 // operation ID size
 )(
     input  logic clk,
     input  logic rst,
-    input  logic flush,
+    input  red_bundle_t redir,           // redirect bundle
     output logic ready,                  // ready for receiving at most `iwd` requests
     input  reg_bundle_t [iwd-1:0] req,   // requests after register read
     input  logic        [ewd-1:0] claim, // claim signals (fetch execution results)
     output exe_bundle_t [ewd-1:0] resp   // execution results
 );
+    /* order calculation function */
+    function logic succeed(input logic [15:0] opid);
+        succeed = redir.opid[15] & opid[15] &
+            $clog2(opsz)'(opid)       - $clog2(opsz)'(redir.topid) >=
+            $clog2(opsz)'(redir.opid) - $clog2(opsz)'(redir.topid) + $clog2(opsz)'(1);
+    endfunction
+
     /* register read buffer */
     logic [$clog2(eqsz)-1:0] rr_front;
     logic [$clog2(eqsz):0] rr_num, rr_in, rr_out;
+    logic [eqsz-1:0][15:0] rr_opid;
+    logic [eqsz-1:0]       rr_bubble;
     logic        [ewd-1:0][$clog2(eqsz)-1:0] rr_raddr, rr_waddr;
     reg_bundle_t [ewd-1:0]                   rr_rvalue, rr_wvalue;
     logic        [ewd-1:0]                   rr_wena;
+    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(ewd), .wports(ewd))
+        rr_inst(.clk(clk), .rst(rst),
+            .raddr(rr_raddr), .rvalue(rr_rvalue),
+            .waddr(rr_waddr), .wvalue(rr_wvalue), .wena(rr_wena));
     always_comb begin
         rr_in = 0; rr_wvalue = 0;
         for (int i = 0; i < iwd; i++)
@@ -36,12 +50,14 @@ module div #(
     always_comb for (int i = 0; i < ewd; i++) rr_raddr[i] = rr_front + $clog2(eqsz)'(i);
     always_comb for (int i = 0; i < ewd; i++) rr_waddr[i] = rr_raddr[i] + $clog2(eqsz)'(rr_num);
     always_comb for (int i = 0; i < ewd; i++) rr_wena [i] = i < 32'(rr_in);
-    always_ff @(posedge clk) if (rst | flush) rr_front <= 0; else rr_front <= rr_front + $clog2(eqsz)'(rr_out);
-    always_ff @(posedge clk) if (rst | flush) rr_num <= 0; else rr_num <= rr_num + rr_in - rr_out;
-    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(ewd), .wports(ewd))
-        rr_inst(.clk(clk), .rst(rst),
-            .raddr(rr_raddr), .rvalue(rr_rvalue),
-            .waddr(rr_waddr), .wvalue(rr_wvalue), .wena(rr_wena));
+    always_ff @(posedge clk) if (rst) rr_opid <= 0;
+        else for (int i = 0; i < ewd; i++) if (rr_wena[i]) rr_opid[rr_waddr[i]] <= rr_wvalue[i].opid;
+    always_ff @(posedge clk) if (rst) rr_bubble <= 0; else begin
+        for (int i = 0; i < eqsz; i++) if (succeed(rr_opid[i])) rr_bubble[i] <= 1;
+        for (int i = 0; i < ewd; i++) if (rr_wena[i]) rr_bubble[rr_waddr[i]] <= 0;
+    end
+    always_ff @(posedge clk) if (rst) rr_front <= 0; else rr_front <= rr_front + $clog2(eqsz)'(rr_out);
+    always_ff @(posedge clk) if (rst) rr_num   <= 0; else rr_num   <= rr_num + rr_in - rr_out;
 
     /* divider (not pipelined) */
     exe_bundle_t bundle;
@@ -58,12 +74,18 @@ module div #(
     always_comb f = div_funct_t'(rr_rvalue[0].funct);
     always_comb rr_out = c == 64 & |rr_num ? 1 : 0;
     always_comb for (int i = 0; i < 64; i++) a_rev[i] = a[63 - i];
-    always_ff @(posedge clk) if (rst | flush) {bundle, a, b, r, c} <= 64;
+    always_ff @(posedge clk) if (rst) {bundle, a, b, r, c} <= 64;
         else if (|rr_out) begin
-            bundle      <= 0;
-            bundle.opid <= rr_rvalue[0].opid;
-            bundle.npc  <= rr_rvalue[0].base[63:0] + 63'(rr_rvalue[0].delta);
-            bundle.prda <= rr_rvalue[0].prda[1];
+            bundle        <= 0;
+            bundle.opid   <= rr_rvalue[0].opid;
+            bundle.brid   <= rr_rvalue[0].brid;
+            bundle.ldid   <= rr_rvalue[0].ldid;
+            bundle.stid   <= rr_rvalue[0].stid;
+            bundle.npc    <= rr_rvalue[0].base[63:0] + 63'(rr_rvalue[0].delta);
+            bundle.delta  <= rr_rvalue[0].delta;
+            bundle.prda   <= rr_rvalue[0].prda[1];
+            bundle.pat    <= rr_rvalue[0].pat;
+            bundle.pc     <= rr_rvalue[0].pc;
             /* prepare for calculation */
             if (f.divw | f.remw | f.divuw | f.remuw) begin
                 a[31:0] <= (f.divw | f.remw) & o[0][31] ? -o[0][31:0] : o[0][31:0];
@@ -95,7 +117,9 @@ module div #(
                 a <= o[0];
                 c <= -7'd2;
             end
-        end else if (~c[6]) begin
+            if (succeed(rr_opid[rr_raddr[0]]) | rr_bubble[rr_raddr[0]]) c <= 64;
+        end else if (succeed(bundle.opid)) c <= 64;
+        else if (~c[6]) begin
             /* calcualting */
             if      (~topone[6])                       c <= -7'd1;
             else if (c > 0 & 63 - topone[5:0] < c - 1) c <= 63 - topone[5:0];

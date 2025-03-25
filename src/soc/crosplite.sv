@@ -231,14 +231,14 @@ module crosplite #(
     always_comb s_axi_rlast = 1;
 
     /* MMU */
-    logic fnci, fncv; logic [7:0] flmask, flrqst;
+    logic [255:0] fl_data, fl_inst;
+    logic fnci, fncv;
     logic  [7:0] it_rqst; logic  [7:0] dt_rqst;
     logic [63:0] it_vadd; logic [63:0] dt_vadd;
     logic [63:0] it_satp; logic [63:0] dt_satp;
     logic  [7:0] it_resp; logic  [7:0] dt_resp;
     logic  [7:0] it_perm; logic  [7:0] dt_perm;
     logic [63:0] it_padd; logic [63:0] dt_padd;
-    logic        dc_flsh; logic        ic_flsh;
     logic  [7:0] dc_rqst; logic  [7:0] ic_rqst;
     logic [63:0] dc_addr; logic [63:0] ic_addr;
     logic  [7:0] dc_strb;
@@ -247,15 +247,13 @@ module crosplite #(
     logic [63:0] dc_rdat; logic [63:0] ic_rdat;
     logic  [7:0] dc_miss;
     mmu #(.init(init), .tohost(tohost), .frhost(frhost), .dcbase(dcbase)) mmu_inst(
-        .clk(clk), .rst(rst), .fnci(fnci), .fncv(fncv),
-        .flmask(flmask), .flrqst(flrqst),
+        .clk(clk), .rst(rst), .fnci(fnci), .fncv(fncv), .flush(fl_inst | fl_data),
         .s_dt_rqst(dt_rqst), .s_it_rqst(it_rqst),
         .s_dt_vadd(dt_vadd), .s_it_vadd(it_vadd),
         .s_dt_satp(dt_satp), .s_it_satp(it_satp),
         .s_dt_resp(dt_resp), .s_it_resp(it_resp),
         .s_dt_perm(dt_perm), .s_it_perm(it_perm),
         .s_dt_padd(dt_padd), .s_it_padd(it_padd),
-        .s_dc_flsh(dc_flsh), .s_ic_flsh(ic_flsh),
         .s_dc_rqst(dc_rqst), .s_ic_rqst(ic_rqst),
         .s_dc_addr(dc_addr), .s_ic_addr(ic_addr),
         .s_dc_strb(dc_strb),
@@ -331,6 +329,7 @@ module crosplite #(
     iss_bundle_t [pwd-1:0] iss_bundle;
     exe_bundle_t [pwd-1:0] exe_bundle;
     com_bundle_t [pwd-1:0] com_bundle;
+    red_bundle_t           red_bundle;
     logic [pwd-1:0] dec_ready;
     logic [pwd-1:0] ren_ready;
     logic [pwd-1:0] iss_ready;
@@ -350,43 +349,48 @@ module crosplite #(
     logic exception;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
-    logic [15:0] nextopid;
+    logic [1:0][15:0] lsu_safe;
+    logic [15:0] top_opid, saf_opid, lsu_unsf;
     frontend #(.init(init), .rst_pc(rst_pc), .fwd(pwd), .cwd(pwd))
-        fe_inst(clk, rst, com_bundle, dec_ready, fet_bundle,
+        fe_inst(clk, rst, com_bundle, red_bundle, dec_ready, fet_bundle, fl_inst,
             it_rqst, it_vadd, it_resp, it_perm, it_padd,
-            ic_flsh, ic_rqst, ic_addr, ic_resp, ic_rdat);
+            ic_rqst, ic_addr, ic_resp, ic_rdat);
     decoder #(.fwd(pwd), .dwd(pwd), .ewd(pwd), .cwd(pwd))
-        dec_inst(clk, rst, csr_intr, csr_status, com_bundle, dec_ready, fet_bundle, ren_ready, dec_bundle);
+        dec_inst(clk, rst, csr_intr, csr_status,
+            com_bundle, red_bundle, dec_ready, fet_bundle, ren_ready, dec_bundle);
     rename #(.dwd(pwd), .rwd(pwd), .cwd(pwd))
-        ren_inst(clk, rst, com_bundle, ren_ready, dec_bundle, iss_ready, ren_bundle);
+        ren_inst(clk, rst, com_bundle, red_bundle, ren_ready, dec_bundle, iss_ready, ren_bundle);
     prf #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd))
-        prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, com_bundle, busy_resp, reg_resp);
+        prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, red_bundle,
+            iss_ready, (pwd)'(-1), busy_resp, reg_resp);
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret,
         csr_excp, csr_intr, csr_flsh,
         mip_ext, mtime, 64'(com_inst.rob_out), csr_status, csr_tvec, csr_mepc, csr_sepc, it_satp, dt_satp);
     issue #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd))
         iss_inst(clk, rst, fu_ready, busy_resp,
-            exe_bundle, com_bundle, iss_ready, ren_bundle, (pwd)'(-1), iss_bundle);
+            exe_bundle, red_bundle, iss_ready, ren_bundle, (pwd)'(-1), iss_bundle);
     execute #(.iwd(pwd), .ewd(pwd))
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (pwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(pwd), .rwd(pwd), .ewd(pwd), .cwd(pwd))
-        com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle,
-            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextopid, fnci, fncv);
+        com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
+            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret,
+            lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv);
     alu #(.iwd(pwd), .ewd(pwd))
-        alu_inst(clk, rst, dec_inst.redir, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
+        alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
     fpu #(.iwd(pwd), .ewd(pwd))
-        fpu_inst(clk, rst, dec_inst.redir, fu_ready[2], fu_req, fu_claim[2], fu_resp[2]);
+        fpu_inst(clk, rst, red_bundle, fu_ready[2], fu_req, fu_claim[2], fu_resp[2]);
     mul #(.iwd(pwd), .ewd(pwd))
-        mul_inst(clk, rst, dec_inst.redir, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
+        mul_inst(clk, rst, red_bundle, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
     div #(.iwd(pwd), .ewd(pwd))
-        div_inst(clk, rst, dec_inst.redir, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
+        div_inst(clk, rst, red_bundle, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
     lsu #(.iwd(pwd), .ewd(pwd), .cwd(pwd))
-        lsu_inst(clk, rst, dec_inst.redir, nextopid, com_bundle,
+        lsu_inst(clk, rst, lsu_safe, lsu_unsf, top_opid, saf_opid, red_bundle, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
-            flmask, flrqst, dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
-            dc_flsh, dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
+            fl_data, fl_inst | fl_data,
+            dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
+            dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
 
     /* debug ports */
     always_comb dbg_cycle = csr_inst.mcycle;
