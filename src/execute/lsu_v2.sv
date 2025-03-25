@@ -18,8 +18,8 @@ module LSU
     parameter robAddrSz = 7,
     parameter MAX_BR_COUNT = 4,
     parameter ADDR_WIDTH = 64,
-    parameter dispatch_width     =  4,
-    parameter commit_width       =  2
+    parameter dispatch_width     =  4,  // dispatch宽度为4
+    parameter commit_width       =  2   // commit宽度为2
 )
 (
     input  logic                                                clk,
@@ -875,25 +875,26 @@ module LSU
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   generate
-    for(genvar w = 0; w < commit_width ; w++)begin : multiple_commit
-      commit_store_wire[w] = core_commit_valids_i[w] && core_commit_uops_i[w].store;
-      commit_load_wire[w]  = core_commit_valids_i[w] && core_commit_uops_i[w].load;
-      commit_idx_wire[w] = commit_store_wire[w] ? stq_commit_head_reg : ldq_head_reg;
-      temp_stq_commit_head_wire[w] =  stq_commit_head_reg;
-      temp_ldq_head_wire[w]        =  ldq_head_reg;
-      if(commit_store_wire[w]) for(int i = 0; i<w ;i++)begin
-        if(commit_store_wire[i]) begin
-          commit_idx_wire[w] = commit_idx_wire[w] +1;
-          temp_stq_commit_head_wire[w] = temp_stq_commit_head_wire[w] +1;
+    for(genvar w = 0; w < commit_width ; w++)begin 
+      always_comb begin : multiple_commit
+        commit_store_wire[w] = core_commit_valids_i[w] && core_commit_uops_i[w].store;
+        commit_load_wire[w]  = core_commit_valids_i[w] && core_commit_uops_i[w].load;
+        commit_idx_wire[w] = commit_store_wire[w] ? stq_commit_head_reg : ldq_head_reg;
+        temp_stq_commit_head_wire[w] =  stq_commit_head_reg;
+        temp_ldq_head_wire[w]        =  ldq_head_reg;
+        if(commit_store_wire[w]) for(int i = 0; i<w ;i++)begin
+          if(commit_store_wire[i]) begin
+            commit_idx_wire[w] = commit_idx_wire[w] +1;
+            temp_stq_commit_head_wire[w] = temp_stq_commit_head_wire[w] +1;
+          end
+        end
+        if(commit_load_wire[w]) for(int i = 0; i<w ;i++)begin
+          if(commit_load_wire[i]) begin
+            commit_idx_wire[w] = commit_idx_wire[w] +1;
+            temp_ldq_head_wire[w] = temp_ldq_head_wire[w] +1;
+          end
         end
       end
-      if(commit_load_wire[w]) for(int i = 0; i<w ;i++)begin
-        if(commit_load_wire[i]) begin
-          commit_idx_wire[w] = commit_idx_wire[w] +1;
-          temp_ldq_head_wire[w] = temp_ldq_head_wire[w] +1;
-        end
-      end
-
     end
   endgenerate
 
