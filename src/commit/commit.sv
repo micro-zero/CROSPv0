@@ -42,7 +42,9 @@ module commit #(
     output logic  [7:0] nextstid,  // next store ID to commit
     /* fences */
     output logic fencei,           // fence.i committed
-    output logic sfence            // sfence.vma committed
+    output logic sfence,           // sfence.vma committed
+    input  logic core_clr_bsy_valid,
+    input  logic core_clr_bsy_rob_idx
 );
     /* pipeline redirect and rollback */
     logic redir, rollback, rollback_last;
@@ -170,6 +172,7 @@ module commit #(
             exe[$clog2(usz)'(com_bundle[i].opid)] <= 0;
             spc[$clog2(usz)'(com_bundle[i].opid)] <= 0;
         end
+        if (core_clr_bsy_valid) exe[$clog2(usz)'(core_clr_bsy_rob_idx)] <= 0;
     end
     always_ff @(posedge clk) if (rst | redir) eid_last  <= 0; else eid_last  <= eid_new;
     always_ff @(posedge clk) if (rst | redir) tval_last <= 0; else tval_last <= tval_new;

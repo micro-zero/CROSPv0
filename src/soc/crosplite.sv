@@ -363,7 +363,8 @@ module crosplite #(
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (pwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(pwd), .rwd(pwd), .ewd(pwd), .cwd(pwd))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle,
-            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextldid, nextstid, fnci, fncv);
+            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextldid, nextstid, fnci, fncv，
+            core_clr_bsy_valid, core_clr_bsy_rob_idx);
     alu #(.iwd(pwd), .ewd(pwd))
         alu_inst(clk, rst, dec_inst.redir, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
     fpu #(.iwd(pwd), .ewd(pwd))
@@ -399,8 +400,8 @@ module crosplite #(
     logic [6:0] dmem_rob_head_idx_o;
     logic dmem_force_order_o;
     logic dmem_ordered_i;
-    logic core_clr_bsy_valid_o;
-    logic [7:0] core_clr_bsy_rob_idx_o;
+    logic core_clr_bsy_valid;
+    logic [7:0] core_clr_bsy_rob_idx;
     logic core_clr_rob_unsafe_valid_o;
     logic [6:0] core_clr_rob_unsafe_idx_o;
     xcpt_t core_lxcpt_o;
@@ -467,8 +468,8 @@ module crosplite #(
         .commit_load_at_rob_head_i(|nextldid),
         .core_commit_valids_i(com_bundle[0].opid[15]),
         .core_commit_uops_i(core_commit_uops_i),
-        .core_clr_bsy_valid_o(core_clr_bsy_valid_o),
-        .core_clr_bsy_rob_idx_o(core_clr_bsy_rob_idx_o),
+        .core_clr_bsy_valid_o(core_clr_bsy_valid),
+        .core_clr_bsy_rob_idx_o(core_clr_bsy_rob_idx),
         .core_clr_rob_unsafe_valid_o(core_clr_rob_unsafe_valid_o),
         .core_clr_rob_unsafe_idx_o(core_clr_rob_unsafe_idx_o),
         .core_lxcpt_o(core_lxcpt_o),
