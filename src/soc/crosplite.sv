@@ -363,8 +363,8 @@ module crosplite #(
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (pwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(pwd), .rwd(pwd), .ewd(pwd), .cwd(pwd))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle,
-            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextldid, nextstid, fnci, fncv，
-            core_clr_bsy_valid, core_clr_bsy_rob_idx);
+            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, nextldid, nextstid, fnci, fncv,
+            core_clr_bsy_valid, core_clr_bsy_rob_idx, core_exe_iresp);
     alu #(.iwd(pwd), .ewd(pwd))
         alu_inst(clk, rst, dec_inst.redir, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
     fpu #(.iwd(pwd), .ewd(pwd))
@@ -386,7 +386,7 @@ module crosplite #(
     logic lsu_fencei_rdy_o;
     logic s1_kill_o;
     func_unit_resp_t exe_req_i;
-    exe_unit_resp_t core_exe_iresp_o;
+    exe_unit_resp_t core_exe_iresp;
     dc_req_t dmem_req_o;
     logic dmem_req_valid_o;
     logic dmem_release_ready_o;
@@ -447,7 +447,7 @@ module crosplite #(
         .lsu_fencei_rdy_o(lsu_fencei_rdy_o),
         .core_exception_i(com_bundle[0].redir),
         .exe_req_i(exe_req_i),
-        .core_exe_iresp_o(core_exe_iresp_o),
+        .core_exe_iresp_o(core_exe_iresp),
         .s1_kill_o(s1_kill_o),
         .dmem_req_o(dmem_req_o),
         .dmem_req_valid_o(dmem_req_valid_o),

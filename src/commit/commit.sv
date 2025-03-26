@@ -44,7 +44,8 @@ module commit #(
     output logic fencei,           // fence.i committed
     output logic sfence,           // sfence.vma committed
     input  logic core_clr_bsy_valid,
-    input  logic core_clr_bsy_rob_idx
+    input  logic [7:0] core_clr_bsy_rob_idx,
+    input exe_unit_resp_t core_exe_iresp
 );
     /* pipeline redirect and rollback */
     logic redir, rollback, rollback_last;
@@ -116,10 +117,10 @@ module commit #(
     /* entry modified by execution results */
     rob_exe_t [cwd-1:0]                  exe_rvalue;     // reading values in ROB
     rob_exe_t [cwd-1:0]                  exe_rvalue_fwd; // forwarded reading values in ROB
-    logic     [ewd-1:0][$clog2(usz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
-    rob_exe_t [ewd-1:0]                  exe_wvalue;     // writing values in ROB
-    logic     [ewd-1:0]                  exe_wena;       // ROB write enable signals after EXE stage
-    always_comb for (int i = 0; i < ewd; i++) begin
+    logic     [ewd:0][$clog2(usz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
+    rob_exe_t [ewd:0]                  exe_wvalue;     // writing values in ROB
+    logic     [ewd:0]                  exe_wena;       // ROB write enable signals after EXE stage
+    always_comb for (int i = 0; i <= ewd; i++) begin
         exe_waddr [i]       = $clog2(usz)'(exe_bundle[i].opid);
         exe_wena  [i]       = exe_bundle[i].opid[15];
         exe_wvalue[i].npc   = exe_bundle[i].npc & ~64'd1; // avoid misaligned fetch
@@ -129,13 +130,19 @@ module commit #(
         exe_wvalue[i].retry = exe_bundle[i].retry;
         exe_wvalue[i].mem   = exe_bundle[i].mem;
         exe_wvalue[i].csr   = exe_bundle[i].csr;
+        if (i == ewd) begin
+            exe_waddr[i] = $clog2(usz)'(core_exe_iresp.uop.rob_idx);
+            exe_wena[i] = core_exe_iresp.valid;
+            exe_wvalue[i] = 0;
+            exe_wvalue[i].npc = 0;
+        end
     end
     always_comb for (int i = 0; i < cwd; i++) begin
         exe_rvalue_fwd[i] = exe_rvalue[i];
-        for (int j = 0; j < ewd; j++)
+        for (int j = 0; j <= ewd; j++)
             if (exe_wena[j] & rob_raddr[i] == exe_waddr[j]) exe_rvalue_fwd[i] = exe_wvalue[j];
     end
-    mwpram #(.width($bits(rob_exe_t)), .depth(usz), .rports(cwd), .wports(ewd))
+    mwpram #(.width($bits(rob_exe_t)), .depth(usz), .rports(cwd), .wports(ewd+1))
         rob_exe_inst(.clk(clk), .rst(rst),
             .raddr(rob_raddr), .rvalue(exe_rvalue),
             .waddr(exe_waddr), .wvalue(exe_wvalue), .wena(exe_wena));
@@ -147,7 +154,7 @@ module commit #(
         /* store earliest trap value in a single register to save space of ROB */
         eid_new = eid_last;
         tval_new = tval_last;
-        for (int i = 0; i < ewd; i++)
+        for (int i = 0; i <= ewd; i++)
             if (exe_wena[i] & exe_bundle[i].cause[7] & ~rollback) // exception happens
                 if (~eid_new[15] | exe_waddr[i] - rob_front < $clog2(usz)'(eid_new) - rob_front) begin
                     eid_new = exe_bundle[i].opid;
@@ -158,14 +165,14 @@ module commit #(
     always_comb begin
         exe_fwd = exe;
         spc_fwd = spc;
-        for (int i = 0; i < ewd; i++) if (exe_wena[i]) exe_fwd[$clog2(usz)'(exe_waddr[i])] = 1;
-        for (int i = 0; i < ewd; i++) if (exe_wena[i]) spc_fwd[$clog2(usz)'(exe_waddr[i])] = exe_bundle[i].specul;
+        for (int i = 0; i <= ewd; i++) if (exe_wena[i]) exe_fwd[$clog2(usz)'(exe_waddr[i])] = 1;
+        for (int i = 0; i <= ewd; i++) if (exe_wena[i]) spc_fwd[$clog2(usz)'(exe_waddr[i])] = exe_bundle[i].specul;
     end
     always_ff @(posedge clk) if (rst | redir) {dec, ren, exe, spc} <= 0; else begin
         for (int i = 0; i < dwd; i++) if (dec_wena[i]) dec[$clog2(usz)'(dec_waddr[i])] <= 1;
         for (int i = 0; i < rwd; i++) if (ren_wena[i]) ren[$clog2(usz)'(ren_waddr[i])] <= 1;
-        for (int i = 0; i < ewd; i++) if (exe_wena[i]) exe[$clog2(usz)'(exe_waddr[i])] <= 1;
-        for (int i = 0; i < ewd; i++) if (exe_wena[i]) spc[$clog2(usz)'(exe_waddr[i])] <= exe_bundle[i].specul;
+        for (int i = 0; i <= ewd; i++) if (exe_wena[i]) exe[$clog2(usz)'(exe_waddr[i])] <= 1;
+        for (int i = 0; i <= ewd; i++) if (exe_wena[i]) spc[$clog2(usz)'(exe_waddr[i])] <= exe_bundle[i].specul;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
             dec[$clog2(usz)'(com_bundle[i].opid)] <= 0;
             ren[$clog2(usz)'(com_bundle[i].opid)] <= 0;
