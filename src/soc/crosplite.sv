@@ -412,7 +412,7 @@ module crosplite #(
     always_comb for (int i = 0; i < pwd; i++) begin
         dis_st_valids_i[i] = dec_bundle[i].opid[15] & ~dec_bundle[i].ldid[7] & dec_bundle[i].stid[7];
         dis_ld_valids_i[i] = dec_bundle[i].opid[15] & dec_bundle[i].ldid[7];
-        dis_uops_i[i] = $bits(lsu_funct_t)'(dec_bundle[i].funct);
+        dis_uops_i[i] = dec_bundle[i].funct;
         dis_uops_i[i].rob_idx = 7'(dec_bundle[i].opid);
     end
     always_comb begin

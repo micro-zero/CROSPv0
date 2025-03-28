@@ -84,6 +84,7 @@ module commit #(
         dec_wvalue[i].ret  = dec_bundle[i].ret;
         dec_wvalue[i].lrsa = dec_bundle[i].rsa;
         dec_wvalue[i].lrda = dec_bundle[i].rda;
+        dec_wvalue[i].funct = dec_bundle[i].funct;
         /* debug signals */
         dec_wvalue[i].branch = dec_bundle[i].branch;
         dec_wvalue[i].jal    = dec_bundle[i].jal;
@@ -220,7 +221,7 @@ module commit #(
             com_bundle[i].ldid     = dec_rvalue[i].ldid;
             com_bundle[i].stid     = dec_rvalue[i].stid;
             com_bundle[i].pc       = dec_rvalue[i].pc;
-            com_bundle[i].lsu_funct = $bits(lsu_funct_t)'(exe_rvalue_fwd[i].funct);
+            com_bundle[i].lsu_funct = $bits(lsu_funct_t)'(dec_rvalue[i].funct);
             com_bundle[i].call     = dec_rvalue[i].call;
             com_bundle[i].ret      = dec_rvalue[i].ret;
             com_bundle[i].pat      = dec_rvalue[i].pat;

@@ -110,6 +110,7 @@ typedef struct packed {
     logic [1:0][6:0] lrsa;
     logic [6:0] lrda;
     logic branch, jal, jalr; // for debugging
+    logic [63:0] funct;
 } rob_dec_t;
 
 typedef struct packed {
@@ -122,7 +123,6 @@ typedef struct packed {
     logic [2:0] ret;    // exception return (MSB is return bit, `ret[1:0]` is privilege level)
     logic mem, csr;     // memory/CSR change
     logic flush, retry; // force pipeline flush
-    logic [63:0] funct;
 } rob_exe_t;
 
 typedef struct packed {
