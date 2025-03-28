@@ -65,7 +65,7 @@ module LSU
     input  logic [robAddrSz-1:0]                                core_rob_pnr_idx_i,      // rob pnr指针
     input  logic [commit_width-1:0]                             commit_load_at_rob_head_i,//rob当前commit表头为load指令  
     input  logic [commit_width-1:0]                             core_commit_valids_i,    // 当前commit有效位
-    input  lsu_funct_t[commit_width-1:0]                        core_commit_uops_i,      // 当前commit的uop //规定一周期可以commit多条load 但是只能commit一条store
+    input  lsu_funct_t[commit_width-1:0]                        core_commit_uops_i,      // 当前commit的uop //规定一周期可以commit多条load store 
     output logic                                                core_clr_bsy_valid_o,    // 清除rob对应busy位信号的有效位
     output logic [robAddrSz-1:0]                                core_clr_bsy_rob_idx_o,  // 需要清除对应busy位的rob表项
     output logic                                                core_clr_rob_unsafe_valid_o,//清除rob对应unsafe位信号的有效位     
