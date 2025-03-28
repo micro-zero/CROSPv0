@@ -467,7 +467,7 @@ module crosplite #(
         .core_rob_head_idx_i(com_inst.rob_front),
         .core_rob_pnr_idx_i(com_inst.rob_front),
         .commit_load_at_rob_head_i(|nextldid),
-        .core_commit_valids_i(com_bundle[0].opid[15]),
+        .core_commit_valids_i(core_commit_valids_i),
         .core_commit_uops_i(core_commit_uops_i),
         .core_clr_bsy_valid_o(core_clr_bsy_valid),
         .core_clr_bsy_rob_idx_o(core_clr_bsy_rob_idx),
