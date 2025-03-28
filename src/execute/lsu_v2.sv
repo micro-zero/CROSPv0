@@ -67,7 +67,7 @@ module LSU
     input  logic [commit_width-1:0]                             core_commit_valids_i,    // 当前commit有效位
     input  lsu_funct_t[commit_width-1:0]                        core_commit_uops_i,      // 当前commit的uop //规定一周期可以commit多条load 但是只能commit一条store
     output logic                                                core_clr_bsy_valid_o,    // 清除rob对应busy位信号的有效位
-    output logic [robAddrSz:0]                                  core_clr_bsy_rob_idx_o,  // 需要清除对应busy位的rob表项
+    output logic [robAddrSz-1:0]                                core_clr_bsy_rob_idx_o,  // 需要清除对应busy位的rob表项
     output logic                                                core_clr_rob_unsafe_valid_o,//清除rob对应unsafe位信号的有效位     
     output logic [robAddrSz-1:0]                                core_clr_rob_unsafe_idx_o,  //需要清除对应unsafe位的rob表项     
     output xcpt_t                                               core_lxcpt_o,               //推测式load发生错误,将错误信号lxcpt发往core
@@ -206,7 +206,7 @@ module LSU
     addr_t                                      mem_paddr_r0_wire ;
     addr_t                                      mem_paddr_r1_reg;
     logic                                       clr_bsy_valid_reg;//reg
-    logic[robAddrSz:0]                          clr_bsy_rob_idx_reg;//reg
+    logic[robAddrSz-1:0]                        clr_bsy_rob_idx_reg;//reg
     logic[MAX_BR_COUNT:0]                       clr_bsy_brmask_reg;//reg
     logic                                       core_exception_i_r1_reg; //用来将core_exception_i寄存一拍
     logic                                       core_exception_i_r2_reg; //-------------------------两拍
@@ -217,7 +217,7 @@ module LSU
   // We are making a local line visible to other harts
     logic                                       do_release_search_wire;
     logic                                       core_clr_bsy_valid_wire;
-    logic                                       core_clr_bsy_rob_idx_wire;
+    logic[robAddrSz-1:0]                        core_clr_bsy_rob_idx_wire;
   // Store addrs don't go to memory yet, get it from the upper response
   // Load wakeups don't go through TLB, get it through memory
   // Load incoming and load retries go through both
