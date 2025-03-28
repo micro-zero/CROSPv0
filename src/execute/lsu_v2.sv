@@ -52,7 +52,7 @@ module LSU
     input  logic                                                dmem_release_valid_i,    // Dcache发进来的release有效的信号
     input  addr_t                                               dmem_release_address_i,  // Dcache进行release的地址
     input  dc_resp_t                                            dmem_resp_i,             // Dcache返回请求
-    input  dc_req_t                                             dmem_nack_i,             // Dcache发进来的对当前load指令的nack信号
+    input  dc_req_t                                             dmem_nack_i,             // Dcache发进来的对当前load / store指令的nack信号
     output brupdate_t                                           dmem_brupdate_o,         // 从core发过来的brupdate信号存一周期发往Dcache
     output logic                                                dmem_exception_o,        // 从core发过来的exception信号存一周期发往Dcache
     output logic [robAddrSz-1:0]                                dmem_rob_pnr_idx_o,      // 从core发过来的rob pnr表项存一周期发往Dcache
