@@ -107,8 +107,8 @@ module issue #(
         lsu_funct = 0;
         for (int i = 0; i < iwd; i++) if(iss_bundle[i].fu[1]) begin
             lsu_funct = $bits(lsu_funct_t)'(iss_bundle[i].funct);
-            lsu_funct.is_sta = 1;
-            lsu_funct.is_std = 1;
+            lsu_funct.is_sta = lsu_funct.store;
+            lsu_funct.is_std = lsu_funct.store;
             lsu_funct.is_amo = 0;
             lsu_funct.is_fence = 0;
             lsu_funct.rob_idx = 6'(iss_bundle[i].opid);
