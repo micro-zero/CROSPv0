@@ -4,7 +4,13 @@
 CPUFREQ       = 50
 PARAM_CPUFREQ = $(CPUFREQ)000000
 PARAM_TBFREQ  = 10000000
-PARAM_PWD     = 2
+PARAM_FWD     = 2
+PARAM_DWD     = 2
+PARAM_RWD     = 2
+PARAM_IWD     = 3
+PARAM_EWD     = 2
+PARAM_CWD     = 2
+PARAM_MWD     = 1
 PARAM_INITRD  = be000000
 PARAM_RSTPC   = 81fff000
 PARAM_DTBADDR = 81ffe000
@@ -58,7 +64,13 @@ define IMP_TCL
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:SOCC:0.1 socctl
 	set_property CONFIG.dcbase 0x$(PARAM_DCBASE) [get_bd_cells core]
 	set_property CONFIG.init 0 [get_bd_cells core]
-	set_property CONFIG.pwd $(PARAM_PWD) [get_bd_cells core]
+	set_property CONFIG.fwd $(PARAM_FWD) [get_bd_cells core]
+	set_property CONFIG.dwd $(PARAM_DWD) [get_bd_cells core]
+	set_property CONFIG.rwd $(PARAM_RWD) [get_bd_cells core]
+	set_property CONFIG.iwd $(PARAM_IWD) [get_bd_cells core]
+	set_property CONFIG.ewd $(PARAM_EWD) [get_bd_cells core]
+	set_property CONFIG.mwd $(PARAM_MWD) [get_bd_cells core]
+	set_property CONFIG.cwd $(PARAM_CWD) [get_bd_cells core]
 	set_property CONFIG.rst_pc {0x$(PARAM_RSTPC)} [get_bd_cells core]
 	set_property CONFIG.tohost {0x$(PARAM_TOHOST)} [get_bd_cells core]
 	set_property CONFIG.frhost {0x$(PARAM_FRHOST)} [get_bd_cells core]
@@ -199,7 +211,13 @@ define SIM_TCL
 	create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 zero
 	set_property CONFIG.dcbase 0x$(PARAM_DCBASE) [get_bd_cells core]
 	set_property CONFIG.init 1 [get_bd_cells core]
-	set_property CONFIG.pwd $(PARAM_PWD) [get_bd_cells core]
+	set_property CONFIG.fwd $(PARAM_FWD) [get_bd_cells core]
+	set_property CONFIG.dwd $(PARAM_DWD) [get_bd_cells core]
+	set_property CONFIG.rwd $(PARAM_RWD) [get_bd_cells core]
+	set_property CONFIG.iwd $(PARAM_IWD) [get_bd_cells core]
+	set_property CONFIG.ewd $(PARAM_EWD) [get_bd_cells core]
+	set_property CONFIG.mwd $(PARAM_MWD) [get_bd_cells core]
+	set_property CONFIG.cwd $(PARAM_CWD) [get_bd_cells core]
 	set_property CONFIG.rst_pc {0x$(PARAM_RSTPC)} [get_bd_cells core]
 	set_property CONFIG.tohost {0x$(PARAM_TOHOST)} [get_bd_cells core]
 	set_property CONFIG.frhost {0x$(PARAM_FRHOST)} [get_bd_cells core]

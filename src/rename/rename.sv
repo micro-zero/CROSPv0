@@ -7,12 +7,11 @@
 import types::*;
 
 module rename #(
-    parameter dwd   = 4,   // decoder width
-    parameter rwd   = 4,   // rename width
-    parameter cwd   = 4,   // commit width
-    parameter prnum = 96,  // number of physical registers
-    parameter rqsz  = 8,   // rename queue size
-    parameter brsz  = 16   // size of branch snapshots
+    parameter dwd,   // decoder width
+    parameter rwd,   // rename width
+    parameter cwd,   // commit width
+    parameter prnum, // number of physical registers
+    parameter brsz   // size of branch snapshots
 )(
     input  logic clk,
     input  logic rst,
@@ -31,6 +30,7 @@ module rename #(
     always_comb rollback = red_bundle.rollback & rq_empty; // rollback after rename queue empty
 
     /* rename queue */
+    parameter rqsz = 2 * (1 << $clog2(rwd));      // rename queue size
     logic [$clog2(rqsz)-1:0] rq_front;            // front index of rename queue
     logic [$clog2(rqsz):0] rq_num, rq_in, rq_out; // several numbers of queue
     logic        [rwd-1:0][$clog2(rqsz)-1:0] rq_raddr, rq_waddr;   // read/write addresses
@@ -101,10 +101,12 @@ module rename #(
             .waddr(brid), .wvalue(mt_step[rwd:1]), .wena(branch));
     always_comb for (int i = 0; i < rwd; i++) mt_raddr[i] = {dec_bundle[i].rsa, dec_bundle[i].rda};
     always_comb for (int i = 0; i < rwd; i++)
-        if (rollback)
-             {mt_waddr[i], mt_wvalue[i]} = {com_bundle[i].lrda, $clog2(prnum)'(com_bundle[i].prda[0])};
-        else {mt_waddr[i], mt_wvalue[i]} = {dec_bundle[i].rda,  $clog2(prnum)'(alloc[i])};
-    always_comb for (int i = 0; i < rwd; i++) mt_wena[i] = rollback | rq_wena[i];
+        if (~rollback)
+            {mt_waddr[i], mt_wvalue[i]} = {dec_bundle[i].rda,  $clog2(prnum)'(alloc[i])};
+        else if (i < cwd)
+            {mt_waddr[i], mt_wvalue[i]} = {com_bundle[i].lrda, $clog2(prnum)'(com_bundle[i].prda[0])};
+        else {mt_waddr[i], mt_wvalue[i]} = 0;
+    always_comb for (int i = 0; i < rwd; i++) mt_wena[i] = rollback & i < cwd | rq_wena[i];
     always_comb begin
         mt_step = 0;
         mt_step[0] = mt;
@@ -128,14 +130,12 @@ module rename #(
     logic [$clog2(rwd)-1:0] alloc_num;
     firstk #(.width(prnum), .k(rwd)) firstk_inst(.bits(fl & ~(prnum)'(1)), .pos(pos));
     always_comb begin
-        alloc_valid = 0;
-        alloc_num = 0;
+        alloc_valid = 0; alloc_num = 0;
+        alloc = 0; dealloc = 0;
         if (rollback) for (int i = 0; i < rwd; i++) begin
             if (i < cwd)   alloc[i] = $clog2(prnum)'(com_bundle[i].prda[0]);
             if (i < cwd) dealloc[i] = $clog2(prnum)'(com_bundle[i].prda[1]);
         end else begin
-            alloc = 0;
-            dealloc = 0;
             for (int i = 0; i < rwd; i++) if (i < cwd & com_bundle[i].opid[15])
                 dealloc[i] = $clog2(prnum)'(com_bundle[i].prda[0]);
             for (int i = 0; i < rwd; i++) if (i < dwd & dec_bundle[i].opid[15])

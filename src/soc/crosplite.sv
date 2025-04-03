@@ -9,7 +9,26 @@ import types::*;
 
 module crosplite #(
     parameter init   = 1,            // whether to initialize some RAM
-    parameter pwd    = 4,            // pipeline width
+    parameter fwd    = 2,            // fetch width
+    parameter dwd    = 2,            // decode width
+    parameter rwd    = 2,            // rename width
+    parameter iwd    = 3,            // issue width
+    parameter ewd    = 2,            // execute width
+    parameter cwd    = 2,            // commit width
+    parameter mwd    = 1,            // memory access width
+    parameter opsz   = 64,           // operation ID size
+    parameter brsz   = 16,           // branch snapshot size
+    parameter lqsz   = 16,           // load queue size
+    parameter sqsz   = 16,           // store queue size
+    parameter cbsz   = 64,           // cache block size to avoid fetch beyond cache line
+    parameter fqsz   = 16,           // instruction fetch queue size
+    parameter ftqsz  = 8,            // fetch target queue size
+    parameter rassz  = 8,            // return address stack size
+    parameter phtsz  = 4096,         // PHT size
+    parameter btbsz  = 512,          // BTB size
+    parameter iqsz   = 16,           // OoO issue queue size
+    parameter fnum   = 4,            // fetch number in half-words
+    parameter prnum  = 96,           // number of physical registers
     parameter rst_pc = 64'hc0000000, // PC on reset
     parameter tohost = 64'd0,        // TOHOST address
     parameter frhost = 64'd0,        // FROMHOST address
@@ -323,22 +342,22 @@ module crosplite #(
     always_comb m_axi_rready  = use_htif ? m_axi_rready_uart  : m_axi_rready_l1;
 
     /* instantiate and connect */
-    fet_bundle_t [pwd-1:0] fet_bundle;
-    dec_bundle_t [pwd-1:0] dec_bundle;
-    ren_bundle_t [pwd-1:0] ren_bundle;
-    iss_bundle_t [pwd-1:0] iss_bundle;
-    exe_bundle_t [pwd-1:0] exe_bundle;
-    com_bundle_t [pwd-1:0] com_bundle;
+    fet_bundle_t [fwd-1:0] fet_bundle;
+    dec_bundle_t [dwd-1:0] dec_bundle;
+    ren_bundle_t [rwd-1:0] ren_bundle;
+    iss_bundle_t [iwd-1:0] iss_bundle;
+    exe_bundle_t [iwd-1:0] exe_bundle;
+    com_bundle_t [cwd-1:0] com_bundle;
     red_bundle_t           red_bundle;
-    logic [pwd-1:0] dec_ready;
-    logic [pwd-1:0] ren_ready;
-    logic [pwd-1:0] iss_ready;
-    logic [pwd-1:0] exe_ready;
-    logic [pwd-1:0][1:0] busy_resp;
-    logic [2*pwd-1:0][63:0] reg_resp;
-    reg_bundle_t      [pwd-1:0] fu_req;
-    logic        [4:0][pwd-1:0] fu_claim;
-    exe_bundle_t [4:0][pwd-1:0] fu_resp;
+    logic [fwd-1:0] dec_ready;
+    logic [dwd-1:0] ren_ready;
+    logic [rwd-1:0] iss_ready;
+    logic [iwd-1:0] exe_ready;
+    logic [rwd-1:0][1:0] busy_resp;
+    logic [2*iwd-1:0][63:0] reg_resp;
+    reg_bundle_t      [iwd-1:0] fu_req;
+    logic        [4:0][ewd-1:0] fu_claim;
+    exe_bundle_t [4:0][ewd-1:0] fu_resp;
     logic        [4:0]      fu_ready;
     logic        csr_rqst, csr_excp, csr_flsh;
     logic  [6:0] csr_intr;
@@ -349,42 +368,45 @@ module crosplite #(
     logic exception;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
-    logic [1:0][15:0] lsu_safe;
-    logic [15:0] top_opid, saf_opid, lsu_unsf;
-    frontend #(.init(init), .rst_pc(rst_pc), .fwd(pwd), .cwd(pwd))
+    logic [15:0] top_opid, saf_opid;
+    logic [2*mwd-1:0][15:0] lsu_safe, lsu_unsf;
+    frontend #(.init(init), .rst_pc(rst_pc), .fwd(fwd), .cwd(cwd),
+        .cbsz(cbsz), .fqsz(fqsz), .ftqsz(ftqsz), .fnum(fnum),
+        .rassz(rassz), .phtsz(phtsz), .btbsz(btbsz))
         fe_inst(clk, rst, com_bundle, red_bundle, dec_ready, fet_bundle, fl_inst,
             it_rqst, it_vadd, it_resp, it_perm, it_padd,
             ic_rqst, ic_addr, ic_resp, ic_rdat);
-    decoder #(.fwd(pwd), .dwd(pwd), .ewd(pwd), .cwd(pwd))
+    decoder #(.fwd(fwd), .dwd(dwd), .cwd(cwd),
+        .dqsz(2*dwd), .opsz(opsz), .brsz(brsz), .ldsz(lqsz), .stsz(sqsz))
         dec_inst(clk, rst, csr_intr, csr_status,
             com_bundle, red_bundle, dec_ready, fet_bundle, ren_ready, dec_bundle);
-    rename #(.dwd(pwd), .rwd(pwd), .cwd(pwd))
+    rename #(.dwd(dwd), .rwd(rwd), .cwd(cwd), .prnum(prnum), .brsz(brsz))
         ren_inst(clk, rst, com_bundle, red_bundle, ren_ready, dec_bundle, iss_ready, ren_bundle);
-    prf #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd))
+    prf #(.prnum(prnum), .rwd(rwd), .iwd(iwd), .cwd(cwd), .opsz(opsz))
         prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, red_bundle,
-            iss_ready, (pwd)'(-1), busy_resp, reg_resp);
+            iss_ready, (iwd)'(-1), busy_resp, reg_resp);
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret,
         csr_excp, csr_intr, csr_flsh,
         mip_ext, mtime, 64'(com_inst.rob_out), csr_status, csr_tvec, csr_mepc, csr_sepc, it_satp, dt_satp);
-    issue #(.rwd(pwd), .iwd(pwd), .ewd(pwd), .cwd(pwd))
+    issue #(.rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .iqsz(iqsz))
         iss_inst(clk, rst, fu_ready, busy_resp,
-            exe_bundle, red_bundle, iss_ready, ren_bundle, (pwd)'(-1), iss_bundle);
-    execute #(.iwd(pwd), .ewd(pwd))
-        exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (pwd)'(-1), exe_bundle, fu_resp, fu_claim);
-    commit #(.rst_pc(rst_pc), .dwd(pwd), .rwd(pwd), .ewd(pwd), .cwd(pwd))
+            exe_bundle, red_bundle, iss_ready, ren_bundle, (iwd)'(-1), iss_bundle);
+    execute #(.iwd(iwd), .ewd(ewd), .prnum(prnum))
+        exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (iwd)'(-1), exe_bundle, fu_resp, fu_claim);
+    commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
             csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret,
             lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv);
-    alu #(.iwd(pwd), .ewd(pwd))
+    alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
-    fpu #(.iwd(pwd), .ewd(pwd))
+    fpu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         fpu_inst(clk, rst, red_bundle, fu_ready[2], fu_req, fu_claim[2], fu_resp[2]);
-    mul #(.iwd(pwd), .ewd(pwd))
+    mul #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         mul_inst(clk, rst, red_bundle, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
-    div #(.iwd(pwd), .ewd(pwd))
+    div #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         div_inst(clk, rst, red_bundle, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
-    lsu #(.iwd(pwd), .ewd(pwd), .cwd(pwd))
+    lsu #(.iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz))
         lsu_inst(clk, rst, lsu_safe, lsu_unsf, top_opid, saf_opid, red_bundle, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,

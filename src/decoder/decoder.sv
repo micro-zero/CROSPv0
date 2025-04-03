@@ -30,15 +30,14 @@ import types::*;
 `define SYSTEM    5'b11100
 
 module decoder #(
-    parameter fwd = 4,   // fetch width
-    parameter dwd = 4,   // decode width
-    parameter ewd = 4,   // decode width
-    parameter cwd = 4,   // commit width
-    parameter dqsz = 8,  // decoder queue size
-    parameter opsz = 64, // operation max size (ROB size)
-    parameter brsz = 16, // branch max size (snapshot size)
-    parameter ldsz = 8,  // load queue size
-    parameter stsz = 8   // store queue size
+    parameter fwd,  // fetch width
+    parameter dwd,  // decode width
+    parameter cwd,  // commit width
+    parameter dqsz, // decoder queue size
+    parameter opsz, // operation max size (ROB size)
+    parameter brsz, // branch max size (snapshot size)
+    parameter ldsz, // load queue size
+    parameter stsz  // store queue size
 )(
     input logic clk,
     input logic rst,
@@ -414,8 +413,8 @@ module decoder #(
         opcom = 0; brcom = 0; ldcom = 0; stcom = 0;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) opcom++;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].brid[7]) brcom++;
-        for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) ldcom++;
-        for (int i = 0; i < ewd; i++) if (com_bundle[i].opid[15] & com_bundle[i].stid[7]) stcom++;
+        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) ldcom++;
+        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & com_bundle[i].stid[7]) stcom++;
     end
     always_comb begin
         opred = 0; brred = 0; ldred = 0; stred = 0;
@@ -446,8 +445,8 @@ module decoder #(
         else if (redir) stnum <= stnum - stred - stcom; else stnum <= stnum - stcom + 16'(dq_stin);
 
     /* flatten results */
-    lsu_funct_t [dwd-1:0][2:0] f;
-    always_comb for (int i = 0; i < dwd; i++)
+    lsu_funct_t [fwd-1:0][2:0] f;
+    always_comb for (int i = 0; i < fwd; i++)
         for (int j = 0; j < 3; j++) f[i][j] = $bits(lsu_funct_t)'(result[i][j].funct);
     always_comb begin
         ready = 0; dq_wvalue = 0; // `dq_wvalue` is the flattened result array

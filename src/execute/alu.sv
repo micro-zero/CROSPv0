@@ -9,10 +9,9 @@
 import types::*;
 
 module alu #(
-    parameter iwd  = 4, // issue width
-    parameter ewd  = 4, // execution width
-    parameter eqsz = 8, // execution queue size
-    parameter opsz = 64 // operation ID size
+    parameter iwd,  // issue width
+    parameter ewd,  // execution width
+    parameter opsz  // operation ID size
 )(
     input  logic clk,
     input  logic rst,
@@ -120,6 +119,7 @@ module alu #(
     end
 
     /* execution output queue */
+    localparam eqsz = 2 * (1 << $clog2(ewd));
     logic [$clog2(eqsz)-1:0] eq_front;
     logic [$clog2(eqsz):0] eq_num, eq_in, eq_out;
     logic [ewd-1:0][$clog2(eqsz)-1:0] eq_raddr, eq_waddr;

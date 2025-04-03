@@ -7,18 +7,19 @@
 import types::*;
 
 module issue #(
-    parameter rwd  = 4,  // rename width
-    parameter iwd  = 4,  // issue width
-    parameter ewd  = 4,  // execution width
-    parameter cwd  = 4,  // commit width
-    parameter opsz = 64, // operation ID size
-    parameter iqsz = 16  // OoO issue queue size
+    parameter rwd,  // rename width
+    parameter iwd,  // issue width
+    parameter ewd,  // execution width
+    parameter cwd,  // commit width
+    parameter mwd,  // memory access width
+    parameter opsz, // operation ID size
+    parameter iqsz  // OoO issue queue size
 )(
     input  logic clk,
     input  logic rst,
     input  logic          [4:0] fu_ready,     // function unit ready signals
     input  logic [rwd-1:0][1:0] busy_resp,    // busy table response
-    input  exe_bundle_t [ewd-1:0] exe_bundle, // execute bundle
+    input  exe_bundle_t [iwd-1:0] exe_bundle, // execute bundle
     input  red_bundle_t           red_bundle, // redirect bundle
     output logic        [rwd-1:0] ready,      // ready signal
     input  ren_bundle_t [rwd-1:0] ren_bundle, // rename bundle
@@ -41,47 +42,46 @@ module issue #(
         iq_in_data = 0;
         iq_in_busy = 0;
         for (int i = 0; i < rwd; i++) if (ren_bundle[i].opid[15]) begin
-            begin
-                /* for now all operations are sent to default issue queue */
-                if (32'(iq_in) >= iwd | 32'(iq_in) >= iqsz - 32'(iq_num)) break;
-                iq_in_data[32'(iq_in)].opid   = ren_bundle[i].opid;
-                iq_in_data[32'(iq_in)].brid   = ren_bundle[i].brid;
-                iq_in_data[32'(iq_in)].ldid   = ren_bundle[i].ldid;
-                iq_in_data[32'(iq_in)].stid   = ren_bundle[i].stid;
-                iq_in_data[32'(iq_in)].ir     = ren_bundle[i].ir;
-                iq_in_data[32'(iq_in)].pc     = ren_bundle[i].pc;
-                iq_in_data[32'(iq_in)].pnpc   = ren_bundle[i].pnpc;
-                iq_in_data[32'(iq_in)].delta  = ren_bundle[i].delta;
-                iq_in_data[32'(iq_in)].pat    = ren_bundle[i].pat;
-                iq_in_data[32'(iq_in)].fu     = ren_bundle[i].fu;
-                iq_in_data[32'(iq_in)].funct  = ren_bundle[i].funct;
-                iq_in_data[32'(iq_in)].base   = ren_bundle[i].base;
-                iq_in_data[32'(iq_in)].offset = ren_bundle[i].offset;
-                iq_in_data[32'(iq_in)].a      = ren_bundle[i].a;
-                iq_in_data[32'(iq_in)].b      = ren_bundle[i].b;
-                iq_in_data[32'(iq_in)].branch = ren_bundle[i].branch;
-                iq_in_data[32'(iq_in)].jal    = ren_bundle[i].jal;
-                iq_in_data[32'(iq_in)].jalr   = ren_bundle[i].jalr;
-                iq_in_data[32'(iq_in)].prsa   = ren_bundle[i].prsa;
-                iq_in_data[32'(iq_in)].prda   = ren_bundle[i].prda;
-                iq_in_busy[32'(iq_in)] = busy_resp[i];
-                iq_in++;
-            end
+            if (i >= iwd | i >= iqsz - 32'(iq_num)) break;
+            iq_in_data[i].opid   = ren_bundle[i].opid;
+            iq_in_data[i].brid   = ren_bundle[i].brid;
+            iq_in_data[i].ldid   = ren_bundle[i].ldid;
+            iq_in_data[i].stid   = ren_bundle[i].stid;
+            iq_in_data[i].ir     = ren_bundle[i].ir;
+            iq_in_data[i].pc     = ren_bundle[i].pc;
+            iq_in_data[i].pnpc   = ren_bundle[i].pnpc;
+            iq_in_data[i].delta  = ren_bundle[i].delta;
+            iq_in_data[i].pat    = ren_bundle[i].pat;
+            iq_in_data[i].fu     = ren_bundle[i].fu;
+            iq_in_data[i].funct  = ren_bundle[i].funct;
+            iq_in_data[i].base   = ren_bundle[i].base;
+            iq_in_data[i].offset = ren_bundle[i].offset;
+            iq_in_data[i].a      = ren_bundle[i].a;
+            iq_in_data[i].b      = ren_bundle[i].b;
+            iq_in_data[i].branch = ren_bundle[i].branch;
+            iq_in_data[i].jal    = ren_bundle[i].jal;
+            iq_in_data[i].jalr   = ren_bundle[i].jalr;
+            iq_in_data[i].prsa   = ren_bundle[i].prsa;
+            iq_in_data[i].prda   = ren_bundle[i].prda;
+            iq_in_busy[i] = busy_resp[i];
+            iq_in++;
             ready[i] = 1;
         end else break;
         if (red_bundle.opid[15]) {ready, iq_in} = 0;
     end
 
     /* default issue queue */
-    logic [iqsz-1:0]              iq_occ, iq_ready;            // issue queue occupation and readiness
-    logic [iqsz-1:0]              iq_out_mask;                 // issue queue output mask (ready =/= out)
-    logic [iqsz-1:0]              iq_resend;                   // issue queue needing resent
-    logic [iqsz-1:0]              iq_flush;                    // flush bits
-    logic [iqsz-1:0][15:0]        iq_opid;                     // operation ID
-    logic [iqsz-1:0][1:0][15:0]   iq_prsa;                     // pending physical register addresses
-    logic [iqsz-1:0][1:0]         iq_prsb, iq_prsb_fwd;        // pending physical register busy bits
-    logic [iqsz-1:0][4:0]         iq_fu;                       // function unit mask
+    logic [iqsz-1:0]                iq_occ, iq_ready;          // issue queue occupation and readiness
+    logic [iqsz-1:0]                iq_out_mask;               // issue queue output mask (ready =/= out)
+    logic [iqsz-1:0]                iq_resend;                 // issue queue needing resent
+    logic [iqsz-1:0]                iq_flush;                  // flush bits
+    logic [iqsz-1:0][15:0]          iq_opid;                   // operation ID
+    logic [iqsz-1:0][1:0][15:0]     iq_prsa;                   // pending physical register addresses
+    logic [iqsz-1:0][1:0]           iq_prsb, iq_prsb_fwd;      // pending physical register busy bits
+    logic [iqsz-1:0][4:0]           iq_fu;                     // function unit mask
+    logic [iqsz-1:0]                iq_mem;                    // memory type
     logic [iwd-1:0][$clog2(iqsz):0] iq_free_pos, iq_ready_pos; // positions within bitmap
+    logic [ewd-1:0][$clog2(iqsz):0] iq_nrm_pos, iq_mem_pos;    // normal and memory instruction positions
     logic        [iwd-1:0][$clog2(iqsz)-1:0] iq_raddr, iq_waddr;
     iss_bundle_t [iwd-1:0]                   iq_rvalue;
     logic        [iwd-1:0]                   iq_wena;
@@ -90,17 +90,24 @@ module issue #(
             .raddr(iq_raddr), .rvalue(iq_rvalue),
             .waddr(iq_waddr), .wvalue(iq_in_data), .wena(iq_wena));
     firstk #(.width(iqsz), .k(iwd)) free_pos_inst(.bits(~iq_occ), .pos(iq_free_pos));
-    firstk #(.width(iqsz), .k(iwd)) ready_pos_inst(.bits(iq_ready), .pos(iq_ready_pos));
+    firstk #(.width(iqsz), .k(ewd)) nrm_pos_inst(.bits(iq_ready & ~iq_mem), .pos(iq_nrm_pos));
+    firstk #(.width(iqsz), .k(ewd)) mem_pos_inst(.bits(iq_ready &  iq_mem), .pos(iq_mem_pos));
     always_comb for (int i = 0; i < iwd; i++) iq_raddr[i] = $clog2(iqsz)'(iq_ready_pos[i]);
     always_comb for (int i = 0; i < iwd; i++) iq_waddr[i] = $clog2(iqsz)'(iq_free_pos[i]);
     always_comb for (int i = 0; i < iwd; i++) iq_wena[i]  = i < 32'(iq_in);
+    always_comb for (int i = 0; i < iqsz; i++) iq_mem[i] = iq_fu[i][1];
     always_comb for (int i = 0; i < iqsz; i++)
-        iq_ready[i] = iq_occ[i] & ~iq_flush[i] & |(iq_fu[i] & fu_ready) &            // related FU ready
-            ~iq_prsb_fwd[i][0] & (~iq_prsb_fwd[i][1] | iq_fu[i][1] & ~iq_resend[i]); // oprands ready
+        iq_ready[i] = iq_occ[i] & ~iq_flush[i] & |(iq_fu[i] & fu_ready) &          // related FU ready
+            ~iq_prsb_fwd[i][0] & (~iq_prsb_fwd[i][1] | iq_mem[i] & ~iq_resend[i]); // oprands ready
+    always_comb begin
+        iq_ready_pos = 0; // limit numbers of memory type and non-memory type within `ewd`
+        for (int i = 0; i < ewd; i++) if (iq_nrm_pos[i][$clog2(iqsz)]) iq_ready_pos[i]       = iq_nrm_pos[i];
+        for (int i = 0; i < ewd; i++) if (iq_mem_pos[i][$clog2(iqsz)]) iq_ready_pos[iwd-1-i] = iq_mem_pos[i];
+    end
     always_comb begin
         iq_prsb_fwd = iq_prsb; // forwarding of wakeup
         for (int i = 0; i < iqsz; i++)
-            for (int j = 0; j < ewd; j++) if (exe_bundle[j].opid[15]) begin
+            for (int j = 0; j < iwd; j++) if (exe_bundle[j].opid[15]) begin
                 if (iq_prsa[i][0] == exe_bundle[j].prda) iq_prsb_fwd[i][0] = 0;
                 if (iq_prsa[i][1] == exe_bundle[j].prda) iq_prsb_fwd[i][1] = 0;
             end

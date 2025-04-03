@@ -19,14 +19,19 @@ typedef struct packed {
 } rob_csr_t;
 
 module vcore #(
-    parameter pwd    = 4,
-    parameter prnum  = 96,
-    parameter rst_pc = 64'hc0000000,
-    parameter tohost = 64'd0,
-    parameter frhost = 64'd0,
-    parameter dcbase = 64'h80000000,
-    parameter uart   = 64'h10000000,
-    parameter clint  = 64'h2000000
+    parameter fwd,
+    parameter dwd,
+    parameter rwd,
+    parameter iwd,
+    parameter ewd,
+    parameter cwd,
+    parameter mwd,
+    parameter rst_pc,
+    parameter tohost,
+    parameter frhost,
+    parameter dcbase,
+    parameter uart,
+    parameter clint
 )(
     input  logic        clk,
     input  logic        rst,
@@ -138,8 +143,8 @@ module vcore #(
     /* instantiate core with direct memory interface */
     logic [63:0] dbg_cycle, dbg_pc0,dbg_pc1;
     logic  [7:0] dbg_axi_stt, dbg_axi_req;
-    crosplite #(.pwd(pwd), .rst_pc(rst_pc), .dcbase(dcbase),
-        .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
+    crosplite #(.fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd),
+        .rst_pc(rst_pc), .dcbase(dcbase), .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
         clk, rst, mip_ext, mtime,
         dbg_cycle, dbg_pc0, dbg_pc1, dbg_axi_stt, dbg_axi_req,
         s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
@@ -156,12 +161,13 @@ module vcore #(
         m_axi_rvalid, m_axi_rready);
 
     /* extract registers from instance */
+    localparam prnum = 96;
     logic [prnum-1:0][63:0] pregs;
     /* verilator tracing_off */
-    logic [63:0] dupregs[pwd-1:0][prnum-1:0]; // forwarded register values
-    logic [$clog2(pwd)-1:0] sel[prnum-1:0];   // forwarded bank selections
+    logic [63:0] dupregs[iwd-1:0][prnum-1:0]; // forwarded register values
+    logic [$clog2(iwd)-1:0] sel[prnum-1:0];   // forwarded bank selections
     /* verilator tracing_on */
-    for (genvar i = 0; i < pwd; i++) for (genvar j = 0; j < prnum; j++)
+    for (genvar i = 0; i < iwd; i++) for (genvar j = 0; j < prnum; j++)
         always_comb begin
             dupregs[i][j] = inst.prf_inst.regfile_inst.dupregs[i].regs[j];
             if (inst.prf_inst.regfile_inst.wena[i])
@@ -169,8 +175,8 @@ module vcore #(
         end
     always_comb begin
         sel = inst.prf_inst.regfile_inst.sel;
-        for (int i = 0; i < pwd; i++) if (inst.prf_inst.regfile_inst.wena[i])
-            sel[inst.prf_inst.regfile_inst.waddr[i]] = $clog2(pwd)'(i);
+        for (int i = 0; i < iwd; i++) if (inst.prf_inst.regfile_inst.wena[i])
+            sel[inst.prf_inst.regfile_inst.waddr[i]] = $clog2(iwd)'(i);
     end
     always_comb for (int i = 0; i < prnum; i++) pregs[i] = dupregs[sel[i]][i];
 
@@ -179,9 +185,9 @@ module vcore #(
     logic [15:0][63:0] st_addr, st_data;
     logic [15:0] [7:0] st_size;
     logic [5:0] st_offset;
-    logic [pwd-1:0][15:0] cmt_opid;
+    logic [cwd-1:0][15:0] cmt_opid;
     always_comb begin
-        for (int i = 0; i < pwd; i++) begin
+        for (int i = 0; i < cwd; i++) begin
             cmt      [i] = inst.com_bundle[i].opid[15] &
                           ~inst.com_inst.dec_rvalue[i].lrda[6] &
                           ~inst.com_inst.exe_rvalue[i].cause[7] & ~inst.com_inst.exe_rvalue[i].eret[2];
@@ -244,7 +250,7 @@ module vcore #(
         st_size[4'(inst.dc_rqst)] <= $countones(inst.dc_strb);
     end
     /* extract CSR info after decode stage */
-    always_ff @(posedge clk) for (int i = 0; i < pwd; i++) if (inst.dec_inst.decode[i]) begin
+    always_ff @(posedge clk) for (int i = 0; i < dwd; i++) if (inst.dec_inst.decode[i]) begin
         rob_csr[7'(inst.dec_bundle[i].opid)].mstatus <= inst.csr_inst.mstatus;
         rob_csr[7'(inst.dec_bundle[i].opid)].misa <= inst.csr_inst.misa;
         rob_csr[7'(inst.dec_bundle[i].opid)].mtvec <= inst.csr_inst.mtvec;
@@ -276,9 +282,7 @@ module vcore #(
         else if (inst.m_axi_rvalid & inst.m_axi_rready) read_mtime <= 0;
 
     /* other stats */
-    always_comb begin stallpc = 0; for (int i = pwd - 1; i >= 0; i--)
-        if (|inst.com_inst.rob_num & ~|inst.com_inst.rob_out)
-            stallpc = inst.com_inst.dec_rvalue[0].pc; end
+    always_comb stallpc = |inst.com_inst.rob_num & ~|inst.com_inst.rob_out ? inst.com_inst.dec_rvalue[0].pc : 0;
     always_ff @(posedge clk) if (rst) {bmisp, brmisp, jmisp, jrmisp, fmisp} <= 0;
         else if (inst.com_inst.mis_bundle.opid[15] & inst.com_inst.mis_bundle.brid[7]) begin
             bmisp <= bmisp + 1;
@@ -300,9 +304,11 @@ module vcore #(
     always_ff @(posedge clk) if (rst) ldfwd <= 0;
         else if (|inst.lsu_inst.ck_resp[0] & inst.lsu_inst.ck_forw[0][64]) ldfwd <= ldfwd + 1;
     always_ff @(posedge clk) if (rst) ldmisp <= 0;
-        else if (inst.com_inst.exe_last.retry) ldmisp <= ldmisp + 1;
+        else if (inst.com_inst.exe_last.retry & inst.red_bundle.opid[15]) ldmisp <= ldmisp + 1;
 
     /* assertion */
+    always_comb assert(rwd >= cwd);
+    always_comb assert(iwd >= ewd);
     always_comb assert(inst.dec_inst.opnum <= inst.dec_inst.opsz);
     always_comb assert(inst.dec_inst.brnum <= inst.dec_inst.brsz);
     int flnum;

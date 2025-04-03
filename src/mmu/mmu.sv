@@ -5,10 +5,10 @@
  */
 
 module mmu #(
-    parameter init   = 0,           // initialize RAMs
-    parameter tohost = 64'h0,       // bypassed tohost address
-    parameter frhost = 64'h0,       // bypassed fromhost address
-    parameter dcbase = 64'h80000000 // base address of cacheable memory
+    parameter init,   // initialize RAMs
+    parameter tohost, // bypassed tohost address
+    parameter frhost, // bypassed fromhost address
+    parameter dcbase  // base address of cacheable memory
 )(
     input  logic         clk,
     input  logic         rst,
@@ -115,7 +115,7 @@ module mmu #(
     logic  [7:0] it_resp_m;
     logic  [7:0] it_perm_m;
     logic [63:0] it_padd_m;
-    tlb #(.chn(1), .set(2), .way(8)) itlb (
+    tlb #(.init(init), .chn(1), .set(2), .way(8)) itlb (
         .clk(clk), .rst(rst | fncv), .flush(flush),
         .s_rqst(s_it_rqst), .m_rqst(it_rqst_m),
         .s_vadd(s_it_vadd), .m_vadd(it_vadd_m),
@@ -132,7 +132,7 @@ module mmu #(
     logic  [7:0] dt_resp_m;
     logic  [7:0] dt_perm_m;
     logic [63:0] dt_padd_m;
-    tlb #(.init(init), .chn(1), .set(2), .way(16)) dtlb (
+    tlb #(.init(init), .chn(1), .set(2), .way(8)) dtlb (
         .clk(clk), .rst(rst | fncv), .flush(flush),
         .s_rqst(s_dt_rqst), .m_rqst(dt_rqst_m),
         .s_vadd(s_dt_vadd), .m_vadd(dt_vadd_m),
@@ -152,7 +152,7 @@ module mmu #(
     logic             st_ready;
     logic       [7:0] st_rqst_b, st_rqst_f;
     logic      [63:0] st_vadd_b, st_vadd_f;
-    tlb #(.init(init), .chn(2), .set(64), .way(8)) stlb (
+    tlb #(.init(init), .chn(2), .set(64), .way(4)) stlb (
         .clk(clk), .rst(rst | fncv), .flush(flush),
         .s_rqst({dt_rqst_m, it_rqst_m}), .m_rqst(st_rqst_m),
         .s_vadd({dt_vadd_m, it_vadd_m}), .m_vadd(st_vadd_m),
@@ -206,7 +206,7 @@ module mmu #(
     logic             coh_takn_mb; // master coherence request taken by AXI
 
     /* instruction cache */
-    cache #(.init(init), .chn(1), .set(64), .way(8), .blk(64), .mshrsz(2)) icache (
+    cache #(.init(init), .chn(1), .set(64), .way(4), .blk(64), .mshrsz(2)) icache (
         .clk(clk), .rst(rst | fnci), .rid(0), .flush(flush),
         .s_trsc(ic_trsc_s), .m_trsc(ic_trsc_m),
         .s_rqst(ic_rqst_s), .m_rqst(ic_rqst_m),
@@ -237,10 +237,10 @@ module mmu #(
     always_comb ic_rdat_m = dc_rdat_s;
     always_ff @(posedge clk) ic_rqst_b <= rst | flush[ic_rqst_f] ? 0 : ic_rqst_f;
     always_ff @(posedge clk) ic_addr_b <= ic_addr_f;
-    always_ff @(posedge clk) ic_offset <= ic_addr_s[5:0];
+    always_ff @(posedge clk) ic_offset <= s_ic_addr[5:0];
 
     /* data cache */
-    cache #(.init(init), .chn(1), .set(64), .way(8), .blk(64), .mshrsz(4)) dcache (
+    cache #(.init(init), .chn(1), .set(128), .way(4), .blk(64), .mshrsz(2)) dcache (
         .clk(clk), .rst(rst), .rid(8'b0000_0010), .flush(flush),
         .s_trsc(dc_trsc_s), .m_trsc(dc_trsc_m),
         .s_rqst(dc_rqst_s), .m_rqst(dc_rqst_m),

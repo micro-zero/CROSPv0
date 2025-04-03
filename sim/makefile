@@ -5,7 +5,13 @@
 # parameters
 CPUFREQ = 20000000
 TBFREQ  = 10000000
-PWD     = 4
+FWD     = 2
+DWD     = 2
+RWD     = 2
+IWD     = 3
+EWD     = 2
+CWD     = 2
+MWD     = 1
 INITRD  = be000000 # same as in DTB
 RST_PC  = 81fff000
 DTBADDR = 81ffe000 # limited to 4KB
@@ -22,7 +28,9 @@ CLINT   = 02000000
 # Verilator variables
 MAKE = make -j8
 CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
-	-I.vcore -DRST_PC="0x$(RST_PC)" -DDCBASE="0x$(DCBASE)" -DPWD="$(PWD)" \
+	-I.vcore -DRST_PC="0x$(RST_PC)" -DDCBASE="0x$(DCBASE)" \
+		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) -DIWD=$(IWD) \
+		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
 		-DTOHOST="0x$(TOHOST)" -DFRHOST="0x$(FRHOST)" -DUART="0x$(UART)" \
 	-I.intc -DCLINT="0x$(CLINT)" -DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
@@ -104,7 +112,9 @@ all: main
 .vcore : $(VCORE_SV) $(VCORE_H)
 	$(RM) -r .vcore
 	verilator $(VERILATOR_FLAGS) $(VCORE_SV) -lib-create vcore -top-module vcore -Mdir .vcore \
-		-Grst_pc="32'h$(RST_PC)" -Gdcbase="64'h$(DCBASE)" -Gpwd="$(PWD)" \
+		-Grst_pc="32'h$(RST_PC)" -Gdcbase="64'h$(DCBASE)" \
+		-Gfwd=$(FWD) -Gdwd=$(DWD) -Grwd=$(RWD) -Giwd=$(IWD) \
+		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD) \
 		-Gtohost="64'h$(TOHOST)" -Gfrhost="64'h$(FRHOST)" \
 		-Guart="64'h$(UART)" -Gclint="64'h$(CLINT)"
 	$(MAKE) -C .vcore -f Vvcore.mk

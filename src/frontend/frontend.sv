@@ -8,17 +8,17 @@
 import types::*;
 
 module frontend #(
-    parameter init   = 1,            // initialize RAM
-    parameter rst_pc = 32'hc0000000, // PC on reset
-    parameter fwd   = 4,             // fetch width
-    parameter cwd   = 4,             // commit width
-    parameter cbsz  = 64,            // cache block size to avoid fetch beyond cache line
-    parameter fqsz  = 16,            // instruction fetch queue size
-    parameter ftqsz = 8,             // fetch target queue size
-    parameter fnum  = 4,             // fetch number in half-words
-    parameter rassz = 8,             // return address stack size
-    parameter phtsz = 4096,          // PHT size
-    parameter btbsz = 512            // BTB size
+    parameter init,   // initialize RAM
+    parameter rst_pc, // PC on reset
+    parameter fwd,    // fetch width
+    parameter cwd,    // commit width
+    parameter cbsz,   // cache block size to avoid fetch beyond cache line
+    parameter fqsz,   // instruction fetch queue size
+    parameter ftqsz,  // fetch target queue size
+    parameter fnum,   // fetch number in half-words
+    parameter rassz,  // return address stack size
+    parameter phtsz,  // PHT size
+    parameter btbsz   // BTB size
 )(
     input  logic clk,
     input  logic rst,
@@ -193,15 +193,15 @@ module frontend #(
     end
 
     /* generate instructions */
-    fet_bundle_t [fwd-1:0] result; // generation results
-    logic [7:0] fet_pos[fwd:0];    // position in `fdata` of each instruction
-    logic [$clog2(fwd):0] fet_num; // number of successfully fetched instruction in current cycle
-    logic [fwd:0][63:0] pc;        // extracted program counter
-    logic [fwd-1:0][31:0] ir;      // the instructions ready to output
-    logic [fwd-1:0] valid;         // valid bits of extracted instructions
-    logic [fwd-1:0] incomp;        // incomplete instruction fetch occurs
-    logic [fwd-1:0] call, ret;     // call and return signal
-    logic [fwd-1:0][64:0] br;      // predicted as instruction flow break
+    fet_bundle_t [fwd-1:0] result;     // generation results
+    logic [7:0] fet_pos[fwd:0];        // position in `fdata` of each instruction
+    logic [$clog2(fwd+1)-1:0] fet_num; // number of successfully fetched instruction in current cycle
+    logic [fwd:0][63:0] pc;            // extracted program counter
+    logic [fwd-1:0][31:0] ir;          // the instructions ready to output
+    logic [fwd-1:0] valid;             // valid bits of extracted instructions
+    logic [fwd-1:0] incomp;            // incomplete instruction fetch occurs
+    logic [fwd-1:0] call, ret;         // call and return signal
+    logic [fwd-1:0][64:0] br;          // predicted as instruction flow break
     always_comb begin
         fet_num = 0;
         for (int i = 0; i < fwd; i++)
@@ -209,7 +209,7 @@ module frontend #(
     end
     always_comb begin
         fet_pos[0] = 0;
-        /* recursion calculation of instruction positions in data */
+        /* recursive calculation of instruction positions in data */
         for (int i = 1; i <= fwd; i++)
             fet_pos[i] = fet_pos[i-1] + (&fdata[fet_pos[i-1]][1:0] ? 2 : 1);
     end

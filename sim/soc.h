@@ -4,8 +4,8 @@
 #include <verilated_vcd_c.h>
 #include <queue>
 
-#ifndef PWD
-#define PWD 4
+#ifndef CWD
+#define CWD 4
 #endif
 #ifndef INITRD
 #define INITRD 0xfe60fe00

@@ -88,7 +88,7 @@ axidev &verifcore::operator<=(const axiport_t &ap)
  */
 verifcore &verifcore::operator>>(cmts_t &cmts)
 {
-    for (int i = 0; i < PWD; i++)
+    for (int i = 0; i < CWD; i++)
         if (dut.cmt[i])
             cmts.push({.cycle = cycle,
                        .time = dut.cmt_mtime,
@@ -125,7 +125,7 @@ verifcore &verifcore::operator>>(cmts_t &cmts)
  */
 verifcore &verifcore::operator>>(dels_t &dels)
 {
-    for (int i = 0; i < PWD; i++)
+    for (int i = 0; i < CWD; i++)
         if (dut.del_gprw[i])
             dels.gprs.push({.w = 1, .a = dut.del_gpra[i], .v = dut.del_gprv[i]});
     if (dut.del_memw)

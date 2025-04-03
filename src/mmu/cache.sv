@@ -234,8 +234,8 @@ module cache #(
     end
 
     /* slave interface */
-    always_comb for (int i = 0; i < chn; i++)
-        mshr_rej[i] = ~set_hitpos[i][$clog2(way)] & ~mshr_in[i][$clog2(mshrsz)] & ~miss_under_miss[i];
+    always_comb for (int i = 0; i < chn; i++) mshr_rej[i] = ~set_hitpos[i][$clog2(way)] &
+        ~mshr_in[i][$clog2(mshrsz)] & ~|b_trsc[i] & ~miss_under_miss[i];
     always_comb begin
         miss_under_miss = 0;
         for (int i = 0; i < chn; i++) begin

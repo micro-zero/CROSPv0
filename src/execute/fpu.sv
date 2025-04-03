@@ -29,10 +29,9 @@ function logic [31:0] double2single(input logic [63:0] d, input logic [2:0] rm);
 endfunction
 
 module fpu #(
-    parameter iwd = 4,  // issue width
-    parameter ewd = 4,  // execution width
-    parameter eqsz = 8, // execution queue size
-    parameter opsz = 64 // operation ID size
+    parameter iwd,  // issue width
+    parameter ewd,  // execution width
+    parameter opsz  // operation ID size
 )(
     input  logic clk,
     input  logic rst,
@@ -50,6 +49,7 @@ module fpu #(
     endfunction
 
     /* register read buffer */
+    localparam eqsz = 2 * (1 << $clog2(ewd));
     logic [$clog2(eqsz)-1:0] rr_front;
     logic [$clog2(eqsz):0] rr_num, rr_in, rr_out;
     logic [eqsz-1:0][15:0] rr_opid;
