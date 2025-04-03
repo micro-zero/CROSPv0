@@ -33,33 +33,45 @@ CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
 		-DTOHOST="0x$(TOHOST)" -DFRHOST="0x$(FRHOST)" -DUART="0x$(UART)" \
 	-I.intc -DCLINT="0x$(CLINT)" -DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
+	-I.sdc \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
-VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 -I../src/common
-VCORE_H  = ../src/common/types.sv
+VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 \
+	-I../../src/common -I../../src/soc/axi_sdc
+VCORE_H  = ../../src/common/types.sv
 VCORE_SV = \
-	../src/common/mwpram.sv \
-	../src/common/firstk.sv \
-	../src/frontend/pcgen.sv \
-	../src/frontend/frontend.sv \
-	../src/decoder/ci2i.sv \
-	../src/decoder/decoder.sv \
-	../src/rename/rename.sv \
-	../src/issue/issue.sv \
-	../src/execute/alu.sv \
-	../src/execute/mul.sv \
-	../src/execute/div.sv \
-	../src/execute/fpu.sv \
-	../src/execute/lsu.sv \
-	../src/execute/execute.sv \
-	../src/commit/prf.sv \
-	../src/commit/csr.sv \
-	../src/commit/commit.sv \
-	../src/mmu/tlb.sv \
-	../src/mmu/cache.sv \
-	../src/mmu/mmu.sv \
-	../src/soc/crosplite.sv \
+	../../src/common/mwpram.sv \
+	../../src/common/firstk.sv \
+	../../src/frontend/pcgen.sv \
+	../../src/frontend/frontend.sv \
+	../../src/decoder/ci2i.sv \
+	../../src/decoder/decoder.sv \
+	../../src/rename/rename.sv \
+	../../src/issue/issue.sv \
+	../../src/execute/alu.sv \
+	../../src/execute/mul.sv \
+	../../src/execute/div.sv \
+	../../src/execute/fpu.sv \
+	../../src/execute/lsu.sv \
+	../../src/execute/execute.sv \
+	../../src/commit/prf.sv \
+	../../src/commit/csr.sv \
+	../../src/commit/commit.sv \
+	../../src/mmu/tlb.sv \
+	../../src/mmu/cache.sv \
+	../../src/mmu/mmu.sv \
+	../../src/soc/crosplite.sv \
 	vcore.sv
-INTC_SV = ../src/soc/intc.sv
+INTC_SV = ../../src/soc/intc.sv
+SDC_SV = \
+	../../src/soc/axi_sdc/axi_sd_fifo.v \
+	../../src/soc/axi_sdc/axi_sd_fifo_filler.v \
+	../../src/soc/axi_sdc/sd_cmd_master.v \
+	../../src/soc/axi_sdc/sd_data_master.v \
+	../../src/soc/axi_sdc/sd_cmd_serial_host.v \
+	../../src/soc/axi_sdc/sd_data_serial_host.v \
+	../../src/soc/axi_sdc/sd_data_xfer_trig.v \
+	../../src/soc/axi_sdc/axi_sdc_controller.v \
+	../../src/soc/sdc.sv
 
 # Scripts
 define RVTESTS_SCRIPT
@@ -92,7 +104,7 @@ define RVTESTS_SCRIPT
 endef
 define HEXTESTS_SCRIPT
 	err=0
-	for file in ../util/code/hex/*.hex; do
+	for file in ../../util/code/hex/*.hex; do
 		./main -s -hex $$file >/dev/null 2>&1
 		exitcode=$$?
 		if [ $$exitcode -ne 0 ]; then
@@ -125,6 +137,11 @@ all: main
 		-Gclint="64'h$(CLINT)" -Gcpufreq="64'd$(CPUFREQ)" -Gtbfreq="64'd$(TBFREQ)"
 	$(MAKE) -C .intc -f Vintc.mk
 
+.sdc : $(SDC_SV)
+	$(RM) -r .sdc
+	verilator $(VERILATOR_FLAGS) $(SDC_SV) -lib-create sdc -top-module sdc -Mdir .sdc
+	$(MAKE) -C .sdc -f Vsdc.mk
+
 verif.o : verif.h soc.h
 
 soc.o : .vcore .intc verif.h soc.h
@@ -132,7 +149,7 @@ soc.o : .vcore .intc verif.h soc.h
 main.o : .vcore .intc verif.h soc.h
 
 main : verif.o soc.o main.o
-	$(CXX) -O2 verif.o soc.o main.o .vcore/libvcore.a .intc/libintc.a -o main
+	$(CXX) -O2 verif.o soc.o main.o .vcore/libvcore.a .intc/libintc.a .sdc/libsdc.a -o main
 
 rv : main
 	@bash -c "$$RVTESTS_SCRIPT"
@@ -141,8 +158,8 @@ hex : main
 	@bash -c "$$HEXTESTS_SCRIPT"
 
 pk : main
-	@make -C ../util/dt >/dev/null
-	@./main -s -dtb ../util/dt/spike.dtb $$RISCV/riscv64-unknown-elf/bin/pk $(PKARG)
+	@make -C ../../util/dt >/dev/null
+	@./main -s -dtb ../../util/dt/spike.dtb $$RISCV/riscv64-unknown-elf/bin/pk $(PKARG)
 
 sim : sim.o verif.o
 	$(CXX) -O2 sim.o verif.o -o sim

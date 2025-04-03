@@ -30,7 +30,7 @@ The source files are listed below:
 ## Build
 
 The simulation uses Verilator, and for testing, RISC-V
-toolchain is also recommanded to be installed. A pre-built
+toolchain is also recommended to be installed. A pre-built
 docker image can be found at
 [dockerhub](https://hub.docker.com/r/microzero/riscv-sim). Run
 ```
@@ -55,7 +55,7 @@ There are four steps in current verification flow.
 
 1. Hex code test, run `make hex` to verify all hex codes.
 2. RV standard test, run `make rv` to verify all rv codes.
-3. Proxy kernal test, run `make pk PKARG="..."` to run PK.
+3. Proxy kernel test, run `make pk PKARG="..."` to run PK.
 4. Buildroot test.
 
 The above procedure is related to three types of initializing
@@ -132,56 +132,3 @@ make pk PKARG="../util/code/user/arg hello world"
 ```
 for example to run code with arguments specified in `PKARG` in
 user mode and virtual address space.
-
-### Buildroot test
-
-First, we need to build Buildroot images. Run
-```
-git clone https://github.com/buildroot/buildroot.git
-```
-and checkout to version 2024.5. The version thereafter seems to
-has issue with HTIF console protocol in spike configuration.
-After RISC-V toolchain and Buildroot prerequisites are properly
-installed, run
-```
-make spike_riscv64_defconfig
-```
-to generate a default spike configuration file. Then run
-```
-make menuconfig
-```
-in an x11 display environment or just edit the configuration to
-modify instruction set to IMAC (before floating-point operations
-are fully supported) and add some packages like coremark and
-dhrystone. After that, run
-```
-make -j32 FORCE_UNSAFE_CONFIGURE=1
-```
-to build images and this may take some time.
-
-To run Buildroot image, we should bypass HTIF registers to
-handle console requests. Run
-```
-make TOHOST=800421b8 FRHOST=800421b0 -j8
-```
-for example to build simulation with a dual-issue core.
-
-After images and simulation program are built, run
-```
-./main -dump path-to-example.img -s \
-    -dtb     ../util/dt/spike.dtb \
-    -initrd  path-to-example.cpio \
-    -elf     path-to-example.elf
-```
-to create initial memory image using `-dump` flag and boot OS.
-If we already have this image, alternatively we can simply run
-```
-./main -s -bin path-to-example.img 2>/dev/null
-```
-The `-s` is for simualtor checking. Output from code is
-redirected to `stdout` even when the program issuing a write
-system call to other file descriptor, meanwhlile the output
-from simulation program is redirected to `stderr` including log
-and debug information. Users can make use of this to separate
-or hide logs by redirect `stderr` to other files such as
-`/dev/null`.
