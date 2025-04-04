@@ -3,8 +3,8 @@
 # Execute in docker.io/microzero/riscv-sim:verilator
 
 # parameters
-CPUFREQ = 20000000
-TBFREQ  = 10000000
+CPUFREQ = 1000000
+TBFREQ  = 500000
 FWD     = 2
 DWD     = 2
 RWD     = 2
@@ -15,15 +15,11 @@ MWD     = 1
 INITRD  = be000000 # same as in DTB
 RST_PC  = 81fff000
 DTBADDR = 81ffe000 # limited to 4KB
-ifndef TOHOST
-	TOHOST = 0
-endif
-ifndef FRHOST
-	FRHOST = 0
-endif
 DCBASE  = 80000000
-UART    = 10000000
+UART    = 60010000
+SDC     = 60000000
 CLINT   = 02000000
+BAUD	= 115200
 
 # Verilator variables
 MAKE = make -j8
@@ -31,12 +27,12 @@ CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 	-I.vcore -DRST_PC="0x$(RST_PC)" -DDCBASE="0x$(DCBASE)" \
 		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) -DIWD=$(IWD) \
 		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
-		-DTOHOST="0x$(TOHOST)" -DFRHOST="0x$(FRHOST)" -DUART="0x$(UART)" \
+		-DUART="0x$(UART)" -DSDC="0x$(SDC)" \
 	-I.intc -DCLINT="0x$(CLINT)" -DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
-	-I.sdc \
+	-I.uart -I.sdc -DBAUD="$(BAUD)" \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
 VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 \
-	-I../../src/common -I../../src/soc/axi_sdc
+	-I../../src/common -I../../src/soc/axi_uart -I../../src/soc/axi_sdc
 VCORE_H  = ../../src/common/types.sv
 VCORE_SV = \
 	../../src/common/mwpram.sv \
@@ -59,9 +55,10 @@ VCORE_SV = \
 	../../src/mmu/tlb.sv \
 	../../src/mmu/cache.sv \
 	../../src/mmu/mmu.sv \
-	../../src/soc/crosplite.sv \
+	../../src/soc/crospaxi.sv \
 	vcore.sv
 INTC_SV = ../../src/soc/intc.sv
+UART_SV = ../../src/soc/axi_uart/axi_uart.v ../../src/soc/uart.sv
 SDC_SV = \
 	../../src/soc/axi_sdc/axi_sd_fifo.v \
 	../../src/soc/axi_sdc/axi_sd_fifo_filler.v \
@@ -126,9 +123,7 @@ all: main
 	verilator $(VERILATOR_FLAGS) $(VCORE_SV) -lib-create vcore -top-module vcore -Mdir .vcore \
 		-Grst_pc="32'h$(RST_PC)" -Gdcbase="64'h$(DCBASE)" \
 		-Gfwd=$(FWD) -Gdwd=$(DWD) -Grwd=$(RWD) -Giwd=$(IWD) \
-		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD) \
-		-Gtohost="64'h$(TOHOST)" -Gfrhost="64'h$(FRHOST)" \
-		-Guart="64'h$(UART)" -Gclint="64'h$(CLINT)"
+		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD) -Gclint="64'h$(CLINT)"
 	$(MAKE) -C .vcore -f Vvcore.mk
 
 .intc : $(INTC_SV)
@@ -137,6 +132,12 @@ all: main
 		-Gclint="64'h$(CLINT)" -Gcpufreq="64'd$(CPUFREQ)" -Gtbfreq="64'd$(TBFREQ)"
 	$(MAKE) -C .intc -f Vintc.mk
 
+.uart : $(UART_SV)
+	$(RM) -r .uart
+	verilator $(VERILATOR_FLAGS) $(UART_SV) -lib-create uart -top-module uart -Mdir .uart \
+		-Gcpufreq="64'd$(CPUFREQ)" -Gbaud="64'd$(BAUD)"
+	$(MAKE) -C .uart -f Vuart.mk
+
 .sdc : $(SDC_SV)
 	$(RM) -r .sdc
 	verilator $(VERILATOR_FLAGS) $(SDC_SV) -lib-create sdc -top-module sdc -Mdir .sdc
@@ -144,12 +145,13 @@ all: main
 
 verif.o : verif.h soc.h
 
-soc.o : .vcore .intc verif.h soc.h
+soc.o : .vcore .intc .uart .sdc verif.h soc.h
 
-main.o : .vcore .intc verif.h soc.h
+main.o : .vcore .intc .uart .sdc verif.h soc.h
 
 main : verif.o soc.o main.o
-	$(CXX) -O2 verif.o soc.o main.o .vcore/libvcore.a .intc/libintc.a .sdc/libsdc.a -o main
+	$(CXX) -O2 verif.o soc.o main.o -o main \
+		.vcore/libvcore.a .intc/libintc.a .uart/libuart.a .sdc/libsdc.a
 
 rv : main
 	@bash -c "$$RVTESTS_SCRIPT"

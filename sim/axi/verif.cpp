@@ -69,18 +69,16 @@ memory::memory(const memory &b) { *this = b; }
  * @param entry entry code position
  * @param dtbaddr device tree base address
  * @param initrdaddr initramdisk base address
- * @param uartaddr UART-lite base address
  * @return error string, NULL if successful
  */
 const char *memory::init(const char *fname, const char *dtb, const char *initrd,
                          uint8_t ftype, std::vector<const char *> args, uint64_t entry,
-                         uint64_t dtbaddr, uint64_t initrdaddr, uint64_t uartaddr)
+                         uint64_t dtbaddr, uint64_t initrdaddr)
 {
     this->args = args;
     this->entry = entry;
     this->dtbaddr = dtbaddr;
     this->initrdaddr = initrdaddr;
-    this->uartaddr = uartaddr;
     this->htifexit = 0;
     if (ftype == MEMINIT_ELF)
     {
@@ -224,7 +222,6 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
         fclose(fp);
     }
     this->ui64(htifaddr.fromhost) = this->ui64(htifaddr.tohost) = 0;
-    this->ui64(uartaddr) = this->ui64(uartaddr + 1) = 0;
     return NULL;
 }
 
@@ -440,7 +437,6 @@ void memory::checkpoint(const char *fn)
     fwrite(&hexsz, sizeof(hexsz), 1, fp);
     fwrite(&dtbaddr, sizeof(dtbaddr), 1, fp);
     fwrite(&initrdaddr, sizeof(initrdaddr), 1, fp);
-    fwrite(&uartaddr, sizeof(uartaddr), 1, fp);
     fwrite(&htifaddr, sizeof(htifaddr), 1, fp);
     buf = args.size();
     fwrite(&buf, sizeof(buf), 1, fp);
@@ -513,7 +509,6 @@ int memory::restore(const char *fn)
         fread(&hexsz, sizeof(hexsz), 1, fp) < 0 ||
         fread(&dtbaddr, sizeof(dtbaddr), 1, fp) < 0 ||
         fread(&initrdaddr, sizeof(initrdaddr), 1, fp) < 0 ||
-        fread(&uartaddr, sizeof(uartaddr), 1, fp) < 0 ||
         fread(&htifaddr, sizeof(htifaddr), 1, fp) < 0 ||
         fread(&buf, sizeof(buf), 1, fp) < 0)
         return -1;
@@ -607,8 +602,6 @@ void memory::posedge()
     }
     if (axiport.wvalid & axiport.wready)
     {
-        if (axibuff.awaddr == uartaddr) // UART-lite Rx/Tx FIFO
-            putchar((uint8_t)(axiport.wdata >> 32)), fflush(stdout);
         for (int i = 0; i < 8; i++)
             if ((axiport.wstrb >> i) & 1)
                 this->ui8(axibuff.awaddr + wbursti * 8 + i) = uint8_t(axiport.wdata >> 8 * i);
@@ -629,17 +622,6 @@ void memory::posedge()
     axiport.rvalid = rbursti < axibuff.arlen;
     axiport.rlast = rbursti == axibuff.arlen - 1;
     axiport.rdata = this->ui64(axibuff.araddr + rbursti * 8);
-    char ch;
-    static std::queue<char> chbuf;
-#ifdef FRHOST
-    if (FRHOST && (ch = nbgetchar()) != EOF)
-        chbuf.push(ch);
-#endif
-    if (axibuff.araddr == uartaddr) // UART-lite Rx/Tx FIFO
-        if (!chbuf.empty())
-            axiport.rdata = chbuf.front(), chbuf.pop();
-    if (axibuff.araddr == uartaddr + 8) // UART-lite status
-        axiport.rdata = !chbuf.empty();
     axiport.bvalid = axibuff.bvalid;
 }
 

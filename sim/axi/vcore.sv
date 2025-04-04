@@ -27,10 +27,7 @@ module vcore #(
     parameter cwd,
     parameter mwd,
     parameter rst_pc,
-    parameter tohost,
-    parameter frhost,
     parameter dcbase,
-    parameter uart,
     parameter clint
 )(
     input  logic        clk,
@@ -143,8 +140,8 @@ module vcore #(
     /* instantiate core with direct memory interface */
     logic [63:0] dbg_cycle, dbg_pc0,dbg_pc1;
     logic  [7:0] dbg_axi_stt, dbg_axi_req;
-    crosplite #(.fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd),
-        .rst_pc(rst_pc), .dcbase(dcbase), .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
+    crospaxi #(.fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd),
+        .rst_pc(rst_pc), .dcbase(dcbase)) inst(
         clk, rst, mip_ext, mtime,
         dbg_cycle, dbg_pc0, dbg_pc1, dbg_axi_stt, dbg_axi_req,
         s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,

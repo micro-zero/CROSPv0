@@ -298,19 +298,19 @@ int main(int argc, char *argv[])
         fprintf(stderr, "\n");
     }
     if (cmd.vcd)
-        fprintf(stderr, "[Info] Recording waveform in files: vcore.vcd, intc.vcd, sdc.vcd\n");
+        fprintf(stderr, "[Info] Recording waveform in files: vcore.vcd, intc.vcd, uart.vcd, sdc.vcd\n");
 
     /* Device registration */
     memory amem;
     verifcore vrcr(cmd.vcd ? "vcore.vcd" : NULL);
     intctl intc(cmd.vcd ? "intc.vcd" : NULL);
+    uartctl uart(cmd.vcd ? "uart.vcd" : NULL);
     sdctl sdc(cmd.vcd ? "sdc.vcd" : NULL);
-    std::vector<axidev *> dev({&amem, &vrcr, &intc, &sdc}); // AXI device references
+    std::vector<axidev *> dev({&amem, &vrcr, &intc, &uart, &sdc}); // AXI device references
     const char *err = 0;
     if (cmd.file) // init memory from file
     {
-        err = amem.init(cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, cmd.args,
-                        RST_PC, DTBADDR, INITRD, UART);
+        err = amem.init(cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, cmd.args, RST_PC, DTBADDR, INITRD);
         if (cmd.dump)
         {
             fprintf(stderr, "[Info] Dumping memory to file: %s\n", cmd.dump);
@@ -326,6 +326,7 @@ int main(int argc, char *argv[])
     else if (amem.restore("amem.save") < 0 || // init memory and DUTs from checkpoint
              vrcr.restore("vcore.save") < 0 ||
              intc.restore("intc.save") < 0 ||
+             uart.restore("uart.save") < 0 ||
              sdc.restore("sdc.save") < 0)
         err = "[Error] Failed to recover from checkpoint\n";
     if (err)
@@ -388,8 +389,8 @@ int main(int argc, char *argv[])
                     slave = &intc;
                 else if (addr >= SDC && addr < SDC + 0x10000)
                     slave = &sdc;
-                else if (addr >= UART && addr < UART + 0x10)
-                    ; // function proxied by abstract memory
+                else if (addr >= UART && addr < UART + 0x10000)
+                    slave = &uart;
                 else if (vap.awvalid & addr < DCBASE)
                     fprintf(stderr, "[Warning] Writing to unregistered address %lx\n", addr);
             }
@@ -398,8 +399,20 @@ int main(int argc, char *argv[])
         {
             *slave << *master, *master <= *slave; // synchronization between AXI objects
             axiport_t ap = *master;
-            if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && ap.rlast)
-                master = slave = 0; // current transaction finished
+            if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && ap.rlast) // current transaction finished
+                master = slave = 0;
+            static uint8_t output = 0; // implication of output operation by load a low address
+            static uint64_t oaddr;
+            if (ap.arvalid && ap.arready && ap.araddr < DCBASE)
+                output = 1, oaddr = ap.araddr;
+            if (output && ap.rvalid && ap.rready && ap.rlast)
+            {
+                output = 0;
+                if (oaddr >= SDC && oaddr < SDC + 0x10000) // synchronize data in simulator
+                    sim.mem.ui32(oaddr) = ap.rdata;
+                else if (oaddr >= UART && oaddr < UART + 0x10000)
+                    sim.mem.ui32(oaddr) = ap.rdata;
+            }
         }
         vrcr.scrqst = amem.scrqst; // VCORE -- MEM
         vrcr.scaddr = amem.scaddr;
@@ -550,6 +563,7 @@ int main(int argc, char *argv[])
             vrcr.checkpoint("vcore.save");
             intc.checkpoint("intc.save");
             sdc.checkpoint("sdc.save");
+            uart.checkpoint("uart.save");
             checkpoint(cycle, instret, sim, cmts, dels, master, slave, "main.save", dev);
             fprintf(stderr, "[Info] Checkpoint recorded [cycle: %ld  pc: 0x%lx  ir: 0x%lx]\n",
                     cycle, checkpc, checkir);

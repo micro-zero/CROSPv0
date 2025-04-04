@@ -2,6 +2,7 @@
 #include "Vvcore.h"
 #include "Vintc.h"
 #include "Vsdc.h"
+#include "Vuart.h"
 #include <verilated_vcd_c.h>
 #include <queue>
 
@@ -20,20 +21,23 @@
 #ifndef DCBASE
 #define DCBASE 0x80000000
 #endif
-#ifndef UART
-#define UART 0x10000000
-#endif
 #ifndef CLINT
 #define CLINT 0x02000000
 #endif
 #ifndef SDC
 #define SDC 0x60000000
 #endif
+#ifndef UART
+#define UART 0x60010000
+#endif
 #ifndef CPUFREQ
-#define CPUFREQ 20000000
+#define CPUFREQ 1000000
 #endif
 #ifndef TBFREQ
-#define TBFREQ 10000000
+#define TBFREQ 500000
+#endif
+#ifndef BAUD
+#define BAUD 115200
 #endif
 
 typedef struct
@@ -128,6 +132,33 @@ public:
     operator axiport_t() const;
     axidev &operator<<(const axiport_t &ap);
     intctl &operator>>(dels_t &dels);
+    void reset(uint8_t value);
+    void negedge();
+    void posedge();
+    void record();
+    void checkpoint(const char *fn);
+    int restore(const char *fn);
+};
+
+/**
+ *  UART controller
+ *  ------------------
+ *  The SD card controller is implemented by verilog.
+ */
+
+class uartctl : public axidev
+{
+private:
+    uint64_t st, cycle; // simulation time and cycle
+    Vuart dut;          // design under test
+    VerilatedVcdC *vcd; // trace pointer
+    uint64_t div, cnum; // cycle division and number from start bit
+    uint8_t buf;        // character state and buffer
+public:
+    uartctl(const char *fnvcd = 0);
+    ~uartctl();
+    operator axiport_t() const;
+    axidev &operator<<(const axiport_t &ap);
     void reset(uint8_t value);
     void negedge();
     void posedge();

@@ -594,3 +594,177 @@ int sdctl::restore(const char *fn)
     delete[] name;
     return 0;
 }
+
+/*-----------------------------------------------------------*\
+|*                      UART controller                      *|
+\*-----------------------------------------------------------*/
+
+/**
+ * @brief Constructor function of UART controller
+ * @param fnvcd filename of waveform
+ * @param fnsave filename of saved checkpoint
+ */
+uartctl::uartctl(const char *fnvcd)
+{
+    st = cycle = 0;
+    div = CPUFREQ / BAUD;
+    cnum = (uint64_t)-1;
+    buf = 0;
+    vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
+    if (vcd)
+    {
+        Verilated::traceEverOn(true);
+        dut.trace(vcd, 5);
+        vcd->open(fnvcd);
+    }
+}
+
+/**
+ * @brief Destructor of UART controller
+ */
+uartctl::~uartctl()
+{
+    if (vcd)
+        vcd->close();
+    delete vcd;
+}
+
+/**
+ * @brief Get AXI port signals sending to master
+ * @return AXI port values
+ */
+uartctl::operator axiport_t() const
+{
+    axiport_t ap;
+    ap.arid = 0;
+    ap.awid = 0;
+    ap.awready = dut.s_axi_awready;
+    ap.arready = dut.s_axi_arready;
+    ap.wready = dut.s_axi_wready;
+    ap.rvalid = dut.s_axi_rvalid;
+    ap.rresp = dut.s_axi_rresp;
+    ap.rdata = dut.s_axi_rdata;
+    ap.rlast = 1;
+    ap.bvalid = dut.s_axi_bvalid;
+    ap.bresp = dut.s_axi_bresp;
+    return ap;
+}
+
+/**
+ * @brief Set values on AXI port from master
+ * @param ap data of AXI port from master
+ * @return the object
+ */
+axidev &uartctl::operator<<(const axiport_t &ap)
+{
+    dut.s_axi_awvalid = ap.awvalid;
+    dut.s_axi_awaddr = ap.awaddr;
+    dut.s_axi_arvalid = ap.arvalid;
+    dut.s_axi_araddr = ap.araddr;
+    dut.s_axi_wvalid = ap.wvalid;
+    dut.s_axi_wdata = ap.wdata;
+    dut.s_axi_rready = ap.rready;
+    dut.s_axi_bready = ap.bready;
+    return *this;
+}
+
+/**
+ * @brief Set reset signal
+ * @param value value of rst to set
+ */
+void uartctl::reset(uint8_t value) { dut.rst = value; }
+
+/**
+ * @brief Do clock negedge
+ */
+void uartctl::negedge() { dut.clk = 0, dut.eval(), st++; }
+
+/**
+ * @brief Do clock posedge
+ */
+void uartctl::posedge()
+{
+    uint8_t txold = dut.TxD;
+    dut.clk = 1, dut.eval(), st++, cycle++;
+    if (cnum == (uint64_t)-1 && txold && !dut.TxD) // idle and negedge
+    {
+        cnum = 0; // receive start bit
+        buf = 0;
+    }
+    if (cnum != -1) // receiving and counting
+        cnum++;
+    for (int i = 0; i < 10; i++)
+        if (cnum == i * div + div / 2) // sampling i-th bit
+            if (i == 9)
+                putchar(buf), cnum = -1; // stop bit
+            else if (i > 0)
+                buf |= dut.TxD << i - 1;
+}
+
+/**
+ * @brief Record waveform
+ */
+void uartctl::record()
+{
+    if (vcd)
+        vcd->dump(st);
+}
+
+/**
+ * @brief Save to checkpoint file
+ * @param fn checkpoint file name
+ */
+void uartctl::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn checkpoint file name
+ * @return -1 if error occurs
+ */
+int uartctl::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) < 0 ||
+        fread(&cycle, sizeof(cycle), 1, fp) < 0)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
+}

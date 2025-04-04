@@ -487,7 +487,7 @@ module lsu #(
                 lq_trans[$clog2(lqsz)'(dt_resp[i])] <= 1;
                 if (ldpf[i]) begin
                     lq_pgft [$clog2(lqsz)'(dt_resp[i])] <= 1;
-                    lq_chck [$clog2(lqsz)'(dt_resp[i])] <= 1;
+                    lq_chck [$clog2(lqsz)'(dt_resp[i])] <= 2'b11;
                     lq_accsd[$clog2(lqsz)'(dt_resp[i])] <= 1;
                 end
             end
@@ -558,7 +558,7 @@ module lsu #(
                     func_load[i].bits[1:0] == 2'b11 & |lq_vadd_wvalue[i][2:0]) begin
                     lq_misa [lq_waddr[i]] <= 1;
                     lq_trans[lq_waddr[i]] <= 1;
-                    lq_chck [lq_waddr[i]] <= 1;
+                    lq_chck [lq_waddr[i]] <= 2'b11;
                     lq_accsd[lq_waddr[i]] <= 1;
                 end
             end

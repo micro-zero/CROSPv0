@@ -115,7 +115,6 @@ public:
     uint64_t hexsz;                 // hex code size in bytes
     uint64_t dtbaddr;               // device tree storing address
     uint64_t initrdaddr;            // initial ramdisk address
-    uint64_t uartaddr;              // UART-lite base address
     htifaddr_t htifaddr;            // HTIF addresses
     std::vector<const char *> args; // program arguments
     memory *smem;                   // simulation memory pointer
@@ -126,8 +125,7 @@ public:
                      std::vector<const char *> args,
                      uint64_t entry = 0xc0000000,
                      uint64_t dtbaddr = 0xc0001000,
-                     uint64_t initrdaddr = 0xf0000000,
-                     uint64_t uartaddr = 0x10000000);
+                     uint64_t initrdaddr = 0xf0000000);
     ~memory();
     bool add(uint64_t size, uint64_t base);
     bool copy(uint8_t *ptr, uint64_t size, uint64_t base);
