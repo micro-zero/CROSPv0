@@ -399,20 +399,8 @@ int main(int argc, char *argv[])
         {
             *slave << *master, *master <= *slave; // synchronization between AXI objects
             axiport_t ap = *master;
-            if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && ap.rlast) // current transaction finished
-                master = slave = 0;
-            static uint8_t output = 0; // implication of output operation by load a low address
-            static uint64_t oaddr;
-            if (ap.arvalid && ap.arready && ap.araddr < DCBASE)
-                output = 1, oaddr = ap.araddr;
-            if (output && ap.rvalid && ap.rready && ap.rlast)
-            {
-                output = 0;
-                if (oaddr >= SDC && oaddr < SDC + 0x10000) // synchronize data in simulator
-                    sim.mem.ui32(oaddr) = ap.rdata;
-                else if (oaddr >= UART && oaddr < UART + 0x10000)
-                    sim.mem.ui32(oaddr) = ap.rdata;
-            }
+            if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && ap.rlast)
+                master = slave = 0; // current transaction finished
         }
         vrcr.scrqst = amem.scrqst; // VCORE -- MEM
         vrcr.scaddr = amem.scaddr;
@@ -504,7 +492,11 @@ int main(int argc, char *argv[])
                 print(cyc, stt, del);
             if (cmd.sim)
             {
-                delta_t delsim = next(sim);
+                uint8_t lsize;
+                uint64_t laddr;
+                delta_t delsim = next(sim, &lsize, &laddr);
+                if (lsize && laddr < DCBASE) // an output operation
+                    delsim.gprv = del.gprv;  // synchronize with DUT
                 if (delsim.memw >> 4 == 0x8) // DUT does not consider LR as memory change instruction
                 {
                     del.memw = delsim.memw;

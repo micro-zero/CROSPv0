@@ -1169,9 +1169,11 @@ inline delta_t &genx(state_t &state, delta_t &del, uint8_t level, uint64_t cause
 /**
  * @brief calculate a next state
  * @param s the current state
+ * @param plsize pointer of size of load instruction (record for IO synchronization)
+ * @param pladdr pointer of address of load instruction
  * @return a possible delta for next state
  */
-delta_t next(state_t &s)
+delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
 {
     /* initialize */
     delta_t ret;
@@ -1558,6 +1560,10 @@ delta_t next(state_t &s)
             ret.gprv = (int64_t)(int32_t)ret.gprv;
         else if (funct3 == 0b110) // LWU
             ret.gprv = (uint32_t)ret.gprv;
+        if (plsize)
+            *plsize = 1 << ir.range(12, 13);
+        if (pladdr)
+            *pladdr = pa;
         break;
     case 0b0000111: // LOAD-FP
         if (!fs)
@@ -1573,6 +1579,10 @@ delta_t next(state_t &s)
             ret.gprv = s.mem.ui64(pa) | (-1llu << 32);
         else if (funct3 == 0b011) // FLD
             ret.gprv = s.mem.ui64(pa);
+        if (plsize)
+            *plsize = 1 << ir.range(12, 13);
+        if (pladdr)
+            *pladdr = pa;
         break;
     case 0b0001111: // MISC-MEM
         break;
@@ -1649,6 +1659,10 @@ delta_t next(state_t &s)
             ret.mema = pa;
             if (funct3 == 0b010) // LR.W
                 ret.gprv = (int64_t)(int32_t)ret.gprv;
+            if (plsize)
+                *plsize = 1 << ir.range(12, 13);
+            if (pladdr)
+                *pladdr = pa;
             break;
         case 0b00011: // SC
             if (va >> (funct3 & 3) << (funct3 & 3) != va)
@@ -1709,6 +1723,10 @@ delta_t next(state_t &s)
                 ret.memv = rs2 > ret.gprv ? (uint64_t)rs2 : ret.gprv;
             if (ret.memw < 8)
                 ret.memv &= ~((uint64_t)-1 << (8 * ret.memw));
+            if (plsize)
+                *plsize = 1 << ir.range(12, 13);
+            if (pladdr)
+                *pladdr = pa;
             break;
         }
         break;

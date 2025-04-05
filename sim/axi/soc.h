@@ -176,9 +176,15 @@ public:
 class sdctl : public axidev
 {
 private:
-    uint64_t st, cycle; // simulation time and cycle
-    Vsdc dut;           // design under test
-    VerilatedVcdC *vcd; // trace pointer
+    uint64_t st, cycle;  // simulation time and cycle
+    Vsdc dut;            // design under test
+    VerilatedVcdC *vcd;  // trace pointer
+    uint64_t cnum;       // command number from start bit
+    uint8_t cmdtk[47];   // command token
+    uint64_t rnum, rmax; // response number from start bit
+    uint8_t restk[136];  // response token
+    uint8_t cstt;        // card state
+    uint16_t rca;        // relative card address
 public:
     sdctl(const char *fnvcd = 0);
     ~sdctl();

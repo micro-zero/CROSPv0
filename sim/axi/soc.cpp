@@ -454,6 +454,8 @@ sdctl::sdctl(const char *fnvcd)
 {
     st = cycle = 0;
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
+    cnum = rnum = rmax = (uint64_t)-1;
+    cstt = 0;
     if (vcd)
     {
         Verilated::traceEverOn(true);
@@ -515,7 +517,12 @@ axidev &sdctl::operator<<(const axiport_t &ap)
  * @brief Set reset signal
  * @param value value of rst to set
  */
-void sdctl::reset(uint8_t value) { dut.rst = value; }
+void sdctl::reset(uint8_t value)
+{
+    dut.rst = value;
+    dut.sd_cmd_i = 1;
+    dut.sd_dat_i = 0xf;
+}
 
 /**
  * @brief Do clock negedge
@@ -525,7 +532,125 @@ void sdctl::negedge() { dut.clk = 0, dut.eval(), st++; }
 /**
  * @brief Do clock posedge
  */
-void sdctl::posedge() { dut.clk = 1, dut.eval(), st++, cycle++; }
+void sdctl::posedge()
+{
+    uint8_t sclkold = dut.sd_sclk;
+    dut.clk = 1, dut.eval(), st++, cycle++;
+    if (!sclkold && dut.sd_sclk) // posedge sclk
+        if (dut.sd_cmd_t)        // host command input
+        {
+            if (rnum != (uint64_t)-1) // sending and counting
+                dut.sd_cmd_i = restk[rnum++];
+            if (rnum == rmax)
+                rnum = (uint64_t)-1;
+        }
+        else // host command output
+        {
+            if (cnum != (uint64_t)-1) // receiving and counting
+                cmdtk[cnum++] = dut.sd_cmd_o;
+            if (cnum == 47) // stop bit
+            {
+                cnum = (uint64_t)-1;
+                uint8_t cmd = 0, crc7 = 0;
+                uint32_t arg = 0;
+                for (int i = 1; i <= 6; i++)
+                    cmd = (cmd << 1) | cmdtk[i];
+                for (int i = 7; i <= 38; i++)
+                    arg = (arg << 1) | cmdtk[i];
+                for (int i = 39; i <= 45; i++)
+                    crc7 = (crc7 << 1) | cmdtk[i];
+                uint8_t calc = 0;
+                for (int i = 0; i < 39; i++)
+                    calc = ((calc << 1) ^ (cmdtk[i] ^ (calc >> 6)) ^ ((cmdtk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                if (crc7 != calc)
+                    fprintf(stderr, "[Warning] CRC error: CMD=%d ARG=%x CRC7=%x\n", cmd, arg, crc7);
+                if (cmd == 0)
+                    ;
+                else if (cmd == 55 || cmd == 7 && rca == arg >> 16) // R1 response
+                {
+                    rnum = 0;
+                    rmax = 48;
+                    memset(restk, 0, sizeof(restk));
+                    for (int i = 0; i < 4; i++)
+                        restk[27 + i] = (cstt >> 3 - i) & 0x1; // current state
+                    restk[31] = 1;                             // ready for data
+                    restk[34] = 1;                             // APP CMD
+                    for (int i = 0; i < 6; i++)
+                        restk[2 + i] = (cmd >> 5 - i) & 0x1;
+                    restk[47] = 1;
+                    calc = 0;
+                    for (int i = 0; i < 40; i++)
+                        calc = ((calc << 1) ^ (restk[i] ^ (calc >> 6)) ^ ((restk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                    for (int i = 0; i < 7; i++)
+                        restk[40 + i] = (calc >> 6 - i) & 0x1;
+                }
+                else if (cmd == 2) // R2 response
+                {
+                    rnum = 0;
+                    rmax = 136;
+                    memset(restk, 0, sizeof(restk));
+                    for (int i = 0; i < 6; i++)
+                        restk[2 + i] = 1;
+                    restk[135] = 1;
+                }
+                else if (cmd == 41) // R3 response
+                {
+                    rnum = 0;
+                    rmax = 48;
+                    memset(restk, 0, sizeof(restk));
+                    restk[8] = 1; // initialization complete
+                    for (int i = 0; i < 6; i++)
+                        restk[2 + i] = 1;
+                    restk[47] = 1;
+                    for (int i = 0; i < 7; i++)
+                        restk[40 + i] = 1;
+                }
+                else if (cmd == 3) // R6 response
+                {
+                    rnum = 0;
+                    rmax = 48;
+                    rca = arg >> 16;
+                    memset(restk, 0, sizeof(restk));
+                    for (int i = 0; i < 4; i++)
+                        restk[27 + i] = (cstt >> 3 - i) & 0x1; // current state
+                    restk[31] = 1;                             // ready for data
+                    restk[34] = 1;                             // APP CMD
+                    for (int i = 0; i < 6; i++)
+                        restk[2 + i] = (cmd >> 5 - i) & 0x1;
+                    for (int i = 0; i < 16; i++)
+                        restk[8 + i] = (rca >> 15 - i) & 0x1;
+                    restk[47] = 1;
+                    calc = 0;
+                    for (int i = 0; i < 40; i++)
+                        calc = ((calc << 1) ^ (restk[i] ^ (calc >> 6)) ^ ((restk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                    for (int i = 0; i < 7; i++)
+                        restk[40 + i] = (calc >> 6 - i) & 0x1;
+                }
+                else if (cmd == 8) // R7 response
+                {
+                    rnum = 0;
+                    rmax = 48;
+                    memset(restk, 0, sizeof(restk));
+                    for (int i = 0; i < 8; i++)
+                        restk[32 + i] = (arg >> 7 - i) & 0x1; // voltage accepted
+                    for (int i = 0; i < 4; i++)
+                        restk[28 + i] = (arg >> 11 - i) & 0x1; // check pattern
+                    for (int i = 0; i < 6; i++)
+                        restk[2 + i] = (cmd >> 5 - i) & 0x1;
+                    restk[47] = 1;
+                    calc = 0;
+                    for (int i = 0; i < 40; i++)
+                        calc = ((calc << 1) ^ (restk[i] ^ (calc >> 6)) ^ ((restk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                    for (int i = 0; i < 7; i++)
+                        restk[40 + i] = (calc >> 6 - i) & 0x1;
+                }
+                else
+                    fprintf(stderr, "[Warning] Unsupported command: CMD=%d ARG=%x\n", cmd, arg);
+            }
+            if (cnum == (uint64_t)-1 && dut.sd_cmd_o == 0) // start bit
+                cnum = 0;
+        }
+}
 
 /**
  * @brief Record waveform
@@ -560,6 +685,13 @@ void sdctl::checkpoint(const char *fn)
         return;
     fwrite(&st, sizeof(st), 1, fp);
     fwrite(&cycle, sizeof(cycle), 1, fp);
+    fwrite(&cnum, sizeof(cnum), 1, fp);
+    fwrite(&cmdtk, sizeof(cmdtk), 1, fp);
+    fwrite(&rnum, sizeof(rnum), 1, fp);
+    fwrite(&rmax, sizeof(rmax), 1, fp);
+    fwrite(&restk, sizeof(restk), 1, fp);
+    fwrite(&cstt, sizeof(cstt), 1, fp);
+    fwrite(&rca, sizeof(rca), 1, fp);
     fclose(fp);
     delete[] name;
 }
@@ -588,7 +720,14 @@ int sdctl::restore(const char *fn)
     if (!fp)
         return -1;
     if (fread(&st, sizeof(st), 1, fp) < 0 ||
-        fread(&cycle, sizeof(cycle), 1, fp) < 0)
+        fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
+        fread(&cnum, sizeof(cnum), 1, fp) < 0 ||
+        fread(&cmdtk, sizeof(cmdtk), 1, fp) < 0 ||
+        fread(&rnum, sizeof(rnum), 1, fp) < 0 ||
+        fread(&rmax, sizeof(rmax), 1, fp) < 0 ||
+        fread(&restk, sizeof(restk), 1, fp) < 0 ||
+        fread(&cstt, sizeof(cstt), 1, fp) < 0 ||
+        fread(&rca, sizeof(rca), 1, fp) < 0)
         return -1;
     fclose(fp);
     delete[] name;
@@ -734,6 +873,9 @@ void uartctl::checkpoint(const char *fn)
         return;
     fwrite(&st, sizeof(st), 1, fp);
     fwrite(&cycle, sizeof(cycle), 1, fp);
+    fwrite(&div, sizeof(div), 1, fp);
+    fwrite(&cnum, sizeof(cnum), 1, fp);
+    fwrite(&buf, sizeof(buf), 1, fp);
     fclose(fp);
     delete[] name;
 }
@@ -762,7 +904,10 @@ int uartctl::restore(const char *fn)
     if (!fp)
         return -1;
     if (fread(&st, sizeof(st), 1, fp) < 0 ||
-        fread(&cycle, sizeof(cycle), 1, fp) < 0)
+        fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
+        fread(&div, sizeof(div), 1, fp) < 0 ||
+        fread(&cnum, sizeof(cnum), 1, fp) < 0 ||
+        fread(&buf, sizeof(buf), 1, fp) < 0)
         return -1;
     fclose(fp);
     delete[] name;
