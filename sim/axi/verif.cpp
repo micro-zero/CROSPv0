@@ -37,8 +37,10 @@ int64_t bits::sext(int w) const { return ((data >> w - 1) & 1 ? -1ull << w : 0) 
 void bits::write(uint8_t s, uint8_t e, uint64_t x) { (data &= ~((1ull << e - s + 1ull) - 1ull << s)) |= x << s; }
 void bits::write(uint8_t i, uint64_t x) { (data &= ~(1ull << i)) |= x << i; }
 
-axidev &axidev::operator<<(const axiport_t &ap) { return *this; }
-axidev &axidev::operator<=(const axiport_t &ap) { return *this; }
+axiport_t axidev::m() const { return axiport_t{0}; }
+axiport_t axidev::s() const { return axiport_t{0}; }
+axidev &axidev::mset(const axiport_t &ap) { return *this; }
+axidev &axidev::sset(const axiport_t &ap) { return *this; }
 
 /**
  * @brief abstract memory default constructor
@@ -88,7 +90,7 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
         FILE *fp = fopen(fname, "r");
         if (!fp)
             return sprintf(errstr, "[Error] Unable to open file %s\n", fname), errstr;
-        if (fread(&elf_h, sizeof(elf_h), 1, fp) < 0)
+        if (fread(&elf_h, sizeof(elf_h), 1, fp) != 1)
             return sprintf(errstr, "[Error] Fread failed\n"), errstr;
         if (strncmp((char *)elf_h.e_ident, ELFMAG, strlen(ELFMAG)) ||
             elf_h.e_ident[EI_CLASS] != ELFCLASS64)
@@ -100,7 +102,7 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
         /* sections from ELF file */
         Elf64_Shdr *shdr = new (std::nothrow) Elf64_Shdr[elf_h.e_shnum]; // section headers
         fseek(fp, elf_h.e_shoff, SEEK_SET);
-        if (fread(shdr, sizeof(Elf64_Shdr) * elf_h.e_shnum, 1, fp) < 0)
+        if (fread(shdr, sizeof(Elf64_Shdr) * elf_h.e_shnum, 1, fp) != 1)
             return sprintf(errstr, "[Error] Fread failed\n"), errstr;
         for (int i = 0; i < elf_h.e_shnum; i++)
             if (shdr[i].sh_flags & SHF_ALLOC)
@@ -130,7 +132,7 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
                 {
                     Elf64_Sym sym;
                     fseek(fp, shdr[i].sh_offset + j * shdr[i].sh_entsize, SEEK_SET);
-                    if (fread(&sym, sizeof(sym), 1, fp) < 0)
+                    if (fread(&sym, sizeof(sym), 1, fp) != 1)
                         return sprintf(errstr, "[Error] Fread failed\n"), errstr;
                     fseek(fp, shdr[shdr[i].sh_link].sh_offset + sym.st_name, SEEK_SET);
                     if (fscanf(fp, "%1023s", name) <= 0)
@@ -298,7 +300,7 @@ bool memory::load(FILE *fp, uint64_t size, uint64_t base)
 {
     if (!add(size, base))
         return false;
-    if (fread(&(*this)[base], size, 1, fp) < 0)
+    if (fread(&(*this)[base], size, 1, fp) != 1)
         return false;
     return true;
 }
@@ -341,14 +343,14 @@ memory &memory::operator=(const memory &b)
  * @brief Get AXI port values sending to master
  * @return values on AXI port
  */
-memory::operator axiport_t() const { return axiport; }
+axiport_t memory::s() const { return axiport; }
 
 /**
  * @brief Set AXI port values from master
  * @param ap the AXI port values
  * @return self reference
  */
-axidev &memory::operator<<(const axiport_t &ap)
+axidev &memory::sset(const axiport_t &ap)
 {
     axiport.awid = ap.arid;
     axiport.awvalid = ap.awvalid;
@@ -461,72 +463,72 @@ int memory::restore(const char *fn)
     if (!fp)
         return -1;
     uint64_t buf;
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t b, s;
-        if (fread(&b, sizeof(b), 1, fp) < 0 ||
-            fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&b, sizeof(b), 1, fp) != 1 ||
+            fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         add(s, b);
-        if (fread(&this->ui8(b), s, 1, fp) < 0)
+        if (fread(&this->ui8(b), s, 1, fp) != 1)
             return -1;
     }
-    if (fread(&axiport, sizeof(axiport), 1, fp) < 0 ||
-        fread(&axibuff, sizeof(axibuff), 1, fp) < 0 ||
-        fread(&rbursti, sizeof(rbursti), 1, fp) < 0 ||
-        fread(&wbursti, sizeof(wbursti), 1, fp) < 0 ||
-        fread(&scrqstr, sizeof(scrqstr), 1, fp) < 0 ||
-        fread(&mcrqstr, sizeof(mcrqstr), 1, fp) < 0 ||
-        fread(&scaddrr, sizeof(scaddrr), 1, fp) < 0 ||
-        fread(&mctrscr, sizeof(mctrscr), 1, fp) < 0 ||
-        fread(&mcaddrr, sizeof(mcaddrr), 1, fp) < 0 ||
-        fread(&scsent, sizeof(scsent), 1, fp) < 0 ||
-        fread(&thbusy, sizeof(thbusy), 1, fp) < 0 ||
-        fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&axiport, sizeof(axiport), 1, fp) != 1 ||
+        fread(&axibuff, sizeof(axibuff), 1, fp) != 1 ||
+        fread(&rbursti, sizeof(rbursti), 1, fp) != 1 ||
+        fread(&wbursti, sizeof(wbursti), 1, fp) != 1 ||
+        fread(&scrqstr, sizeof(scrqstr), 1, fp) != 1 ||
+        fread(&mcrqstr, sizeof(mcrqstr), 1, fp) != 1 ||
+        fread(&scaddrr, sizeof(scaddrr), 1, fp) != 1 ||
+        fread(&mctrscr, sizeof(mctrscr), 1, fp) != 1 ||
+        fread(&mcaddrr, sizeof(mcaddrr), 1, fp) != 1 ||
+        fread(&scsent, sizeof(scsent), 1, fp) != 1 ||
+        fread(&thbusy, sizeof(thbusy), 1, fp) != 1 ||
+        fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t f;
         uint8_t s;
-        if (fread(&f, sizeof(f), 1, fp) < 0 ||
-            fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&f, sizeof(f), 1, fp) != 1 ||
+            fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         owner[f] = s;
     }
-    if (fread(&scrqst, sizeof(scrqst), 1, fp) < 0 ||
-        fread(&mcrqst, sizeof(mcrqst), 1, fp) < 0 ||
-        fread(&sctrsc, sizeof(sctrsc), 1, fp) < 0 ||
-        fread(&mctrsc, sizeof(mctrsc), 1, fp) < 0 ||
-        fread(&scresp, sizeof(scresp), 1, fp) < 0 ||
-        fread(&mcresp, sizeof(mcresp), 1, fp) < 0 ||
-        fread(&scmesi, sizeof(scmesi), 1, fp) < 0 ||
-        fread(&mcmesi, sizeof(mcmesi), 1, fp) < 0 ||
-        fread(&scaddr, sizeof(scaddr), 1, fp) < 0 ||
-        fread(&mcaddr, sizeof(mcaddr), 1, fp) < 0 ||
-        fread(&entry, sizeof(entry), 1, fp) < 0 ||
-        fread(&hexsz, sizeof(hexsz), 1, fp) < 0 ||
-        fread(&dtbaddr, sizeof(dtbaddr), 1, fp) < 0 ||
-        fread(&initrdaddr, sizeof(initrdaddr), 1, fp) < 0 ||
-        fread(&htifaddr, sizeof(htifaddr), 1, fp) < 0 ||
-        fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&scrqst, sizeof(scrqst), 1, fp) != 1 ||
+        fread(&mcrqst, sizeof(mcrqst), 1, fp) != 1 ||
+        fread(&sctrsc, sizeof(sctrsc), 1, fp) != 1 ||
+        fread(&mctrsc, sizeof(mctrsc), 1, fp) != 1 ||
+        fread(&scresp, sizeof(scresp), 1, fp) != 1 ||
+        fread(&mcresp, sizeof(mcresp), 1, fp) != 1 ||
+        fread(&scmesi, sizeof(scmesi), 1, fp) != 1 ||
+        fread(&mcmesi, sizeof(mcmesi), 1, fp) != 1 ||
+        fread(&scaddr, sizeof(scaddr), 1, fp) != 1 ||
+        fread(&mcaddr, sizeof(mcaddr), 1, fp) != 1 ||
+        fread(&entry, sizeof(entry), 1, fp) != 1 ||
+        fread(&hexsz, sizeof(hexsz), 1, fp) != 1 ||
+        fread(&dtbaddr, sizeof(dtbaddr), 1, fp) != 1 ||
+        fread(&initrdaddr, sizeof(initrdaddr), 1, fp) != 1 ||
+        fread(&htifaddr, sizeof(htifaddr), 1, fp) != 1 ||
+        fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t s;
-        if (fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         char *b = new char[s + 1]; // todo: memory here will leak
         if (!b)
             return -1;
         args.push_back(b);
-        if (fread(b, s, 1, fp) < 0)
+        if (fread(b, s, 1, fp) != 1)
             return -1;
         b[s] = 0;
     }
-    if (fread(&smem, sizeof(smem), 1, fp) < 0 ||
-        fread(&htifexit, sizeof(htifexit), 1, fp) < 0)
+    if (fread(&smem, sizeof(smem), 1, fp) != 1 ||
+        fread(&htifexit, sizeof(htifexit), 1, fp) != 1)
         return -1;
     fclose(fp);
     return 0;
@@ -602,9 +604,14 @@ void memory::posedge()
     }
     if (axiport.wvalid & axiport.wready)
     {
-        for (int i = 0; i < 8; i++)
+        uint8_t sz = axibuff.awsize;
+        for (int i = 0; i < sz; i++)
             if ((axiport.wstrb >> i) & 1)
-                this->ui8(axibuff.awaddr + wbursti * 8 + i) = uint8_t(axiport.wdata >> 8 * i);
+            {
+                this->ui8(axibuff.awaddr + wbursti * sz + i) = uint8_t(axiport.wdata >> 8 * i);
+                if (smem)
+                    smem->ui8(axibuff.awaddr + wbursti * sz + i) = uint8_t(axiport.wdata >> 8 * i);
+            }
         wbursti++;
     }
     if (axiport.wlast || axibuff.awlen == 1)
@@ -621,7 +628,7 @@ void memory::posedge()
     axiport.wready = wbursti < axibuff.awlen;
     axiport.rvalid = rbursti < axibuff.arlen;
     axiport.rlast = rbursti == axibuff.arlen - 1;
-    axiport.rdata = this->ui64(axibuff.araddr + rbursti * 8);
+    axiport.rdata = this->ui64(axibuff.araddr + rbursti * axibuff.arsize);
     axiport.bvalid = axibuff.bvalid;
 }
 

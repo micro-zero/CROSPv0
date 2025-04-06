@@ -97,8 +97,8 @@ public:
     uint64_t &scaddr = dut.s_coh_addr, &mcaddr = dut.m_coh_addr;
     verifcore(const char *fnvcd = 0);
     ~verifcore();
-    operator axiport_t() const;
-    axidev &operator<=(const axiport_t &ap);
+    axiport_t m() const;
+    axidev &mset(const axiport_t &ap);
     verifcore &operator>>(cmts_t &cmts);
     verifcore &operator>>(dels_t &dels);
     verifcore &operator>>(stat_t &stat);
@@ -129,8 +129,8 @@ public:
     uint64_t &int_time = dut.int_time;
     intctl(const char *fnvcd = 0);
     ~intctl();
-    operator axiport_t() const;
-    axidev &operator<<(const axiport_t &ap);
+    axiport_t s() const;
+    axidev &sset(const axiport_t &ap);
     intctl &operator>>(dels_t &dels);
     void reset(uint8_t value);
     void negedge();
@@ -157,8 +157,8 @@ private:
 public:
     uartctl(const char *fnvcd = 0);
     ~uartctl();
-    operator axiport_t() const;
-    axidev &operator<<(const axiport_t &ap);
+    axiport_t s() const;
+    axidev &sset(const axiport_t &ap);
     void reset(uint8_t value);
     void negedge();
     void posedge();
@@ -179,17 +179,24 @@ private:
     uint64_t st, cycle;  // simulation time and cycle
     Vsdc dut;            // design under test
     VerilatedVcdC *vcd;  // trace pointer
+    FILE *img;           // image file pointer
     uint64_t cnum;       // command number from start bit
     uint8_t cmdtk[47];   // command token
     uint64_t rnum, rmax; // response number from start bit
     uint8_t restk[136];  // response token
     uint8_t cstt;        // card state
     uint16_t rca;        // relative card address
+    uint8_t bwd;         // bus width
+    uint32_t blen;       // block length
+    uint8_t dat[4114];   // data buffer
+    uint64_t dnum, dmax; // data numbers
 public:
-    sdctl(const char *fnvcd = 0);
+    sdctl(const char *fnvcd = 0, const char *fnimg = 0);
     ~sdctl();
-    operator axiport_t() const;
-    axidev &operator<<(const axiport_t &ap);
+    axiport_t m() const;
+    axiport_t s() const;
+    axidev &mset(const axiport_t &ap);
+    axidev &sset(const axiport_t &ap);
     void reset(uint8_t value);
     void negedge();
     void posedge();

@@ -21,91 +21,91 @@ int restore(uint64_t &cycle, uint64_t &instret, state_t &sim, cmts_t &cmts, dels
 {
     FILE *fp = fopen(fn, "rb");
     uint64_t buf;
-    if (fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
-        fread(&instret, sizeof(instret), 1, fp) < 0 ||
-        fread(&sim.pc, sizeof(sim.pc), 1, fp) < 0 ||
-        fread(&sim.ir, sizeof(sim.ir), 1, fp) < 0 ||
-        fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&cycle, sizeof(cycle), 1, fp) != 1 ||
+        fread(&instret, sizeof(instret), 1, fp) != 1 ||
+        fread(&sim.pc, sizeof(sim.pc), 1, fp) != 1 ||
+        fread(&sim.ir, sizeof(sim.ir), 1, fp) != 1 ||
+        fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t b, s;
-        if (fread(&b, sizeof(b), 1, fp) < 0 ||
-            fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&b, sizeof(b), 1, fp) != 1 ||
+            fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         sim.mem.add(s, b);
-        if (fread(&sim.mem.ui8(b), s, 1, fp) < 0)
+        if (fread(&sim.mem.ui8(b), s, 1, fp) != 1)
             return -1;
     }
-    if (fread(&sim.level, sizeof(sim.level), 1, fp) < 0 ||
-        fread(&sim.gpr, sizeof(sim.gpr), 1, fp) < 0 ||
-        fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&sim.level, sizeof(sim.level), 1, fp) != 1 ||
+        fread(&sim.gpr, sizeof(sim.gpr), 1, fp) != 1 ||
+        fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t l;
-        if (fread(&l, sizeof(l), 1, fp) < 0)
+        if (fread(&l, sizeof(l), 1, fp) != 1)
             return -1;
         char *s = new (std::nothrow) char[l + 1];
         if (!s)
             return -1;
         s[l] = 0;
-        if (fread(s, l, 1, fp) < 0 ||
-            fread(&sim.csr[s], sizeof(sim.csr[s]), 1, fp) < 0)
+        if (fread(s, l, 1, fp) != 1 ||
+            fread(&sim.csr[s], sizeof(sim.csr[s]), 1, fp) != 1)
             return -1;
         delete[] s;
     }
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t f;
         uint8_t s;
-        if (fread(&f, sizeof(f), 1, fp) < 0 ||
-            fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&f, sizeof(f), 1, fp) != 1 ||
+            fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         sim.rsrv[f] = s;
     }
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         cmt_t c;
-        if (fread(&c, sizeof(c), 1, fp) < 0)
+        if (fread(&c, sizeof(c), 1, fp) != 1)
             return -1;
         cmts.push(c);
     }
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         del_t d;
-        if (fread(&d, sizeof(d), 1, fp) < 0)
+        if (fread(&d, sizeof(d), 1, fp) != 1)
             return -1;
         dels.gprs.push(d);
     }
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         del_t d;
-        if (fread(&d, sizeof(d), 1, fp) < 0)
+        if (fread(&d, sizeof(d), 1, fp) != 1)
             return -1;
         dels.mems.push(d);
     }
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         del_t d;
-        if (fread(&d, sizeof(d), 1, fp) < 0)
+        if (fread(&d, sizeof(d), 1, fp) != 1)
             return -1;
         dels.csrs.push(d);
     }
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     master = (int64_t)buf >= 0 ? dev.at(buf) : NULL;
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     slave = (int64_t)buf >= 0 ? dev.at(buf) : NULL;
     fclose(fp);
@@ -305,7 +305,7 @@ int main(int argc, char *argv[])
     verifcore vrcr(cmd.vcd ? "vcore.vcd" : NULL);
     intctl intc(cmd.vcd ? "intc.vcd" : NULL);
     uartctl uart(cmd.vcd ? "uart.vcd" : NULL);
-    sdctl sdc(cmd.vcd ? "sdc.vcd" : NULL);
+    sdctl sdc(cmd.vcd ? "sdc.vcd" : NULL, "sdc.img");
     std::vector<axidev *> dev({&amem, &vrcr, &intc, &uart, &sdc}); // AXI device references
     const char *err = 0;
     if (cmd.file) // init memory from file
@@ -373,12 +373,16 @@ int main(int argc, char *argv[])
         for (auto d : dev)
             d->posedge();
         for (auto d : dev) // AXI interconnection
-            *d << zero, *d <= zero;
+            d->sset(zero), d->mset(zero);
         if (!master) // search for a transaction request from master
         {
             uint64_t addr;
-            axiport_t vap = vrcr;
-            if (vap.arvalid)
+            axiport_t vap = vrcr.m(), sap = sdc.m();
+            if (sap.arvalid)
+                master = &sdc, addr = sap.araddr;
+            else if (sap.awvalid)
+                master = &sdc, addr = sap.awaddr;
+            else if (vap.arvalid)
                 master = &vrcr, addr = vap.araddr;
             else if (vap.awvalid)
                 master = &vrcr, addr = vap.awaddr;
@@ -391,14 +395,14 @@ int main(int argc, char *argv[])
                     slave = &sdc;
                 else if (addr >= UART && addr < UART + 0x10000)
                     slave = &uart;
-                else if (vap.awvalid & addr < DCBASE)
+                else if (master->m().awvalid & addr < DCBASE)
                     fprintf(stderr, "[Warning] Writing to unregistered address %lx\n", addr);
             }
         }
         if (master) // in-flight transaction
         {
-            *slave << *master, *master <= *slave; // synchronization between AXI objects
-            axiport_t ap = *master;
+            slave->sset(master->m()), master->mset(slave->s()); // synchronization between AXI objects
+            axiport_t ap = master->m();
             if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && ap.rlast)
                 master = slave = 0; // current transaction finished
         }

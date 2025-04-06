@@ -36,7 +36,7 @@ verifcore::~verifcore()
  * @brief Get AXI port signals sending to slave
  * @return AXI port values
  */
-verifcore::operator axiport_t() const
+axiport_t verifcore::m() const
 {
     axiport_t ap;
     ap.awid = dut.m_axi_awid;
@@ -65,7 +65,7 @@ verifcore::operator axiport_t() const
  * @param ap data of AXI port from slave
  * @return the object
  */
-axidev &verifcore::operator<=(const axiport_t &ap)
+axidev &verifcore::mset(const axiport_t &ap)
 {
     dut.m_axi_awready = ap.awready;
     dut.m_axi_arready = ap.arready;
@@ -233,8 +233,8 @@ int verifcore::restore(const char *fn)
     FILE *fp = fopen(name, "rb");
     if (!fp)
         return -1;
-    if (fread(&st, sizeof(st), 1, fp) < 0 ||
-        fread(&cycle, sizeof(cycle), 1, fp) < 0)
+    if (fread(&st, sizeof(st), 1, fp) != 1 ||
+        fread(&cycle, sizeof(cycle), 1, fp) != 1)
         return -1;
     fclose(fp);
     delete[] name;
@@ -277,7 +277,7 @@ intctl::~intctl()
  * @brief Get AXI port signals sending to master
  * @return AXI port values
  */
-intctl::operator axiport_t() const
+axiport_t intctl::s() const
 {
     axiport_t ap;
     ap.arid = dut.s_axi_arid;
@@ -299,7 +299,7 @@ intctl::operator axiport_t() const
  * @param ap data of AXI port from master
  * @return the object
  */
-axidev &intctl::operator<<(const axiport_t &ap)
+axidev &intctl::sset(const axiport_t &ap)
 {
     dut.s_axi_awid = ap.awid;
     dut.s_axi_awvalid = ap.awvalid;
@@ -431,10 +431,10 @@ int intctl::restore(const char *fn)
     FILE *fp = fopen(name, "rb");
     if (!fp)
         return -1;
-    if (fread(&st, sizeof(st), 1, fp) < 0 ||
-        fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
-        fread(&wrec, sizeof(wrec), 1, fp) < 0 ||
-        fread(&raddr, sizeof(raddr), 1, fp) < 0)
+    if (fread(&st, sizeof(st), 1, fp) != 1 ||
+        fread(&cycle, sizeof(cycle), 1, fp) != 1 ||
+        fread(&wrec, sizeof(wrec), 1, fp) != 1 ||
+        fread(&raddr, sizeof(raddr), 1, fp) != 1)
         return -1;
     fclose(fp);
     delete[] name;
@@ -448,14 +448,17 @@ int intctl::restore(const char *fn)
 /**
  * @brief Constructor function of SD card controller
  * @param fnvcd filename of waveform
- * @param fnsave filename of saved checkpoint
+ * @param fnimg filename of disk image
  */
-sdctl::sdctl(const char *fnvcd)
+sdctl::sdctl(const char *fnvcd, const char *fnimg)
 {
     st = cycle = 0;
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
-    cnum = rnum = rmax = (uint64_t)-1;
+    img = fnimg ? fopen(fnimg, "ab+") : NULL;
+    cnum = rnum = rmax = dnum = dmax = (uint64_t)-1;
     cstt = 0;
+    bwd = 1;
+    blen = 512;
     if (vcd)
     {
         Verilated::traceEverOn(true);
@@ -472,13 +475,43 @@ sdctl::~sdctl()
     if (vcd)
         vcd->close();
     delete vcd;
+    if (img)
+        fclose(img);
+}
+
+/**
+ * @brief Get AXI port signals sending to slave
+ * @return AXI port values
+ */
+axiport_t sdctl::m() const
+{
+    axiport_t ap;
+    ap.awid = 0;
+    ap.awvalid = dut.m_axi_awvalid;
+    ap.awaddr = dut.m_axi_awaddr;
+    ap.awburst = dut.m_axi_awburst;
+    ap.awlen = dut.m_axi_awlen;
+    ap.awsize = dut.m_axi_awsize;
+    ap.arid = 0;
+    ap.arvalid = dut.m_axi_arvalid;
+    ap.araddr = dut.m_axi_araddr;
+    ap.arburst = dut.m_axi_arburst;
+    ap.arlen = dut.m_axi_arlen;
+    ap.arsize = dut.m_axi_arsize;
+    ap.wvalid = dut.m_axi_wvalid;
+    ap.wdata = dut.m_axi_wdata;
+    ap.wstrb = dut.m_axi_wstrb;
+    ap.wlast = dut.m_axi_wlast;
+    ap.rready = dut.m_axi_rready;
+    ap.bready = dut.m_axi_bready;
+    return ap;
 }
 
 /**
  * @brief Get AXI port signals sending to master
  * @return AXI port values
  */
-sdctl::operator axiport_t() const
+axiport_t sdctl::s() const
 {
     axiport_t ap;
     ap.arid = 0;
@@ -496,11 +529,30 @@ sdctl::operator axiport_t() const
 }
 
 /**
+ * @brief Set values on AXI port from slave
+ * @param ap data of AXI port from slave
+ * @return the object
+ */
+axidev &sdctl::mset(const axiport_t &ap)
+{
+    dut.m_axi_awready = ap.awready;
+    dut.m_axi_arready = ap.arready;
+    dut.m_axi_wready = ap.wready;
+    dut.m_axi_rvalid = ap.rvalid;
+    dut.m_axi_rresp = ap.rresp;
+    dut.m_axi_rdata = ap.rdata;
+    dut.m_axi_rlast = ap.rlast;
+    dut.m_axi_bvalid = ap.bvalid;
+    dut.m_axi_bresp = ap.bresp;
+    return *this;
+}
+
+/**
  * @brief Set values on AXI port from master
  * @param ap data of AXI port from master
  * @return the object
  */
-axidev &sdctl::operator<<(const axiport_t &ap)
+axidev &sdctl::sset(const axiport_t &ap)
 {
     dut.s_axi_awvalid = ap.awvalid;
     dut.s_axi_awaddr = ap.awaddr;
@@ -537,7 +589,8 @@ void sdctl::posedge()
     uint8_t sclkold = dut.sd_sclk;
     dut.clk = 1, dut.eval(), st++, cycle++;
     if (!sclkold && dut.sd_sclk) // posedge sclk
-        if (dut.sd_cmd_t)        // host command input
+    {
+        if (dut.sd_cmd_t) // host command input
         {
             if (rnum != (uint64_t)-1) // sending and counting
                 dut.sd_cmd_i = restk[rnum++];
@@ -559,16 +612,51 @@ void sdctl::posedge()
                     arg = (arg << 1) | cmdtk[i];
                 for (int i = 39; i <= 45; i++)
                     crc7 = (crc7 << 1) | cmdtk[i];
-                uint8_t calc = 0;
+                uint16_t calc = 0;
                 for (int i = 0; i < 39; i++)
-                    calc = ((calc << 1) ^ (cmdtk[i] ^ (calc >> 6)) ^ ((cmdtk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                    calc = (calc << 1 ^ (cmdtk[i] ^ calc >> 6) ^ (cmdtk[i] ^ calc >> 6) << 3) & 0x7f;
                 if (crc7 != calc)
                     fprintf(stderr, "[Warning] CRC error: CMD=%d ARG=%x CRC7=%x\n", cmd, arg, crc7);
                 if (cmd == 0)
                     ;
-                else if (cmd == 55 || cmd == 7 && rca == arg >> 16) // R1 response
+                else if (cmd == 7 && rca == arg >> 16 || cmd == 16 || cmd == 17 || // R1 response
+                         cmd == 55 || cmd == 6)
                 {
-                    rnum = 0;
+                    if (cmd == 55)
+                        ; // todo: should check RCA
+                    if (cmd == 16)
+                        blen = arg;
+                    if (cmd == 6)
+                        bwd = (arg & 3) == 0 ? 1 : 4;
+                    if (cmd == 17)
+                        if (img)
+                        {
+                            fseek(img, arg * blen, SEEK_SET);
+                            uint8_t *block = new (std::nothrow) uint8_t[blen];
+                            if (!block || fread(block, 1, blen, img) != blen)
+                                fprintf(stderr, "[Warning] Read disk image error: block addr: 0x%x\n", arg);
+                            if (block && bwd == 1)
+                            {
+                                dnum = 0;
+                                dmax = blen * 8 + 18;
+                                dat[0] = 0;
+                                for (int i = 0; i < blen * 8; i++)
+                                    dat[i + 1] = block[i / 8] >> (7 - i % 8) & 0x1;
+                                calc = 0;
+                                for (int i = 0; i <= blen * 8; i++)
+                                    calc = calc << 1 ^ (dat[i] ^ calc >> 15) ^
+                                           (dat[i] ^ calc >> 15) << 5 ^ (dat[i] ^ calc >> 15) << 12;
+                                for (int i = 0; i < 16; i++)
+                                    dat[blen * 8 + 1 + i] = (calc >> 15 - i) & 0x1;
+                                dat[blen * 8 + 17] = 1;
+                                for (int i = 0; i < blen * 8 + 18; i++)
+                                    dat[i] |= 0xe;
+                            }
+                            delete[] block;
+                        }
+                        else
+                            fprintf(stderr, "[Warning] Read command detected but no image open\n");
+                    rnum = 0; // assemble output
                     rmax = 48;
                     memset(restk, 0, sizeof(restk));
                     for (int i = 0; i < 4; i++)
@@ -580,12 +668,13 @@ void sdctl::posedge()
                     restk[47] = 1;
                     calc = 0;
                     for (int i = 0; i < 40; i++)
-                        calc = ((calc << 1) ^ (restk[i] ^ (calc >> 6)) ^ ((restk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                        calc = (calc << 1 ^ (restk[i] ^ calc >> 6) ^ (restk[i] ^ calc >> 6) << 3) & 0x7f;
                     for (int i = 0; i < 7; i++)
                         restk[40 + i] = (calc >> 6 - i) & 0x1;
                 }
                 else if (cmd == 2) // R2 response
                 {
+                    cstt = 2; // ident state
                     rnum = 0;
                     rmax = 136;
                     memset(restk, 0, sizeof(restk));
@@ -595,6 +684,7 @@ void sdctl::posedge()
                 }
                 else if (cmd == 41) // R3 response
                 {
+                    cstt = 1; // ready state
                     rnum = 0;
                     rmax = 48;
                     memset(restk, 0, sizeof(restk));
@@ -607,6 +697,7 @@ void sdctl::posedge()
                 }
                 else if (cmd == 3) // R6 response
                 {
+                    cstt = 3; // stby state
                     rnum = 0;
                     rmax = 48;
                     rca = arg >> 16;
@@ -622,7 +713,7 @@ void sdctl::posedge()
                     restk[47] = 1;
                     calc = 0;
                     for (int i = 0; i < 40; i++)
-                        calc = ((calc << 1) ^ (restk[i] ^ (calc >> 6)) ^ ((restk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                        calc = (calc << 1 ^ (restk[i] ^ calc >> 6) ^ (restk[i] ^ calc >> 6) << 3) & 0x7f;
                     for (int i = 0; i < 7; i++)
                         restk[40 + i] = (calc >> 6 - i) & 0x1;
                 }
@@ -640,7 +731,7 @@ void sdctl::posedge()
                     restk[47] = 1;
                     calc = 0;
                     for (int i = 0; i < 40; i++)
-                        calc = ((calc << 1) ^ (restk[i] ^ (calc >> 6)) ^ ((restk[i] ^ (calc >> 6)) << 3)) & 0x7f;
+                        calc = (calc << 1 ^ (restk[i] ^ calc >> 6) ^ (restk[i] ^ calc >> 6) << 3) & 0x7f;
                     for (int i = 0; i < 7; i++)
                         restk[40 + i] = (calc >> 6 - i) & 0x1;
                 }
@@ -650,6 +741,16 @@ void sdctl::posedge()
             if (cnum == (uint64_t)-1 && dut.sd_cmd_o == 0) // start bit
                 cnum = 0;
         }
+        if (dut.sd_dat_t) // host data input
+        {
+            if (dnum != (uint64_t)-1) // sending and counting
+                dut.sd_dat_i = dat[dnum], dnum++;
+            if (dnum == dmax)
+                dnum = (uint64_t)-1;
+        }
+        else // host data output
+            ;
+    }
 }
 
 /**
@@ -692,6 +793,11 @@ void sdctl::checkpoint(const char *fn)
     fwrite(&restk, sizeof(restk), 1, fp);
     fwrite(&cstt, sizeof(cstt), 1, fp);
     fwrite(&rca, sizeof(rca), 1, fp);
+    fwrite(&bwd, sizeof(bwd), 1, fp);
+    fwrite(&blen, sizeof(blen), 1, fp);
+    fwrite(&dat, sizeof(dat), 1, fp);
+    fwrite(&dnum, sizeof(dnum), 1, fp);
+    fwrite(&dmax, sizeof(dmax), 1, fp);
     fclose(fp);
     delete[] name;
 }
@@ -719,15 +825,20 @@ int sdctl::restore(const char *fn)
     FILE *fp = fopen(name, "rb");
     if (!fp)
         return -1;
-    if (fread(&st, sizeof(st), 1, fp) < 0 ||
-        fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
-        fread(&cnum, sizeof(cnum), 1, fp) < 0 ||
-        fread(&cmdtk, sizeof(cmdtk), 1, fp) < 0 ||
-        fread(&rnum, sizeof(rnum), 1, fp) < 0 ||
-        fread(&rmax, sizeof(rmax), 1, fp) < 0 ||
-        fread(&restk, sizeof(restk), 1, fp) < 0 ||
-        fread(&cstt, sizeof(cstt), 1, fp) < 0 ||
-        fread(&rca, sizeof(rca), 1, fp) < 0)
+    if (fread(&st, sizeof(st), 1, fp) != 1 ||
+        fread(&cycle, sizeof(cycle), 1, fp) != 1 ||
+        fread(&cnum, sizeof(cnum), 1, fp) != 1 ||
+        fread(&cmdtk, sizeof(cmdtk), 1, fp) != 1 ||
+        fread(&rnum, sizeof(rnum), 1, fp) != 1 ||
+        fread(&rmax, sizeof(rmax), 1, fp) != 1 ||
+        fread(&restk, sizeof(restk), 1, fp) != 1 ||
+        fread(&cstt, sizeof(cstt), 1, fp) != 1 ||
+        fread(&rca, sizeof(rca), 1, fp) != 1 ||
+        fread(&bwd, sizeof(bwd), 1, fp) != 1 ||
+        fread(&blen, sizeof(blen), 1, fp) != 1 ||
+        fread(&dat, sizeof(dat), 1, fp) != 1 ||
+        fread(&dnum, sizeof(dnum), 1, fp) != 1 ||
+        fread(&dmax, sizeof(dmax), 1, fp) != 1)
         return -1;
     fclose(fp);
     delete[] name;
@@ -772,7 +883,7 @@ uartctl::~uartctl()
  * @brief Get AXI port signals sending to master
  * @return AXI port values
  */
-uartctl::operator axiport_t() const
+axiport_t uartctl::s() const
 {
     axiport_t ap;
     ap.arid = 0;
@@ -794,7 +905,7 @@ uartctl::operator axiport_t() const
  * @param ap data of AXI port from master
  * @return the object
  */
-axidev &uartctl::operator<<(const axiport_t &ap)
+axidev &uartctl::sset(const axiport_t &ap)
 {
     dut.s_axi_awvalid = ap.awvalid;
     dut.s_axi_awaddr = ap.awaddr;
@@ -903,11 +1014,11 @@ int uartctl::restore(const char *fn)
     FILE *fp = fopen(name, "rb");
     if (!fp)
         return -1;
-    if (fread(&st, sizeof(st), 1, fp) < 0 ||
-        fread(&cycle, sizeof(cycle), 1, fp) < 0 ||
-        fread(&div, sizeof(div), 1, fp) < 0 ||
-        fread(&cnum, sizeof(cnum), 1, fp) < 0 ||
-        fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&st, sizeof(st), 1, fp) != 1 ||
+        fread(&cycle, sizeof(cycle), 1, fp) != 1 ||
+        fread(&div, sizeof(div), 1, fp) != 1 ||
+        fread(&cnum, sizeof(cnum), 1, fp) != 1 ||
+        fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     fclose(fp);
     delete[] name;

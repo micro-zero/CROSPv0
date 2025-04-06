@@ -27,9 +27,12 @@ module sdc(
     /* master interface for SDC */
     output logic [31:0] m_axi_awaddr,
     output logic  [7:0] m_axi_awlen,
+    output logic  [2:0] m_axi_awsize,
+    output logic  [1:0] m_axi_awburst,
     output logic        m_axi_awvalid,
     input  logic        m_axi_awready,
     output logic [31:0] m_axi_wdata,
+    output logic  [3:0] m_axi_wstrb,
     output logic        m_axi_wlast,
     output logic        m_axi_wvalid,
     input  logic        m_axi_wready,
@@ -38,6 +41,8 @@ module sdc(
     output logic        m_axi_bready,
     output logic [31:0] m_axi_araddr,
     output logic  [7:0] m_axi_arlen,
+    output logic  [2:0] m_axi_arsize,
+    output logic  [1:0] m_axi_arburst,
     output logic        m_axi_arvalid,
     input  logic        m_axi_arready,
     input  logic [31:0] m_axi_rdata,
@@ -106,4 +111,9 @@ module sdc(
         .sdio_reset(sd_reset),
         .sdio_clk(sd_sclk)
     );
+    always_comb m_axi_awsize = 2;  // 32-bit
+    always_comb m_axi_awburst = 1; // INCR
+    always_comb m_axi_arsize = 2;
+    always_comb m_axi_arburst = 1;
+    always_comb m_axi_wstrb = 'hf;
 endmodule

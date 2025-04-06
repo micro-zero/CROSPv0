@@ -75,9 +75,10 @@ public:
     virtual void record() = 0;
     virtual void checkpoint(const char *fn) = 0;
     virtual int restore(const char *fn) = 0;
-    virtual operator axiport_t() const = 0;
-    virtual axidev &operator<<(const axiport_t &ap);
-    virtual axidev &operator<=(const axiport_t &ap);
+    virtual axiport_t m() const;
+    virtual axiport_t s() const;
+    virtual axidev &mset(const axiport_t &ap);
+    virtual axidev &sset(const axiport_t &ap);
 };
 
 /**
@@ -141,9 +142,9 @@ public:
     uint32_t &ui32(uint64_t addr);
     uint64_t &ui64(uint64_t addr);
     uint8_t &operator[](uint64_t addr);
-    operator axiport_t() const;
+    axiport_t s() const;
+    axidev &sset(const axiport_t &ap);
     memory &operator=(const memory &b);
-    axidev &operator<<(const axiport_t &ap);
 };
 
 typedef struct

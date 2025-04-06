@@ -526,7 +526,7 @@ module lsu #(
             for (int i = 0; i < lqsz; i++)
                 /* todo: for some like with AQ/RL bits, it will also require at LQ front,
                 need to consider this and distinguish them with normal address relevance
-                stuck when checking */
+                stall when checking */
                 if (lq_chck[i] == 2'b01 & lq_stid[i] == next_front) {lq_accsd[i], lq_chck[i]} <= 'b11;
             if (lq_accsd[lq_front] & lq_chck[lq_front] == 2'b10 & ~lq_fail[lq_front] & // speculation succeeds
                 lq_stid[lq_front] == sq_front) {lq_valid[lq_front], lq_chck[lq_front]} <= 3'b111;
