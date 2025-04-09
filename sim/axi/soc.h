@@ -1,6 +1,7 @@
 #include "verif.h"
 #include "Vvcore.h"
 #include "Vintc.h"
+#include "Vcohub.h"
 #include "Vsdc.h"
 #include "Vuart.h"
 #include <verilated_vcd_c.h>
@@ -75,6 +76,41 @@ typedef struct
 } stat_t;
 
 /**
+ *  Coherence hub
+ *  ----------------
+ *  This is coherence hub to interconnect coherence interfaces.
+ */
+class coherhub : public axidev
+{
+private:
+    uint64_t st, cycle; // simulation time and cycle
+    Vcohub dut;         // design under test
+    VerilatedVcdC *vcd; // trace pointer
+
+public:
+    coherhub(const char *fnvcd = 0);
+    ~coherhub();
+    cohport_t mmem() const;
+    cohport_t smem() const;
+    axidev &mmemset(const cohport_t &cp);
+    axidev &smemset(const cohport_t &cp);
+    cohport_t mmmu() const;
+    cohport_t smmu() const;
+    axidev &mmmuset(const cohport_t &cp);
+    axidev &smmuset(const cohport_t &cp);
+    cohport_t msdc() const;
+    cohport_t ssdc() const;
+    axidev &msdcset(const cohport_t &cp);
+    axidev &ssdcset(const cohport_t &cp);
+    void reset(uint8_t value);
+    void negedge();
+    void posedge();
+    void record();
+    void checkpoint(const char *fn);
+    int restore(const char *fn);
+};
+
+/**
  *  Core with verification
  *  ----------------------
  *  The core with verificaton is implemented by verilog.
@@ -87,18 +123,16 @@ private:
     VerilatedVcdC *vcd; // trace pointer
 
 public:
-    uint8_t &rst = dut.rst;
     uint64_t &mtime = dut.mtime; // interrupt controller ports
     uint64_t &mip_ext = dut.mip_ext;
-    uint8_t &scrqst = dut.s_coh_rqst, &mcrqst = dut.m_coh_rqst; // coherence ports
-    uint8_t &sctrsc = dut.s_coh_trsc, &mctrsc = dut.m_coh_trsc;
-    uint8_t &scresp = dut.s_coh_resp, &mcresp = dut.m_coh_resp;
-    uint8_t &scmesi = dut.s_coh_mesi, &mcmesi = dut.m_coh_mesi;
-    uint64_t &scaddr = dut.s_coh_addr, &mcaddr = dut.m_coh_addr;
     verifcore(const char *fnvcd = 0);
     ~verifcore();
     axiport_t m() const;
     axidev &mset(const axiport_t &ap);
+    cohport_t mc() const;
+    cohport_t sc() const;
+    axidev &mcset(const cohport_t &cp);
+    axidev &scset(const cohport_t &cp);
     verifcore &operator>>(cmts_t &cmts);
     verifcore &operator>>(dels_t &dels);
     verifcore &operator>>(stat_t &stat);
@@ -197,6 +231,10 @@ public:
     axiport_t s() const;
     axidev &mset(const axiport_t &ap);
     axidev &sset(const axiport_t &ap);
+    cohport_t mc() const;
+    cohport_t sc() const;
+    axidev &mcset(const cohport_t &cp);
+    axidev &scset(const cohport_t &cp);
     void reset(uint8_t value);
     void negedge();
     void posedge();

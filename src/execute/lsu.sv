@@ -7,13 +7,14 @@
 import types::*;
 
 module lsu #(
-    parameter iwd,  // issue width
-    parameter ewd,  // execution width
-    parameter cwd,  // commit width
-    parameter mwd,  // memory access width
-    parameter lqsz, // load queue size
-    parameter sqsz, // store queue size
-    parameter opsz  // operation ID size
+    parameter iwd,   // issue width
+    parameter ewd,   // execution width
+    parameter cwd,   // commit width
+    parameter mwd,   // memory access width
+    parameter lqsz,  // load queue size
+    parameter sqsz,  // store queue size
+    parameter opsz,  // operation ID size
+    parameter dcbase // DCACHE base address
 )(
     input  logic clk,
     input  logic rst,
@@ -653,6 +654,9 @@ module lsu #(
         if (ck_aqrl[i][0])               rslt[i] = 2'b01; // release bit
         for (int j = 0; j < sqsz; j++)                    // acquire bit
             if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front) if (sq_aqrl[sq_index[j]][1]) rslt[i] = 2'b01;
+        /* for convenience of IO operations, load operation (output) does not
+           run speculatively here, even though RVWMO does not constrain this */
+        if (ck_padd[i] < dcbase) rslt[i] = 2'b01;
         if (rslt[i] == 2'b01) forw[i] = 0;
     end
     always_ff @(posedge clk) if (rst) ck_resp <= 0;

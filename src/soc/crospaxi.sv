@@ -42,11 +42,13 @@ module crospaxi #(
     output logic  [7:0] dbg_axi_stt,
     output logic  [7:0] dbg_axi_req,
     /* coherence interface */
+    input logic         s_coh_lock,
     input  logic  [7:0] s_coh_rqst,
     input  logic  [7:0] s_coh_trsc,
     input  logic [63:0] s_coh_addr,
     output logic  [7:0] s_coh_resp,
     output logic  [7:0] s_coh_mesi,
+    output logic        m_coh_lock,
     output logic  [7:0] m_coh_rqst,
     output logic  [7:0] m_coh_trsc,
     output logic [63:0] m_coh_addr,
@@ -122,11 +124,13 @@ module crospaxi #(
         .s_dc_resp(dc_resp), .s_ic_resp(ic_resp),
         .s_dc_rdat(dc_rdat), .s_ic_rdat(ic_rdat),
         .s_dc_miss(dc_miss),
+        .s_coh_lock(s_coh_lock),
         .s_coh_rqst(s_coh_rqst),
         .s_coh_trsc(s_coh_trsc),
         .s_coh_addr(s_coh_addr),
         .s_coh_resp(s_coh_resp),
         .s_coh_mesi(s_coh_mesi),
+        .m_coh_lock(m_coh_lock),
         .m_coh_rqst(m_coh_rqst),
         .m_coh_trsc(m_coh_trsc),
         .m_coh_addr(m_coh_addr),
@@ -236,7 +240,7 @@ module crospaxi #(
         mul_inst(clk, rst, red_bundle, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
     div #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         div_inst(clk, rst, red_bundle, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
-    lsu #(.iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz))
+    lsu #(.iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz), .dcbase(dcbase))
         lsu_inst(clk, rst, lsu_safe, lsu_unsf, top_opid, saf_opid, red_bundle, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,

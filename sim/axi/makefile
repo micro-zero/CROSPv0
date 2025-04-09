@@ -29,7 +29,7 @@ CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
 		-DUART="0x$(UART)" -DSDC="0x$(SDC)" \
 	-I.intc -DCLINT="0x$(CLINT)" -DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
-	-I.uart -I.sdc -DBAUD="$(BAUD)" \
+	-I.cohub -I.uart -I.sdc -DBAUD="$(BAUD)" \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
 VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 \
 	-I../../src/common -I../../src/soc/axi_uart -I../../src/soc/axi_sdc
@@ -58,6 +58,7 @@ VCORE_SV = \
 	../../src/soc/crospaxi.sv \
 	vcore.sv
 INTC_SV = ../../src/soc/intc.sv
+COHUB_SV = ../../src/soc/cohub.sv
 UART_SV = ../../src/soc/axi_uart/axi_uart.v ../../src/soc/uart.sv
 SDC_SV = \
 	../../src/soc/axi_sdc/axi_sd_fifo.v \
@@ -132,6 +133,11 @@ all: main
 		-Gclint="64'h$(CLINT)" -Gcpufreq="64'd$(CPUFREQ)" -Gtbfreq="64'd$(TBFREQ)"
 	$(MAKE) -C .intc -f Vintc.mk
 
+.cohub : $(COHUB_SV)
+	$(RM) -r .cohub
+	verilator $(VERILATOR_FLAGS) $(COHUB_SV) -lib-create cohub -top-module cohub -Mdir .cohub
+	$(MAKE) -C .cohub -f Vcohub.mk
+
 .uart : $(UART_SV)
 	$(RM) -r .uart
 	verilator $(VERILATOR_FLAGS) $(UART_SV) -lib-create uart -top-module uart -Mdir .uart \
@@ -145,13 +151,14 @@ all: main
 
 verif.o : verif.h soc.h
 
-soc.o : .vcore .intc .uart .sdc verif.h soc.h
+soc.o : .vcore .intc .cohub .uart .sdc verif.h soc.h
 
-main.o : .vcore .intc .uart .sdc verif.h soc.h
+main.o : .vcore .intc .cohub .uart .sdc verif.h soc.h
 
 main : verif.o soc.o main.o
 	$(CXX) -O2 verif.o soc.o main.o -o main \
-		.vcore/libvcore.a .intc/libintc.a .uart/libuart.a .sdc/libsdc.a
+		.vcore/libvcore.a .intc/libintc.a .cohub/libcohub.a \
+		.uart/libuart.a .sdc/libsdc.a
 
 rv : main
 	@bash -c "$$RVTESTS_SCRIPT"

@@ -43,11 +43,13 @@ module mmu #(
     output logic  [7:0] s_dc_miss, // data cache miss signal
     output logic [63:0] s_dc_rdat, // data cache read data
     /* coherence interface */
+    input  logic        s_coh_lock, // slave coherence lock
     input  logic  [7:0] s_coh_rqst, // slave coherence request ID
     input  logic  [7:0] s_coh_trsc, // slave coherence transaction
     input  logic [63:0] s_coh_addr, // slave coherence physical address
     output logic  [7:0] s_coh_resp, // slave coherence response ID
     output logic  [7:0] s_coh_mesi, // slave coherence state
+    output logic        m_coh_lock, // master coherence lock
     output logic  [7:0] m_coh_rqst, // master coherence request ID
     output logic  [7:0] m_coh_trsc, // master coherence transaction
     output logic [63:0] m_coh_addr, // master coherence physical address
@@ -441,6 +443,7 @@ module mmu #(
     always_comb m_coh_trsc = coh_trsc_mb;
     always_comb s_coh_resp = axi_stt == 6 & axi_req == coh_rqst_sb ? coh_resp_sb : 0;
     always_comb s_coh_mesi = axi_stt == 6 & axi_req == coh_rqst_sb ? coh_mesi_sb : 0;
+    always_comb m_coh_lock = 0; // not acquire strong bus lock
     always_ff @(posedge clk) begin
         if (rst | |coh_resp_mb & flush[coh_resp_mb]) {m_coh_rqst, coh_rqst_mb, coh_resp_mb} <= 0;
         else if (~|coh_rqst_mb) begin // buffer vacant

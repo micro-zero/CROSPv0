@@ -298,15 +298,19 @@ int main(int argc, char *argv[])
         fprintf(stderr, "\n");
     }
     if (cmd.vcd)
-        fprintf(stderr, "[Info] Recording waveform in files: vcore.vcd, intc.vcd, uart.vcd, sdc.vcd\n");
+    {
+        fprintf(stderr, "[Info] Recording waveform in files: ");
+        fprintf(stderr, "cohub.vcd, vcore.vcd, intc.vcd, uart.vcd, sdc.vcd\n");
+    }
 
     /* Device registration */
     memory amem;
+    coherhub cohub(cmd.vcd ? "cohub.vcd" : NULL);
     verifcore vrcr(cmd.vcd ? "vcore.vcd" : NULL);
     intctl intc(cmd.vcd ? "intc.vcd" : NULL);
     uartctl uart(cmd.vcd ? "uart.vcd" : NULL);
     sdctl sdc(cmd.vcd ? "sdc.vcd" : NULL, "sdc.img");
-    std::vector<axidev *> dev({&amem, &vrcr, &intc, &uart, &sdc}); // AXI device references
+    std::vector<axidev *> dev({&amem, &cohub, &vrcr, &intc, &uart, &sdc}); // AXI device references
     const char *err = 0;
     if (cmd.file) // init memory from file
     {
@@ -324,6 +328,7 @@ int main(int argc, char *argv[])
         }
     }
     else if (amem.restore("amem.save") < 0 || // init memory and DUTs from checkpoint
+             cohub.restore("cohub.save") < 0 ||
              vrcr.restore("vcore.save") < 0 ||
              intc.restore("intc.save") < 0 ||
              uart.restore("uart.save") < 0 ||
@@ -372,7 +377,8 @@ int main(int argc, char *argv[])
         /* clock posedge */
         for (auto d : dev)
             d->posedge();
-        for (auto d : dev) // AXI interconnection
+        /* AXI interconnection */
+        for (auto d : dev)
             d->sset(zero), d->mset(zero);
         if (!master) // search for a transaction request from master
         {
@@ -406,18 +412,17 @@ int main(int argc, char *argv[])
             if (ap.bvalid && ap.bready || ap.rvalid && ap.rready && ap.rlast)
                 master = slave = 0; // current transaction finished
         }
-        vrcr.scrqst = amem.scrqst; // VCORE -- MEM
-        vrcr.scaddr = amem.scaddr;
-        vrcr.sctrsc = amem.sctrsc;
-        vrcr.mcresp = amem.mcresp;
-        vrcr.mcmesi = amem.mcmesi;
-        amem.mcrqst = vrcr.mcrqst;
-        amem.mcaddr = vrcr.mcaddr;
-        amem.mctrsc = vrcr.mctrsc;
-        amem.scresp = vrcr.scresp;
-        amem.scmesi = vrcr.scmesi;
+        /* coherence interconnection */
+        amem.scset(cohub.mmem()), amem.mcset(cohub.smem());
+        vrcr.scset(cohub.mmmu()), vrcr.mcset(cohub.smmu());
+        sdc.scset(cohub.msdc()), sdc.mcset(cohub.ssdc());
+        cohub.smemset(amem.mc()), cohub.mmemset(amem.sc());
+        cohub.smmuset(vrcr.mc()), cohub.mmmuset(vrcr.sc());
+        cohub.ssdcset(sdc.mc()), cohub.msdcset(sdc.sc());
+        /* other connection */
         vrcr.mtime = intc.int_time; // VCORE -- INTC
         vrcr.mip_ext = intc.int_pend;
+        /* record after synchronization */
         if (cycle >= cmd.mintime)
             for (auto d : dev)
                 d->record();
@@ -556,6 +561,7 @@ int main(int argc, char *argv[])
         if (cycle % 10000000 == 0)
         {
             amem.checkpoint("amem.save");
+            cohub.checkpoint("cohub.save");
             vrcr.checkpoint("vcore.save");
             intc.checkpoint("intc.save");
             sdc.checkpoint("sdc.save");

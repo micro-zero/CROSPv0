@@ -28,6 +28,14 @@ typedef struct
 
 typedef struct
 {
+    uint8_t lock;
+    uint8_t rqst, trsc;
+    uint64_t addr;
+    uint8_t resp, mesi;
+} cohport_t;
+
+typedef struct
+{
     uint64_t fromhost = 0, tohost = 0, lock = 0;
 } htifaddr_t;
 
@@ -79,6 +87,10 @@ public:
     virtual axiport_t s() const;
     virtual axidev &mset(const axiport_t &ap);
     virtual axidev &sset(const axiport_t &ap);
+    virtual cohport_t mc() const;
+    virtual cohport_t sc() const;
+    virtual axidev &mcset(const cohport_t &cp);
+    virtual axidev &scset(const cohport_t &cp);
 };
 
 /**
@@ -95,11 +107,9 @@ private:
     axiport_t axiport;                 // AXI port
     axiport_t axibuff;                 // AXI value buffer
     uint8_t rbursti, wbursti;          // AXI burst index
-    uint8_t scrqstr, mcrqstr;          // coherence request registers
-    uint64_t scaddrr;                  // coherence address register
-    uint8_t mctrscr;                   // coherence transaction register
-    uint64_t mcaddrr;                  // coherence address register
-    uint8_t scsent, thbusy;            // slave command sent and handling tohost
+    cohport_t mcport, scport;          // coherence port
+    cohport_t mcbuff, scbuff;          // coherence buffer
+    uint8_t scsent;                    // slave coherence sent
     std::map<uint64_t, uint8_t> owner; // block owner
     char errstr[128];                  // error string
 
@@ -107,11 +117,6 @@ public:
     std::vector<uint64_t> base;     // segment base address list
     std::vector<uint64_t> size;     // segment size list
     std::vector<uint8_t *> ptr;     // segment pointer list
-    uint8_t scrqst, mcrqst;         // coherence request ports
-    uint8_t sctrsc, mctrsc;         // coherence transaction ports
-    uint8_t scresp, mcresp;         // coherence response ports
-    uint8_t scmesi, mcmesi;         // coherence state ports
-    uint64_t scaddr, mcaddr;        // coherence address ports
     uint64_t entry;                 // program entry
     uint64_t hexsz;                 // hex code size in bytes
     uint64_t dtbaddr;               // device tree storing address
@@ -144,6 +149,10 @@ public:
     uint8_t &operator[](uint64_t addr);
     axiport_t s() const;
     axidev &sset(const axiport_t &ap);
+    cohport_t mc() const;
+    cohport_t sc() const;
+    axidev &mcset(const cohport_t &cp);
+    axidev &scset(const cohport_t &cp);
     memory &operator=(const memory &b);
 };
 

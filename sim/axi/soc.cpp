@@ -1,17 +1,241 @@
 #include "soc.h"
 
 /*-----------------------------------------------------------*\
+|*                      Coherence hub                        *|
+\*-----------------------------------------------------------*/
+
+/**
+ * @brief Default constructor function of coherence hub
+ * @param fnvcd filename of waveform
+ */
+coherhub::coherhub(const char *fnvcd)
+{
+    st = cycle = 0;
+    vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
+    if (vcd)
+    {
+        Verilated::traceEverOn(true);
+        dut.trace(vcd, 5);
+        vcd->open(fnvcd);
+    }
+}
+
+/**
+ * @brief Destructor of coherence hub
+ */
+coherhub::~coherhub()
+{
+    if (vcd)
+        vcd->close();
+    delete vcd;
+}
+
+/**
+ * @brief Get coherence port values sending to master
+ * @return values on coherence port
+ */
+cohport_t coherhub::smem() const
+{
+    cohport_t cp;
+    cp.resp = dut.s_mem_resp;
+    cp.mesi = dut.s_mem_mesi;
+    return cp;
+}
+cohport_t coherhub::smmu() const
+{
+    cohport_t cp;
+    cp.resp = dut.s_mmu_resp;
+    cp.mesi = dut.s_mmu_mesi;
+    return cp;
+}
+cohport_t coherhub::ssdc() const
+{
+    cohport_t cp;
+    cp.resp = dut.s_sdc_resp;
+    cp.mesi = dut.s_sdc_mesi;
+    return cp;
+}
+
+/**
+ * @brief Get coherence port values sending to slave
+ * @return values on coherence port
+ */
+cohport_t coherhub::mmem() const
+{
+    cohport_t cp;
+    cp.lock = dut.m_mem_lock;
+    cp.rqst = dut.m_mem_rqst;
+    cp.addr = dut.m_mem_addr;
+    cp.trsc = dut.m_mem_trsc;
+    return cp;
+}
+cohport_t coherhub::mmmu() const
+{
+    cohport_t cp;
+    cp.lock = dut.m_mmu_lock;
+    cp.rqst = dut.m_mmu_rqst;
+    cp.addr = dut.m_mmu_addr;
+    cp.trsc = dut.m_mmu_trsc;
+    return cp;
+}
+cohport_t coherhub::msdc() const
+{
+    cohport_t cp;
+    cp.lock = dut.m_sdc_lock;
+    cp.rqst = dut.m_sdc_rqst;
+    cp.addr = dut.m_sdc_addr;
+    cp.trsc = dut.m_sdc_trsc;
+    return cp;
+}
+
+/**
+ * @brief Set coherence port values from master
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &coherhub::smemset(const cohport_t &cp)
+{
+    dut.s_mem_lock = cp.lock;
+    dut.s_mem_rqst = cp.rqst;
+    dut.s_mem_addr = cp.addr;
+    dut.s_mem_trsc = cp.trsc;
+    return *this;
+}
+axidev &coherhub::smmuset(const cohport_t &cp)
+{
+    dut.s_mmu_lock = cp.lock;
+    dut.s_mmu_rqst = cp.rqst;
+    dut.s_mmu_addr = cp.addr;
+    dut.s_mmu_trsc = cp.trsc;
+    return *this;
+}
+axidev &coherhub::ssdcset(const cohport_t &cp)
+{
+    dut.s_sdc_lock = cp.lock;
+    dut.s_sdc_rqst = cp.rqst;
+    dut.s_sdc_addr = cp.addr;
+    dut.s_sdc_trsc = cp.trsc;
+    return *this;
+}
+
+/**
+ * @brief Set coherence port values from slave
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &coherhub::mmemset(const cohport_t &cp)
+{
+    dut.m_mem_resp = cp.resp;
+    dut.m_mem_mesi = cp.mesi;
+    return *this;
+}
+axidev &coherhub::mmmuset(const cohport_t &cp)
+{
+    dut.m_mmu_resp = cp.resp;
+    dut.m_mmu_mesi = cp.mesi;
+    return *this;
+}
+axidev &coherhub::msdcset(const cohport_t &cp)
+{
+    dut.m_sdc_resp = cp.resp;
+    dut.m_sdc_mesi = cp.mesi;
+    return *this;
+}
+
+/**
+ * @brief Set reset signal
+ * @param value value of rst to set
+ */
+void coherhub::reset(uint8_t value) { dut.rst = value; }
+
+/**
+ * @brief Do clock negedge
+ */
+void coherhub::negedge() { dut.clk = 0, dut.eval(), st++; }
+
+/**
+ * @brief Do clock posedge
+ */
+void coherhub::posedge() { dut.clk = 1, dut.eval(), st++, cycle++; }
+
+/**
+ * @brief Record waveform
+ */
+void coherhub::record()
+{
+    if (vcd)
+        vcd->dump(st);
+}
+
+/**
+ * @brief Save to checkpoint file
+ * @param fn filename of checkpoint
+ */
+void coherhub::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn filename of checkpoint
+ * @return -1 if error occurs
+ */
+int coherhub::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) != 1 ||
+        fread(&cycle, sizeof(cycle), 1, fp) != 1)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
+}
+
+/*-----------------------------------------------------------*\
 |*                  Core with verification                   *|
 \*-----------------------------------------------------------*/
 
 /**
  * @brief Default constructor function of verification core
  * @param fnvcd filename of waveform
- * @param fnsave filename of saved checkpoint
  */
 verifcore::verifcore(const char *fnvcd)
 {
-    st = cycle = 0;
     st = cycle = 0;
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
     if (vcd)
@@ -78,6 +302,58 @@ axidev &verifcore::mset(const axiport_t &ap)
     dut.m_axi_bid = ap.bid;
     dut.m_axi_bvalid = ap.bvalid;
     dut.m_axi_bresp = ap.bresp;
+    return *this;
+}
+
+/**
+ * @brief Get coherence port values sending to master
+ * @return values on coherence port
+ */
+cohport_t verifcore::sc() const
+{
+    cohport_t cp;
+    cp.resp = dut.s_coh_resp;
+    cp.mesi = dut.s_coh_mesi;
+    return cp;
+}
+
+/**
+ * @brief Get coherence port values sending to slave
+ * @return values on coherence port
+ */
+cohport_t verifcore::mc() const
+{
+    cohport_t cp;
+    cp.lock = dut.m_coh_lock;
+    cp.rqst = dut.m_coh_rqst;
+    cp.addr = dut.m_coh_addr;
+    cp.trsc = dut.m_coh_trsc;
+    return cp;
+}
+
+/**
+ * @brief Set coherence port values from master
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &verifcore::scset(const cohport_t &cp)
+{
+    dut.s_coh_lock = cp.lock;
+    dut.s_coh_rqst = cp.rqst;
+    dut.s_coh_addr = cp.addr;
+    dut.s_coh_trsc = cp.trsc;
+    return *this;
+}
+
+/**
+ * @brief Set coherence port values from slave
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &verifcore::mcset(const cohport_t &cp)
+{
+    dut.m_coh_resp = cp.resp;
+    dut.m_coh_mesi = cp.mesi;
     return *this;
 }
 
@@ -562,6 +838,58 @@ axidev &sdctl::sset(const axiport_t &ap)
     dut.s_axi_wdata = ap.wdata;
     dut.s_axi_rready = ap.rready;
     dut.s_axi_bready = ap.bready;
+    return *this;
+}
+
+/**
+ * @brief Get coherence port values sending to master
+ * @return values on coherence port
+ */
+cohport_t sdctl::sc() const
+{
+    cohport_t cp;
+    cp.resp = dut.s_coh_resp;
+    cp.mesi = dut.s_coh_mesi;
+    return cp;
+}
+
+/**
+ * @brief Get coherence port values sending to slave
+ * @return values on coherence port
+ */
+cohport_t sdctl::mc() const
+{
+    cohport_t cp;
+    cp.lock = dut.m_coh_lock;
+    cp.rqst = dut.m_coh_rqst;
+    cp.addr = dut.m_coh_addr;
+    cp.trsc = dut.m_coh_trsc;
+    return cp;
+}
+
+/**
+ * @brief Set coherence port values from master
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &sdctl::scset(const cohport_t &cp)
+{
+    dut.s_coh_lock = cp.lock;
+    dut.s_coh_rqst = cp.rqst;
+    dut.s_coh_addr = cp.addr;
+    dut.s_coh_trsc = cp.trsc;
+    return *this;
+}
+
+/**
+ * @brief Set coherence port values from slave
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &sdctl::mcset(const cohport_t &cp)
+{
+    dut.m_coh_resp = cp.resp;
+    dut.m_coh_mesi = cp.mesi;
     return *this;
 }
 
