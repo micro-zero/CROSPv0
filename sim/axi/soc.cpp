@@ -731,14 +731,20 @@ sdctl::sdctl(const char *fnvcd, const char *fnimg)
     st = cycle = 0;
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
     img = fnimg ? fopen(fnimg, "ab+") : NULL;
-    cnum = rnum = rmax = dnum = dmax = (uint64_t)-1;
+    cnum = rnum = rmax = (uint64_t)-1;
+    dnum = dcmd = 0;
     cstt = 0;
+    acmd = 0;
     bwd = 1;
     blen = 512;
+    uint8_t csd_cp[16] = {
+        0x40, 0x0e, 0x00, 0x0b, 0xfb, 0x79, 0x00, 0x01, 0x00, 0x00, 0x7f, 0x80, 0x0a, 0x40, 0x00, 0x00};
+    memcpy(csd, csd_cp, sizeof(csd_cp));
+    scr = 0x0205000000000000ull;
     if (vcd)
     {
         Verilated::traceEverOn(true);
-        dut.trace(vcd, 5);
+        dut.trace(vcd, 16);
         vcd->open(fnvcd);
     }
 }
@@ -932,7 +938,8 @@ void sdctl::posedge()
             if (cnum == 47) // stop bit
             {
                 cnum = (uint64_t)-1;
-                uint8_t cmd = 0, crc7 = 0;
+                cmd = 0;
+                uint8_t crc7 = 0;
                 uint32_t arg = 0;
                 for (int i = 1; i <= 6; i++)
                     cmd = (cmd << 1) | cmdtk[i];
@@ -945,45 +952,60 @@ void sdctl::posedge()
                     calc = (calc << 1 ^ (cmdtk[i] ^ calc >> 6) ^ (cmdtk[i] ^ calc >> 6) << 3) & 0x7f;
                 if (crc7 != calc)
                     fprintf(stderr, "[Warning] CRC error: CMD=%d ARG=%x CRC7=%x\n", cmd, arg, crc7);
+                fprintf(stderr, "[Info] SD command received: CMD=%d ARG=%x\n", cmd, arg);
+                if (acmd)
+                {
+                    acmd = 0;
+                    cmd |= 0x80; // MSB indicates ACMD
+                }
                 if (cmd == 0)
                     ;
-                else if (cmd == 7 && rca == arg >> 16 || cmd == 16 || cmd == 17 || // R1 response
-                         cmd == 55 || cmd == 6)
+                else if (cmd == 7 && rca == arg >> 16 || cmd == 6 || cmd == 55 || // R1 response
+                         cmd == 16 || cmd == 17 || cmd == 18 || cmd == 12 ||
+                         cmd == (0x80 | 6) || cmd == (0x80 | 51) || cmd == (0x80 | 13))
                 {
                     if (cmd == 55)
-                        ; // todo: should check RCA
+                        acmd = 1; // todo: should check RCA
                     if (cmd == 16)
                         blen = arg;
-                    if (cmd == 6)
+                    if (cmd == (0x80 | 6))
                         bwd = (arg & 3) == 0 ? 1 : 4;
+                    if (cmd == 6)
+                    {
+                        dnum = dcmd = 1;
+                        di = 0;
+                        dblk = 512 + 18;
+                    }
+                    if (cmd == (0x80 | 51))
+                    {
+                        dnum = dcmd = 1;
+                        di = 0;
+                        dblk = 64 + 18;
+                    }
+                    if (cmd == (0x80 | 13))
+                    {
+                        dnum = dcmd = 1;
+                        di = 0;
+                        dblk = 512 + 18;
+                    }
                     if (cmd == 17)
-                        if (img)
-                        {
-                            fseek(img, arg * blen, SEEK_SET);
-                            uint8_t *block = new (std::nothrow) uint8_t[blen];
-                            if (!block || fread(block, 1, blen, img) != blen)
-                                fprintf(stderr, "[Warning] Read disk image error: block addr: 0x%x\n", arg);
-                            if (block && bwd == 1)
-                            {
-                                dnum = 0;
-                                dmax = blen * 8 + 18;
-                                dat[0] = 0;
-                                for (int i = 0; i < blen * 8; i++)
-                                    dat[i + 1] = block[i / 8] >> (7 - i % 8) & 0x1;
-                                calc = 0;
-                                for (int i = 0; i <= blen * 8; i++)
-                                    calc = calc << 1 ^ (dat[i] ^ calc >> 15) ^
-                                           (dat[i] ^ calc >> 15) << 5 ^ (dat[i] ^ calc >> 15) << 12;
-                                for (int i = 0; i < 16; i++)
-                                    dat[blen * 8 + 1 + i] = (calc >> 15 - i) & 0x1;
-                                dat[blen * 8 + 17] = 1;
-                                for (int i = 0; i < blen * 8 + 18; i++)
-                                    dat[i] |= 0xe;
-                            }
-                            delete[] block;
-                        }
-                        else
-                            fprintf(stderr, "[Warning] Read command detected but no image open\n");
+                    {
+                        dnum = 1; // single block read
+                        dcmd = 0;
+                        dadd = arg * blen;
+                        di = 0;
+                        dblk = blen * 8 + 18;
+                    }
+                    if (cmd == 18)
+                    {
+                        dnum = (uint32_t)-1; // continuous block read
+                        dcmd = 0;
+                        dadd = arg * blen;
+                        di = 0;
+                        dblk = blen * 8 + 18;
+                    }
+                    if (cmd == 12)
+                        dnum = 0;
                     rnum = 0; // assemble output
                     rmax = 48;
                     memset(restk, 0, sizeof(restk));
@@ -1000,7 +1022,7 @@ void sdctl::posedge()
                     for (int i = 0; i < 7; i++)
                         restk[40 + i] = (calc >> 6 - i) & 0x1;
                 }
-                else if (cmd == 2) // R2 response
+                else if (cmd == 2 || cmd == 9) // R2 response
                 {
                     cstt = 2; // ident state
                     rnum = 0;
@@ -1008,15 +1030,26 @@ void sdctl::posedge()
                     memset(restk, 0, sizeof(restk));
                     for (int i = 0; i < 6; i++)
                         restk[2 + i] = 1;
+                    if (cmd == 9)
+                    {
+                        for (int i = 1; i < 128; i++)
+                            restk[135 - i] = csd[i / 8] >> i % 8 & 0x1;
+                        calc = 0;
+                        for (int i = 8; i < 128; i++)
+                            calc = (calc << 1 ^ (restk[i] ^ calc >> 6) ^ (restk[i] ^ calc >> 6) << 3) & 0x7f;
+                        for (int i = 0; i < 7; i++)
+                            restk[134 - i] = (calc >> i) & 1;
+                    }
                     restk[135] = 1;
                 }
-                else if (cmd == 41) // R3 response
+                else if (cmd == (0x80 | 41)) // R3 response
                 {
                     cstt = 1; // ready state
                     rnum = 0;
                     rmax = 48;
                     memset(restk, 0, sizeof(restk));
                     restk[8] = 1; // initialization complete
+                    restk[9] = 1; // SDHC or SDXC
                     for (int i = 0; i < 6; i++)
                         restk[2 + i] = 1;
                     restk[47] = 1;
@@ -1069,15 +1102,96 @@ void sdctl::posedge()
             if (cnum == (uint64_t)-1 && dut.sd_cmd_o == 0) // start bit
                 cnum = 0;
         }
-        if (dut.sd_dat_t) // host data input
+        if (dut.sd_dat_t & dnum > 0) // host data input
         {
-            if (dnum != (uint64_t)-1) // sending and counting
-                dut.sd_dat_i = dat[dnum], dnum++;
-            if (dnum == dmax)
-                dnum = (uint64_t)-1;
+            if (di == 0)
+            {
+                uint8_t *raw = new uint8_t[blen * 8 > 512 ? blen * 8 : 512];
+                uint32_t rawlen;
+                if (raw)
+                {
+                    if (dcmd && cmd == 6)
+                    {
+                        rawlen = 512;
+                        memset(raw, 0, sizeof(raw));
+                        for (int i = 400; i < 512; i++)
+                            raw[511 - i] = 1;
+                    }
+                    else if (dcmd && cmd == (0x80 | 51))
+                    {
+                        rawlen = 64;
+                        memset(raw, 0, sizeof(raw));
+                        for (int i = 0; i < 64; i++)
+                            raw[63 - i] = (scr >> i) & 0x1;
+                    }
+                    else if (dcmd && cmd == (0x80 | 13))
+                    {
+                        rawlen = 512;
+                        memset(raw, 0, sizeof(raw));
+                        raw[0] = bwd == 4;
+                        raw[1] = 0;
+                    }
+                    else if (img)
+                    {
+                        rawlen = blen * 8;
+                        fseek(img, dadd, SEEK_SET);
+                        uint8_t *block = new (std::nothrow) uint8_t[blen];
+                        if (!block || fread(block, 1, blen, img) != blen)
+                            fprintf(stderr, "[Warning] Read disk image error: addr: 0x%x\n", dadd);
+                        if (block)
+                            for (int i = 0; i < blen * 8; i++)
+                                raw[i] = block[i / 8] >> (7 - i % 8) & 0x1;
+                        delete[] block;
+                    }
+                    else
+                        fprintf(stderr, "[Warning] Read command detected but no image open\n");
+                    if (bwd == 1)
+                    {
+                        uint16_t crc = 0;
+                        for (int i = 0; i < rawlen; i++)
+                            crc = crc << 1 ^
+                                  (raw[i] ^ crc >> 15) ^
+                                  (raw[i] ^ crc >> 15) << 5 ^
+                                  (raw[i] ^ crc >> 15) << 12;
+                        dat[0] = 0;
+                        for (int i = 0; i < rawlen; i++)
+                            dat[i + 1] = raw[i];
+                        for (int i = 0; i < 16; i++)
+                            dat[rawlen + 1 + i] = (crc >> 15 - i) & 0x1;
+                        dat[rawlen + 17] = 1;
+                        for (int i = 0; i < rawlen + 18; i++)
+                            dat[i] |= 0xe;
+                    }
+                    else
+                    {
+                        uint16_t crc[4];
+                        for (int i = 0; i < rawlen; i++)
+                            crc[i % 4] = crc[i % 4] << 1 ^
+                                         (raw[i] ^ crc[i % 4] >> 15) ^
+                                         (raw[i] ^ crc[i % 4] >> 15) << 5 ^
+                                         (raw[i] ^ crc[i % 4] >> 15) << 12;
+                        dat[0] = 0;
+                        for (int i = 0; i < rawlen; i++)
+                            dat[i % 4 + 1] = (dat[i % 4 + 1] << 1) | raw[i];
+                        for (int i = 0; i < 16; i++)
+                            dat[rawlen / 4 + 1 + i] = (crc[0] << 3) | (crc[1] << 2) | (crc[2] << 1) | crc[3];
+                    }
+                }
+                else
+                    fprintf(stderr, "[Warning] Memory allocation error at SD card\n");
+                delete[] raw;
+            }
+            if (di < dblk)
+                dut.sd_dat_i = dat[di], di++;
+            else
+            {
+                dnum--;
+                dadd += blen;
+                di = 0;
+            }
         }
-        else // host data output
-            ;
+        else
+            dut.sd_dat_i = 0xf;
     }
 }
 
@@ -1120,12 +1234,19 @@ void sdctl::checkpoint(const char *fn)
     fwrite(&rmax, sizeof(rmax), 1, fp);
     fwrite(&restk, sizeof(restk), 1, fp);
     fwrite(&cstt, sizeof(cstt), 1, fp);
+    fwrite(&acmd, sizeof(acmd), 1, fp);
+    fwrite(&cmd, sizeof(cmd), 1, fp);
     fwrite(&rca, sizeof(rca), 1, fp);
+    fwrite(&csd, sizeof(csd), 1, fp);
+    fwrite(&scr, sizeof(scr), 1, fp);
     fwrite(&bwd, sizeof(bwd), 1, fp);
     fwrite(&blen, sizeof(blen), 1, fp);
     fwrite(&dat, sizeof(dat), 1, fp);
+    fwrite(&di, sizeof(di), 1, fp);
+    fwrite(&dblk, sizeof(dblk), 1, fp);
     fwrite(&dnum, sizeof(dnum), 1, fp);
-    fwrite(&dmax, sizeof(dmax), 1, fp);
+    fwrite(&dadd, sizeof(dadd), 1, fp);
+    fwrite(&dcmd, sizeof(dcmd), 1, fp);
     fclose(fp);
     delete[] name;
 }
@@ -1161,12 +1282,19 @@ int sdctl::restore(const char *fn)
         fread(&rmax, sizeof(rmax), 1, fp) != 1 ||
         fread(&restk, sizeof(restk), 1, fp) != 1 ||
         fread(&cstt, sizeof(cstt), 1, fp) != 1 ||
+        fread(&acmd, sizeof(acmd), 1, fp) != 1 ||
+        fread(&cmd, sizeof(cmd), 1, fp) != 1 ||
         fread(&rca, sizeof(rca), 1, fp) != 1 ||
+        fread(&csd, sizeof(csd), 1, fp) != 1 ||
+        fread(&scr, sizeof(scr), 1, fp) != 1 ||
         fread(&bwd, sizeof(bwd), 1, fp) != 1 ||
         fread(&blen, sizeof(blen), 1, fp) != 1 ||
         fread(&dat, sizeof(dat), 1, fp) != 1 ||
+        fread(&di, sizeof(di), 1, fp) != 1 ||
+        fread(&dblk, sizeof(dblk), 1, fp) != 1 ||
         fread(&dnum, sizeof(dnum), 1, fp) != 1 ||
-        fread(&dmax, sizeof(dmax), 1, fp) != 1)
+        fread(&dadd, sizeof(dadd), 1, fp) != 1 ||
+        fread(&dcmd, sizeof(dcmd), 1, fp) != 1)
         return -1;
     fclose(fp);
     delete[] name;
@@ -1250,7 +1378,11 @@ axidev &uartctl::sset(const axiport_t &ap)
  * @brief Set reset signal
  * @param value value of rst to set
  */
-void uartctl::reset(uint8_t value) { dut.rst = value; }
+void uartctl::reset(uint8_t value)
+{
+    dut.rst = value;
+    dut.RxD = 1;
+}
 
 /**
  * @brief Do clock negedge
@@ -1274,7 +1406,7 @@ void uartctl::posedge()
     for (int i = 0; i < 10; i++)
         if (cnum == i * div + div / 2) // sampling i-th bit
             if (i == 9)
-                putchar(buf), cnum = -1; // stop bit
+                putchar(buf), fflush(stdout), cnum = -1; // stop bit
             else if (i > 0)
                 buf |= dut.TxD << i - 1;
 }
@@ -1347,6 +1479,206 @@ int uartctl::restore(const char *fn)
         fread(&div, sizeof(div), 1, fp) != 1 ||
         fread(&cnum, sizeof(cnum), 1, fp) != 1 ||
         fread(&buf, sizeof(buf), 1, fp) != 1)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
+}
+
+/*-----------------------------------------------------------*\
+|*                   Ethernet controller                     *|
+\*-----------------------------------------------------------*/
+
+/**
+ * @brief Constructor function of ethernet controller
+ * @param fnvcd filename of waveform
+ */
+ethctl::ethctl(const char *fnvcd)
+{
+    st = cycle = 0;
+    vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
+    if (vcd)
+    {
+        Verilated::traceEverOn(true);
+        dut.trace(vcd, 5);
+        vcd->open(fnvcd);
+    }
+}
+
+/**
+ * @brief Destructor of ethernet controller
+ */
+ethctl::~ethctl()
+{
+    if (vcd)
+        vcd->close();
+    delete vcd;
+}
+
+/**
+ * @brief Get AXI port signals sending to slave
+ * @return AXI port values
+ */
+axiport_t ethctl::m() const
+{
+    axiport_t ap;
+    ap.awid = 0;
+    ap.awvalid = dut.m_axi_awvalid;
+    ap.awaddr = dut.m_axi_awaddr;
+    ap.awburst = dut.m_axi_awburst;
+    ap.awlen = dut.m_axi_awlen;
+    ap.awsize = dut.m_axi_awsize;
+    ap.arid = 0;
+    ap.arvalid = dut.m_axi_arvalid;
+    ap.araddr = dut.m_axi_araddr;
+    ap.arburst = dut.m_axi_arburst;
+    ap.arlen = dut.m_axi_arlen;
+    ap.arsize = dut.m_axi_arsize;
+    ap.wvalid = dut.m_axi_wvalid;
+    ap.wdata = dut.m_axi_wdata;
+    ap.wstrb = dut.m_axi_wstrb;
+    ap.wlast = dut.m_axi_wlast;
+    ap.rready = dut.m_axi_rready;
+    ap.bready = dut.m_axi_bready;
+    return ap;
+}
+
+/**
+ * @brief Get AXI port signals sending to master
+ * @return AXI port values
+ */
+axiport_t ethctl::s() const
+{
+    axiport_t ap;
+    ap.arid = 0;
+    ap.awid = 0;
+    ap.awready = dut.s_axi_awready;
+    ap.arready = dut.s_axi_arready;
+    ap.wready = dut.s_axi_wready;
+    ap.rvalid = dut.s_axi_rvalid;
+    ap.rresp = dut.s_axi_rresp;
+    ap.rdata = dut.s_axi_rdata;
+    ap.rlast = 1;
+    ap.bvalid = dut.s_axi_bvalid;
+    ap.bresp = dut.s_axi_bresp;
+    return ap;
+}
+
+/**
+ * @brief Set values on AXI port from slave
+ * @param ap data of AXI port from slave
+ * @return the object
+ */
+axidev &ethctl::mset(const axiport_t &ap)
+{
+    dut.m_axi_awready = ap.awready;
+    dut.m_axi_arready = ap.arready;
+    dut.m_axi_wready = ap.wready;
+    dut.m_axi_rvalid = ap.rvalid;
+    dut.m_axi_rresp = ap.rresp;
+    dut.m_axi_rdata = ap.rdata;
+    dut.m_axi_rlast = ap.rlast;
+    dut.m_axi_bvalid = ap.bvalid;
+    dut.m_axi_bresp = ap.bresp;
+    return *this;
+}
+
+/**
+ * @brief Set values on AXI port from master
+ * @param ap data of AXI port from master
+ * @return the object
+ */
+axidev &ethctl::sset(const axiport_t &ap)
+{
+    dut.s_axi_awvalid = ap.awvalid;
+    dut.s_axi_awaddr = ap.awaddr;
+    dut.s_axi_arvalid = ap.arvalid;
+    dut.s_axi_araddr = ap.araddr;
+    dut.s_axi_wvalid = ap.wvalid;
+    dut.s_axi_wdata = ap.wdata;
+    dut.s_axi_rready = ap.rready;
+    dut.s_axi_bready = ap.bready;
+    return *this;
+}
+
+/**
+ * @brief Set reset signal
+ * @param value value of rst to set
+ */
+void ethctl::reset(uint8_t value) { dut.rst = value; }
+
+/**
+ * @brief Do clock negedge
+ */
+void ethctl::negedge() { dut.clk = 0, dut.eval(), st++; }
+
+/**
+ * @brief Do clock posedge
+ */
+void ethctl::posedge() { dut.clk = 1, dut.eval(), st++, cycle++; }
+
+/**
+ * @brief Record waveform
+ */
+void ethctl::record()
+{
+    if (vcd)
+        vcd->dump(st);
+}
+
+/**
+ * @brief Save to checkpoint file
+ * @param fn checkpoint file name
+ */
+void ethctl::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn checkpoint file name
+ * @return -1 if error occurs
+ */
+int ethctl::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) != 1 ||
+        fread(&cycle, sizeof(cycle), 1, fp) != 1)
         return -1;
     fclose(fp);
     delete[] name;

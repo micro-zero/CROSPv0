@@ -10,7 +10,7 @@ typedef struct
     const char *file = 0, *dtb = 0, *initrd = 0, *dump = 0;
     std::vector<const char *> args;
     uint8_t sim = 0, verbose = 0, vcd = 0, help = 0, filetype = MEMINIT_ELF;
-    int mintime = 0, maxtime = INT32_MAX;
+    uint64_t mintime = 0, maxtime = INT64_MAX;
 } cmd_t;
 
 int interrupt = 0;
@@ -252,7 +252,7 @@ int main(int argc, char *argv[])
                 if (cmd.mintime <= 0)
                     cmd.mintime = 0;
                 if (cmd.maxtime <= 0)
-                    cmd.maxtime = INT32_MAX;
+                    cmd.maxtime = INT64_MAX;
                 i += 2;
             }
             else if (strcmp(argv[i] + j, "w") == 0)
@@ -300,7 +300,7 @@ int main(int argc, char *argv[])
     if (cmd.vcd)
     {
         fprintf(stderr, "[Info] Recording waveform in files: ");
-        fprintf(stderr, "cohub.vcd, vcore.vcd, intc.vcd, uart.vcd, sdc.vcd\n");
+        fprintf(stderr, "cohub.vcd, vcore.vcd, intc.vcd, uart.vcd, sdc.vcd eth.vcd\n");
     }
 
     /* Device registration */
@@ -310,7 +310,8 @@ int main(int argc, char *argv[])
     intctl intc(cmd.vcd ? "intc.vcd" : NULL);
     uartctl uart(cmd.vcd ? "uart.vcd" : NULL);
     sdctl sdc(cmd.vcd ? "sdc.vcd" : NULL, "sdc.img");
-    std::vector<axidev *> dev({&amem, &cohub, &vrcr, &intc, &uart, &sdc}); // AXI device references
+    ethctl eth(cmd.vcd ? "eth.vcd" : NULL);
+    std::vector<axidev *> dev({&amem, &cohub, &vrcr, &intc, &uart, &sdc, &eth}); // AXI device references
     const char *err = 0;
     if (cmd.file) // init memory from file
     {
@@ -332,7 +333,8 @@ int main(int argc, char *argv[])
              vrcr.restore("vcore.save") < 0 ||
              intc.restore("intc.save") < 0 ||
              uart.restore("uart.save") < 0 ||
-             sdc.restore("sdc.save") < 0)
+             sdc.restore("sdc.save") < 0 ||
+             eth.restore("eth.save") < 0)
         err = "[Error] Failed to recover from checkpoint\n";
     if (err)
         return fputs(err, stderr), 255;
@@ -397,6 +399,8 @@ int main(int argc, char *argv[])
                 slave = &amem;
                 if (addr >= CLINT && addr < CLINT + 0xc0000)
                     slave = &intc;
+                else if (addr >= ETH && addr < ETH + 0x10000)
+                    slave = &eth;
                 else if (addr >= SDC && addr < SDC + 0x10000)
                     slave = &sdc;
                 else if (addr >= UART && addr < UART + 0x10000)
@@ -536,7 +540,7 @@ int main(int argc, char *argv[])
                 apply(sim, del);
             }
             emptycycle = 0;
-            if (cmd.filetype == MEMINIT_HEX && cmd.maxtime == INT32_MAX)
+            if (cmd.filetype == MEMINIT_HEX && cmd.maxtime == INT64_MAX)
                 if (del.level == stt.level && del.pc == stt.pc && !del.gprw && !del.memw)
                     stablecycle++;
                 else
@@ -564,6 +568,7 @@ int main(int argc, char *argv[])
             cohub.checkpoint("cohub.save");
             vrcr.checkpoint("vcore.save");
             intc.checkpoint("intc.save");
+            eth.checkpoint("eth.save");
             sdc.checkpoint("sdc.save");
             uart.checkpoint("uart.save");
             checkpoint(cycle, instret, sim, cmts, dels, master, slave, "main.save", dev);

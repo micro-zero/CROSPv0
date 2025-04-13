@@ -3,6 +3,7 @@
 #include "Vintc.h"
 #include "Vcohub.h"
 #include "Vsdc.h"
+#include "Veth.h"
 #include "Vuart.h"
 #include <verilated_vcd_c.h>
 #include <queue>
@@ -24,6 +25,9 @@
 #endif
 #ifndef CLINT
 #define CLINT 0x02000000
+#endif
+#ifndef ETH
+#define ETH 0x60020000
 #endif
 #ifndef SDC
 #define SDC 0x60000000
@@ -177,9 +181,8 @@ public:
 /**
  *  UART controller
  *  ------------------
- *  The SD card controller is implemented by verilog.
+ *  The UART controller is implemented by verilog.
  */
-
 class uartctl : public axidev
 {
 private:
@@ -206,24 +209,29 @@ public:
  *  ------------------
  *  The SD card controller is implemented by verilog.
  */
-
 class sdctl : public axidev
 {
 private:
-    uint64_t st, cycle;  // simulation time and cycle
-    Vsdc dut;            // design under test
-    VerilatedVcdC *vcd;  // trace pointer
-    FILE *img;           // image file pointer
-    uint64_t cnum;       // command number from start bit
-    uint8_t cmdtk[47];   // command token
-    uint64_t rnum, rmax; // response number from start bit
-    uint8_t restk[136];  // response token
-    uint8_t cstt;        // card state
-    uint16_t rca;        // relative card address
-    uint8_t bwd;         // bus width
-    uint32_t blen;       // block length
-    uint8_t dat[4114];   // data buffer
-    uint64_t dnum, dmax; // data numbers
+    uint64_t st, cycle;      // simulation time and cycle
+    Vsdc dut;                // design under test
+    VerilatedVcdC *vcd;      // trace pointer
+    FILE *img;               // image file pointer
+    uint64_t cnum;           // command number from start bit
+    uint8_t cmdtk[47];       // command token
+    uint64_t rnum, rmax;     // response number from start bit
+    uint8_t restk[136];      // response token
+    uint8_t cstt;            // card state
+    uint8_t acmd;            // indication of ACMD
+    uint8_t cmd;             // command code
+    uint16_t rca;            // relative card address
+    uint8_t csd[16];         // card specific data
+    uint64_t scr;            // SD card configuration register
+    uint8_t bwd;             // bus width
+    uint32_t blen;           // block length
+    uint8_t dat[4114];       // data buffer
+    uint32_t di, dblk, dnum; // data numbers
+    uint32_t dadd;           // data read/write addresses
+    uint8_t dcmd;            // send long CMD response on data line
 public:
     sdctl(const char *fnvcd = 0, const char *fnimg = 0);
     ~sdctl();
@@ -235,6 +243,36 @@ public:
     cohport_t sc() const;
     axidev &mcset(const cohport_t &cp);
     axidev &scset(const cohport_t &cp);
+    void reset(uint8_t value);
+    void negedge();
+    void posedge();
+    void record();
+    void checkpoint(const char *fn);
+    int restore(const char *fn);
+};
+
+/**
+ *  Ethernet controller
+ *  ------------------
+ *  The ethernet controller is implemented by verilog.
+ */
+class ethctl : public axidev
+{
+private:
+    uint64_t st, cycle;      // simulation time and cycle
+    Veth dut;                // design under test
+    VerilatedVcdC *vcd;      // trace pointer
+public:
+    ethctl(const char *fnvcd = 0);
+    ~ethctl();
+    axiport_t m() const;
+    axiport_t s() const;
+    axidev &mset(const axiport_t &ap);
+    axidev &sset(const axiport_t &ap);
+    // cohport_t mc() const;
+    // cohport_t sc() const;
+    // axidev &mcset(const cohport_t &cp);
+    // axidev &scset(const cohport_t &cp);
     void reset(uint8_t value);
     void negedge();
     void posedge();

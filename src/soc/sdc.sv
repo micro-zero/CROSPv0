@@ -1,6 +1,6 @@
 /**
  * sdc.sv:
- *   This file wraps SD card controller module with AXI-Lite
+ *   This file wraps SD card controller module with AXI
  */
 
 module sdc #(

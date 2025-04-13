@@ -3,7 +3,7 @@
 # Execute in docker.io/microzero/riscv-sim:verilator
 
 # parameters
-CPUFREQ = 1000000
+CPUFREQ = 50000000
 TBFREQ  = 500000
 FWD     = 2
 DWD     = 2
@@ -16,10 +16,11 @@ INITRD  = be000000 # same as in DTB
 RST_PC  = 81fff000
 DTBADDR = 81ffe000 # limited to 4KB
 DCBASE  = 80000000
+ETH     = 60020000
 UART    = 60010000
 SDC     = 60000000
 CLINT   = 02000000
-BAUD	= 115200
+BAUD	= 11520000
 
 # Verilator variables
 MAKE = make -j8
@@ -27,12 +28,13 @@ CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 	-I.vcore -DRST_PC="0x$(RST_PC)" -DDCBASE="0x$(DCBASE)" \
 		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) -DIWD=$(IWD) \
 		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
-		-DUART="0x$(UART)" -DSDC="0x$(SDC)" \
+		-DUART="0x$(UART)" -DSDC="0x$(SDC)" -DETH="0x$(ETH)" \
 	-I.intc -DCLINT="0x$(CLINT)" -DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
-	-I.cohub -I.uart -I.sdc -DBAUD="$(BAUD)" \
+	-I.cohub -I.uart -I.sdc -I.eth -DBAUD="$(BAUD)" \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
 VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 \
-	-I../../src/common -I../../src/soc/axi_uart -I../../src/soc/axi_sdc
+	-I../../src/common -I../../src/soc/axi_uart \
+	-I../../src/soc/axi_sdc -I../../src/soc/axi_eth
 VCORE_H  = ../../src/common/types.sv
 VCORE_SV = \
 	../../src/common/mwpram.sv \
@@ -70,6 +72,9 @@ SDC_SV = \
 	../../src/soc/axi_sdc/sd_data_xfer_trig.v \
 	../../src/soc/axi_sdc/axi_sdc_controller.v \
 	../../src/soc/sdc.sv
+ETH_SV = \
+	../../src/soc/axi_eth/ethernet.v \
+	../../src/soc/eth.sv
 
 # Scripts
 define RVTESTS_SCRIPT
@@ -149,16 +154,21 @@ all: main
 	verilator $(VERILATOR_FLAGS) $(SDC_SV) -lib-create sdc -top-module sdc -Mdir .sdc
 	$(MAKE) -C .sdc -f Vsdc.mk
 
+.eth : $(ETH_SV)
+	$(RM) -r .eth
+	verilator $(VERILATOR_FLAGS) $(ETH_SV) -lib-create eth -top-module eth -Mdir .eth
+	$(MAKE) -C .eth -f Veth.mk
+
 verif.o : verif.h soc.h
 
-soc.o : .vcore .intc .cohub .uart .sdc verif.h soc.h
+soc.o : .vcore .intc .cohub .uart .sdc .eth verif.h soc.h
 
-main.o : .vcore .intc .cohub .uart .sdc verif.h soc.h
+main.o : .vcore .intc .cohub .uart .sdc .eth verif.h soc.h
 
 main : verif.o soc.o main.o
 	$(CXX) -O2 verif.o soc.o main.o -o main \
 		.vcore/libvcore.a .intc/libintc.a .cohub/libcohub.a \
-		.uart/libuart.a .sdc/libsdc.a
+		.uart/libuart.a .sdc/libsdc.a .eth/libeth.a
 
 rv : main
 	@bash -c "$$RVTESTS_SCRIPT"
