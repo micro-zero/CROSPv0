@@ -518,15 +518,15 @@ int verifcore::restore(const char *fn)
 }
 
 /*-----------------------------------------------------------*\
-|*                   Interrupt controller                    *|
+|*                          CLINT                            *|
 \*-----------------------------------------------------------*/
 
 /**
- * @brief Constructor function of interrupt controller
+ * @brief Constructor function of CLINT
  * @param fnvcd filename of waveform
  * @param fnsave filename of saved checkpoint
  */
-intctl::intctl(const char *fnvcd)
+clint::clint(const char *fnvcd)
 {
     st = cycle = 0;
     wrec = {0, 0, 0};
@@ -540,9 +540,9 @@ intctl::intctl(const char *fnvcd)
 }
 
 /**
- * @brief Destructor of interrupt controller
+ * @brief Destructor of CLINT
  */
-intctl::~intctl()
+clint::~clint()
 {
     if (vcd)
         vcd->close();
@@ -553,7 +553,7 @@ intctl::~intctl()
  * @brief Get AXI port signals sending to master
  * @return AXI port values
  */
-axiport_t intctl::s() const
+axiport_t clint::s() const
 {
     axiport_t ap;
     ap.arid = dut.s_axi_arid;
@@ -575,7 +575,7 @@ axiport_t intctl::s() const
  * @param ap data of AXI port from master
  * @return the object
  */
-axidev &intctl::sset(const axiport_t &ap)
+axidev &clint::sset(const axiport_t &ap)
 {
     dut.s_axi_awid = ap.awid;
     dut.s_axi_awvalid = ap.awvalid;
@@ -603,7 +603,7 @@ axidev &intctl::sset(const axiport_t &ap)
  * @param dels delta data destination
  * @return self reference
  */
-intctl &intctl::operator>>(dels_t &dels)
+clint &clint::operator>>(dels_t &dels)
 {
     if (dut.s_axi_bvalid && dut.s_axi_bready && wrec.w)
         dels.mems.push(wrec);
@@ -614,17 +614,17 @@ intctl &intctl::operator>>(dels_t &dels)
  * @brief Set reset signal
  * @param value value of rst to set
  */
-void intctl::reset(uint8_t value) { dut.rst = value; }
+void clint::reset(uint8_t value) { dut.rst = value; }
 
 /**
  * @brief Do clock negedge
  */
-void intctl::negedge() { dut.clk = 0, dut.eval(), st++; }
+void clint::negedge() { dut.clk = 0, dut.eval(), st++; }
 
 /**
  * @brief Do clock posedge
  */
-void intctl::posedge()
+void clint::posedge()
 {
     if (dut.s_axi_awvalid && dut.s_axi_awready)
         wrec.a = dut.s_axi_awaddr;
@@ -642,13 +642,18 @@ void intctl::posedge()
     }
     if (dut.s_axi_arvalid && dut.s_axi_arready)
         raddr = dut.s_axi_araddr;
+    uint64_t pend = dut.int_pend;
     dut.clk = 1, dut.eval(), st++, cycle++;
+    if (~(pend >> 3) & 1 && (dut.int_pend >> 3) & 1)
+        fprintf(stderr, "[Info] Software interrupt detected [cycle: %ld]\n", cycle);
+    else if (~(pend >> 7) & 1 && (dut.int_pend >> 7) & 1)
+        fprintf(stderr, "[Info] Timer interrupt detected [cycle: %ld]\n", cycle);
 }
 
 /**
  * @brief Record waveform
  */
-void intctl::record()
+void clint::record()
 {
     if (vcd)
         vcd->dump(st);
@@ -658,7 +663,7 @@ void intctl::record()
  * @brief Save to checkpoint file
  * @param fn checkpoint file name
  */
-void intctl::checkpoint(const char *fn)
+void clint::checkpoint(const char *fn)
 {
     char *name = new (std::nothrow) char[strlen(fn) + 16];
     if (!name)
@@ -689,7 +694,7 @@ void intctl::checkpoint(const char *fn)
  * @param fn checkpoint file name
  * @return -1 if error occurs
  */
-int intctl::restore(const char *fn)
+int clint::restore(const char *fn)
 {
     char *name = new (std::nothrow) char[strlen(fn) + 16];
     if (!name)
@@ -711,6 +716,176 @@ int intctl::restore(const char *fn)
         fread(&cycle, sizeof(cycle), 1, fp) != 1 ||
         fread(&wrec, sizeof(wrec), 1, fp) != 1 ||
         fread(&raddr, sizeof(raddr), 1, fp) != 1)
+        return -1;
+    fclose(fp);
+    delete[] name;
+    return 0;
+}
+
+/*-----------------------------------------------------------*\
+|*                           PLIC                            *|
+\*-----------------------------------------------------------*/
+
+/**
+ * @brief Constructor function of PLIC
+ * @param fnvcd filename of waveform
+ * @param fnsave filename of saved checkpoint
+ */
+plic::plic(const char *fnvcd)
+{
+    st = cycle = 0;
+    vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
+    if (vcd)
+    {
+        Verilated::traceEverOn(true);
+        dut.trace(vcd, 5);
+        vcd->open(fnvcd);
+    }
+}
+
+/**
+ * @brief Destructor of PLIC
+ */
+plic::~plic()
+{
+    if (vcd)
+        vcd->close();
+    delete vcd;
+}
+
+/**
+ * @brief Get AXI port signals sending to master
+ * @return AXI port values
+ */
+axiport_t plic::s() const
+{
+    axiport_t ap;
+    ap.arid = dut.s_axi_arid;
+    ap.awid = dut.s_axi_awid;
+    ap.awready = dut.s_axi_awready;
+    ap.arready = dut.s_axi_arready;
+    ap.wready = dut.s_axi_wready;
+    ap.rvalid = dut.s_axi_rvalid;
+    ap.rresp = dut.s_axi_rresp;
+    ap.rdata = dut.s_axi_rdata;
+    ap.rlast = dut.s_axi_rlast;
+    ap.bvalid = dut.s_axi_bvalid;
+    ap.bresp = dut.s_axi_bresp;
+    return ap;
+}
+
+/**
+ * @brief Set values on AXI port from master
+ * @param ap data of AXI port from master
+ * @return the object
+ */
+axidev &plic::sset(const axiport_t &ap)
+{
+    dut.s_axi_awid = ap.awid;
+    dut.s_axi_awvalid = ap.awvalid;
+    dut.s_axi_awaddr = ap.awaddr;
+    dut.s_axi_awburst = ap.awburst;
+    dut.s_axi_awlen = ap.awlen;
+    dut.s_axi_awsize = ap.awsize;
+    dut.s_axi_arid = ap.arid;
+    dut.s_axi_arvalid = ap.arvalid;
+    dut.s_axi_araddr = ap.araddr;
+    dut.s_axi_arburst = ap.arburst;
+    dut.s_axi_arlen = ap.arlen;
+    dut.s_axi_arsize = ap.arsize;
+    dut.s_axi_wvalid = ap.wvalid;
+    dut.s_axi_wdata = ap.wdata;
+    dut.s_axi_wstrb = ap.wstrb;
+    dut.s_axi_wlast = ap.wlast;
+    dut.s_axi_rready = ap.rready;
+    dut.s_axi_bready = ap.bready;
+    return *this;
+}
+
+/**
+ * @brief Set reset signal
+ * @param value value of rst to set
+ */
+void plic::reset(uint8_t value) { dut.rst = value; }
+
+/**
+ * @brief Do clock negedge
+ */
+void plic::negedge() { dut.clk = 0, dut.eval(), st++; }
+
+/**
+ * @brief Do clock posedge
+ */
+void plic::posedge()
+{
+    uint64_t pend = dut.int_pend;
+    dut.clk = 1, dut.eval(), st++, cycle++;
+    if (~(pend >> 11) & 1 && (dut.int_pend >> 11) & 1)
+        fprintf(stderr, "[Info] External interrupt detected [cycle: %ld]\n", cycle);
+}
+
+/**
+ * @brief Record waveform
+ */
+void plic::record()
+{
+    if (vcd)
+        vcd->dump(st);
+}
+
+/**
+ * @brief Save to checkpoint file
+ * @param fn checkpoint file name
+ */
+void plic::checkpoint(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedSave save;
+    save.open(name);
+    if (!save.isOpen())
+        return;
+    save << dut;
+    save.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "wb");
+    if (!fp)
+        return;
+    fwrite(&st, sizeof(st), 1, fp);
+    fwrite(&cycle, sizeof(cycle), 1, fp);
+    fclose(fp);
+    delete[] name;
+}
+
+/**
+ * @brief Restore from checkpoint file
+ * @param fn checkpoint file name
+ * @return -1 if error occurs
+ */
+int plic::restore(const char *fn)
+{
+    char *name = new (std::nothrow) char[strlen(fn) + 16];
+    if (!name)
+        return -1;
+    strcpy(name, fn);
+    strcat(name, ".0"); // verilator checkpoint file
+    VerilatedRestore restore;
+    restore.open(name);
+    if (!restore.isOpen())
+        return -1;
+    restore >> dut;
+    restore.close();
+    strcpy(name, fn);
+    strcat(name, ".1"); // class dump file
+    FILE *fp = fopen(name, "rb");
+    if (!fp)
+        return -1;
+    if (fread(&st, sizeof(st), 1, fp) != 1 ||
+        fread(&cycle, sizeof(cycle), 1, fp) != 1)
         return -1;
     fclose(fp);
     delete[] name;

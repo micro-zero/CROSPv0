@@ -103,7 +103,7 @@ specific program and debug. Run
 ```
 and the flag `-v` will log every committed instructions before
 the error being detected. `-w` is to output waveform with names
-`intc.vcd` and `vcore.vcd`.
+`clint.vcd`, `vcore.vcd`, etc.
 
 ### RV test
 

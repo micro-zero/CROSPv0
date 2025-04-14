@@ -41,7 +41,8 @@ module decoder #(
 )(
     input logic clk,
     input logic rst,
-    input logic [6:0] interrupt,
+    input logic        intlocal,
+    input logic  [6:0] interrupt,
     input logic [63:0] mstatus,
     input  com_bundle_t [cwd-1:0] com_bundle,
     input  red_bundle_t           red_bundle,
@@ -328,8 +329,6 @@ module decoder #(
             result[g][1].pc    = fet_bundle[g].pc;
             result[g][1].pnpc  = fet_bundle[g].pnpc;
             result[g][1].pat   = fet_bundle[g].pat;
-            result[g][1].call  = fet_bundle[g].call;
-            result[g][1].ret   = fet_bundle[g].ret;
             result[g][1].ir    = oir;
             result[g][1].delta = delta;
             result[g][1].fu[0] = |alu_funct[1];
@@ -354,8 +353,6 @@ module decoder #(
             result[g][2].pc    = fet_bundle[g].pc;
             result[g][2].pnpc  = fet_bundle[g].pnpc;
             result[g][2].pat   = fet_bundle[g].pat;
-            result[g][2].call  = fet_bundle[g].call;
-            result[g][2].ret   = fet_bundle[g].ret;
             result[g][2].ir    = oir;
             result[g][2].delta = delta;
             result[g][2].fu[0] = |alu_funct[2];
@@ -445,13 +442,19 @@ module decoder #(
         else if (redir) stnum <= stnum - stred - stcom; else stnum <= stnum - stcom + 16'(dq_stin);
 
     /* flatten results */
-    lsu_funct_t [fwd-1:0][2:0] f;
+    logic wfi;
+    alu_funct_t [fwd-1:0][2:0] f_alu;
+    lsu_funct_t [fwd-1:0][2:0] f_lsu;
     always_comb for (int i = 0; i < fwd; i++)
-        for (int j = 0; j < 3; j++) f[i][j] = $bits(lsu_funct_t)'(result[i][j].funct);
+        for (int j = 0; j < 3; j++) begin
+            f_alu[i][j] = $bits(alu_funct_t)'(result[i][j].funct);
+            f_lsu[i][j] = $bits(lsu_funct_t)'(result[i][j].funct);
+        end
     always_comb begin
         ready = 0; dq_wvalue = 0; // `dq_wvalue` is the flattened result array
         dq_in = 0; dq_brin = 0; dq_ldin = 0; dq_stin = 0;
         for (int i = 0; i < fwd; i++) begin
+            if (wfi) break;
             if (32'(dq_in) + 32'(result_num[i]) > dqsz - 32'(dq_num) |
                 32'(dq_in) + 32'(result_num[i]) > 32'(dwdin) |
                 16'(dq_in)   + 16'(result_num[i])   > opsz - opnum - 1 |
@@ -471,19 +474,23 @@ module decoder #(
                         dq_wvalue[32'(dq_in)].brid[7] = 1;
                         dq_brin++;
                     end
-                    if (result[i][j].fu[1] & f[i][j].load) begin
+                    if (result[i][j].fu[1] & f_lsu[i][j].load) begin
                         dq_wvalue[32'(dq_in)].ldid[7] = 1;
                         dq_ldin++;
                     end
-                    if (result[i][j].fu[1] & f[i][j].store) begin
+                    if (result[i][j].fu[1] & f_lsu[i][j].store) begin
                         dq_wvalue[32'(dq_in)].stid[7] = 1;
                         dq_stin++;
                     end
                     dq_in++;
                 end
             ready[i] = 1;
+            if (result[i][0].opid[15] & result[i][0].fu[0] & f_alu[i][0].wfi) break;
         end
     end
+    always_ff @(posedge clk) if (rst | intlocal | redir) wfi <= 0;
+        else for (int i = 0; i < fwd; i++)
+            if (result[i][0].opid[15] & result[i][0].fu[0] & f_alu[i][0].wfi) wfi <= 1;
 
     /* decoder queue operation */
     always_comb begin

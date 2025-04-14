@@ -246,9 +246,9 @@ int main(int argc, char *argv[])
             else if (strcmp(argv[i] + j, "t") == 0)
             {
                 if (i + 1 < argc)
-                    cmd.mintime = atoi(argv[i + 1]);
+                    cmd.mintime = atol(argv[i + 1]);
                 if (i + 2 < argc)
-                    cmd.maxtime = atoi(argv[i + 2]);
+                    cmd.maxtime = atol(argv[i + 2]);
                 if (cmd.mintime <= 0)
                     cmd.mintime = 0;
                 if (cmd.maxtime <= 0)
@@ -300,18 +300,19 @@ int main(int argc, char *argv[])
     if (cmd.vcd)
     {
         fprintf(stderr, "[Info] Recording waveform in files: ");
-        fprintf(stderr, "cohub.vcd, vcore.vcd, intc.vcd, uart.vcd, sdc.vcd eth.vcd\n");
+        fprintf(stderr, "cohub.vcd, vcore.vcd, clint.vcd, plic.vcd, uart.vcd, sdc.vcd eth.vcd\n");
     }
 
     /* Device registration */
     memory amem;
     coherhub cohub(cmd.vcd ? "cohub.vcd" : NULL);
     verifcore vrcr(cmd.vcd ? "vcore.vcd" : NULL);
-    intctl intc(cmd.vcd ? "intc.vcd" : NULL);
+    clint cli(cmd.vcd ? "clint.vcd" : NULL);
+    plic pli(cmd.vcd ? "plic.vcd" : NULL);
     uartctl uart(cmd.vcd ? "uart.vcd" : NULL);
     sdctl sdc(cmd.vcd ? "sdc.vcd" : NULL, "sdc.img");
     ethctl eth(cmd.vcd ? "eth.vcd" : NULL);
-    std::vector<axidev *> dev({&amem, &cohub, &vrcr, &intc, &uart, &sdc, &eth}); // AXI device references
+    std::vector<axidev *> dev({&amem, &cohub, &vrcr, &cli, &pli, &uart, &sdc, &eth}); // AXI device references
     const char *err = 0;
     if (cmd.file) // init memory from file
     {
@@ -331,7 +332,8 @@ int main(int argc, char *argv[])
     else if (amem.restore("amem.save") < 0 || // init memory and DUTs from checkpoint
              cohub.restore("cohub.save") < 0 ||
              vrcr.restore("vcore.save") < 0 ||
-             intc.restore("intc.save") < 0 ||
+             cli.restore("clint.save") < 0 ||
+             pli.restore("plic.save") < 0 ||
              uart.restore("uart.save") < 0 ||
              sdc.restore("sdc.save") < 0 ||
              eth.restore("eth.save") < 0)
@@ -397,8 +399,10 @@ int main(int argc, char *argv[])
             if (master) // classify destinations by address
             {
                 slave = &amem;
-                if (addr >= CLINT && addr < CLINT + 0xc0000)
-                    slave = &intc;
+                if (addr >= CLINT && addr < CLINT + 0x10000)
+                    slave = &cli;
+                else if (addr >= PLIC && addr < PLIC + 0x4000000)
+                    slave = &pli;
                 else if (addr >= ETH && addr < ETH + 0x10000)
                     slave = &eth;
                 else if (addr >= SDC && addr < SDC + 0x10000)
@@ -424,8 +428,12 @@ int main(int argc, char *argv[])
         cohub.smmuset(vrcr.mc()), cohub.mmmuset(vrcr.sc());
         cohub.ssdcset(sdc.mc()), cohub.msdcset(sdc.sc());
         /* other connection */
-        vrcr.mtime = intc.int_time; // VCORE -- INTC
-        vrcr.mip_ext = intc.int_pend;
+        vrcr.mtime = cli.int_time; // VCORE -- CLINT/PLIC
+        vrcr.mip_ext = cli.int_pend | pli.int_pend;
+        pli.int_vect = uart.intr << 1 | sdc.intr << 2 | eth.intr << 3;
+        if (cmd.filetype == MEMINIT_HEX) // generate some interrupts for HEX tests
+            if (cycle && cycle % 500 == 0)
+                pli.int_vect = 1 << cycle / 500;
         /* record after synchronization */
         if (cycle >= cmd.mintime)
             for (auto d : dev)
@@ -433,7 +441,7 @@ int main(int argc, char *argv[])
 
         /* state check */
         vrcr >> cmts >> dels; // extract from DUT of vcore
-        // intc >> dels; // extract from DUT of intc (if necessary)
+        // cli >> dels; // extract from DUT of cli (if necessary)
         while (cmts.size() > 1)
         {
             state_t stt; // for print
@@ -567,7 +575,8 @@ int main(int argc, char *argv[])
             amem.checkpoint("amem.save");
             cohub.checkpoint("cohub.save");
             vrcr.checkpoint("vcore.save");
-            intc.checkpoint("intc.save");
+            cli.checkpoint("clint.save");
+            pli.checkpoint("plic.save");
             eth.checkpoint("eth.save");
             sdc.checkpoint("sdc.save");
             uart.checkpoint("uart.save");

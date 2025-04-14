@@ -1,6 +1,7 @@
 #include "verif.h"
 #include "Vvcore.h"
-#include "Vintc.h"
+#include "Vclint.h"
+#include "Vplic.h"
 #include "Vcohub.h"
 #include "Vsdc.h"
 #include "Veth.h"
@@ -22,6 +23,9 @@
 #endif
 #ifndef DCBASE
 #define DCBASE 0x80000000
+#endif
+#ifndef PLIC
+#define PLIC 0x0c000000
 #endif
 #ifndef CLINT
 #define CLINT 0x02000000
@@ -149,27 +153,54 @@ public:
 };
 
 /**
- *  Interrupt controller
+ *  CLINT (core-local interruptor)
  *  --------------------
- *  The interrupt controller is implemented by verilog.
+ *  The CLINT is implemented by verilog.
  */
-class intctl : public axidev
+class clint : public axidev
 {
 private:
     uint64_t st, cycle; // simulation time and cycle
     del_t wrec;         // write transaction record
     uint64_t raddr;     // read transaction address
-    Vintc dut;          // design under test
+    Vclint dut;         // design under test
     VerilatedVcdC *vcd; // trace pointer
 
 public:
     uint64_t &int_pend = dut.int_pend;
     uint64_t &int_time = dut.int_time;
-    intctl(const char *fnvcd = 0);
-    ~intctl();
+    clint(const char *fnvcd = 0);
+    ~clint();
     axiport_t s() const;
     axidev &sset(const axiport_t &ap);
-    intctl &operator>>(dels_t &dels);
+    clint &operator>>(dels_t &dels);
+    void reset(uint8_t value);
+    void negedge();
+    void posedge();
+    void record();
+    void checkpoint(const char *fn);
+    int restore(const char *fn);
+};
+
+/**
+ *  PLIC (platform-level interrupt controller)
+ *  --------------------
+ *  The PLIC is implemented by verilog.
+ */
+class plic : public axidev
+{
+private:
+    uint64_t st, cycle; // simulation time and cycle
+    Vplic dut;          // design under test
+    VerilatedVcdC *vcd; // trace pointer
+
+public:
+    uint64_t &int_pend = dut.int_pend;
+    uint8_t &int_vect = dut.int_vect;
+    plic(const char *fnvcd = 0);
+    ~plic();
+    axiport_t s() const;
+    axidev &sset(const axiport_t &ap);
     void reset(uint8_t value);
     void negedge();
     void posedge();
@@ -192,6 +223,7 @@ private:
     uint64_t div, cnum; // cycle division and number from start bit
     uint8_t buf;        // character state and buffer
 public:
+    uint8_t &intr = dut.intr;
     uartctl(const char *fnvcd = 0);
     ~uartctl();
     axiport_t s() const;
@@ -233,6 +265,7 @@ private:
     uint32_t dadd;           // data read/write addresses
     uint8_t dcmd;            // send long CMD response on data line
 public:
+    uint8_t &intr = dut.intr;
     sdctl(const char *fnvcd = 0, const char *fnimg = 0);
     ~sdctl();
     axiport_t m() const;
@@ -259,10 +292,11 @@ public:
 class ethctl : public axidev
 {
 private:
-    uint64_t st, cycle;      // simulation time and cycle
-    Veth dut;                // design under test
-    VerilatedVcdC *vcd;      // trace pointer
+    uint64_t st, cycle; // simulation time and cycle
+    Veth dut;           // design under test
+    VerilatedVcdC *vcd; // trace pointer
 public:
+    uint8_t &intr = dut.intr;
     ethctl(const char *fnvcd = 0);
     ~ethctl();
     axiport_t m() const;

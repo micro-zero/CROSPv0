@@ -19,6 +19,7 @@ DCBASE  = 80000000
 ETH     = 60020000
 UART    = 60010000
 SDC     = 60000000
+PLIC    = 0c000000
 CLINT   = 02000000
 BAUD	= 11520000
 
@@ -29,8 +30,9 @@ CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) -DIWD=$(IWD) \
 		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
 		-DUART="0x$(UART)" -DSDC="0x$(SDC)" -DETH="0x$(ETH)" \
-	-I.intc -DCLINT="0x$(CLINT)" -DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
+	-I.clint -I.plic -DCLINT="0x$(CLINT)" -DPLIC="0x$(PLIC)" \
 	-I.cohub -I.uart -I.sdc -I.eth -DBAUD="$(BAUD)" \
+	-DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
 VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 \
 	-I../../src/common -I../../src/soc/axi_uart \
@@ -59,7 +61,8 @@ VCORE_SV = \
 	../../src/mmu/mmu.sv \
 	../../src/soc/crospaxi.sv \
 	vcore.sv
-INTC_SV = ../../src/soc/intc.sv
+CLINT_SV = ../../src/soc/clint.sv
+PLIC_SV = ../../src/soc/plic.sv
 COHUB_SV = ../../src/soc/cohub.sv
 UART_SV = ../../src/soc/axi_uart/axi_uart.v ../../src/soc/uart.sv
 SDC_SV = \
@@ -132,11 +135,16 @@ all: main
 		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD) -Gclint="64'h$(CLINT)"
 	$(MAKE) -C .vcore -f Vvcore.mk
 
-.intc : $(INTC_SV)
-	$(RM) -r .intc
-	verilator $(VERILATOR_FLAGS) $(INTC_SV) -lib-create intc -top-module intc -Mdir .intc \
-		-Gclint="64'h$(CLINT)" -Gcpufreq="64'd$(CPUFREQ)" -Gtbfreq="64'd$(TBFREQ)"
-	$(MAKE) -C .intc -f Vintc.mk
+.clint : $(CLINT_SV)
+	$(RM) -r .clint
+	verilator $(VERILATOR_FLAGS) $(CLINT_SV) -lib-create clint -top-module clint -Mdir .clint \
+		-Gcpufreq="64'd$(CPUFREQ)" -Gtbfreq="64'd$(TBFREQ)"
+	$(MAKE) -C .clint -f Vclint.mk
+
+.plic : $(PLIC_SV)
+	$(RM) -r .plic
+	verilator $(VERILATOR_FLAGS) $(PLIC_SV) -lib-create plic -top-module plic -Mdir .plic
+	$(MAKE) -C .plic -f Vplic.mk
 
 .cohub : $(COHUB_SV)
 	$(RM) -r .cohub
@@ -161,13 +169,13 @@ all: main
 
 verif.o : verif.h soc.h
 
-soc.o : .vcore .intc .cohub .uart .sdc .eth verif.h soc.h
+soc.o : .vcore .clint .plic .cohub .uart .sdc .eth verif.h soc.h
 
-main.o : .vcore .intc .cohub .uart .sdc .eth verif.h soc.h
+main.o : .vcore .clint .plic .cohub .uart .sdc .eth verif.h soc.h
 
 main : verif.o soc.o main.o
 	$(CXX) -O2 verif.o soc.o main.o -o main \
-		.vcore/libvcore.a .intc/libintc.a .cohub/libcohub.a \
+		.vcore/libvcore.a .clint/libclint.a .plic/libplic.a .cohub/libcohub.a \
 		.uart/libuart.a .sdc/libsdc.a .eth/libeth.a
 
 rv : main

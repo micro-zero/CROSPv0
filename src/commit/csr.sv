@@ -64,7 +64,8 @@ module csr(
     input  logic  [2:0] ret,
     /* exception caused by CSR module */
     output logic        eout,  // raise exception
-    output logic  [6:0] intr,  // raise interrupt
+    output logic        intl,  // local interrupt detected (for halting wfi)
+    output logic  [6:0] intg,  // raise global interrupt
     output logic        flush, // cause pipeline flush
     /* input and output not from instructions */
     input  logic [63:0] in_ip,      // interrupt pending
@@ -228,13 +229,16 @@ module csr(
     always_comb mip = in_ip    & 64'b1000_1000_0000 | // MEIP/MTIP from external
                       mip_base & 64'b0011_0011_1011;
     always_comb begin
-        intr = 0;
+        intg = 0;
+        intl = 0;
         /* an interrupt is generated when related `mip` and `mie` bit is set,
            and interrupt is globally enabled */
-        for (int i = 0; i < 12; i++) if (mip[i] & mie[i])
+        for (int i = 0; i < 12; i++) if (mip[i] & mie[i]) begin
+            intl = 1;
             if (~mideleg[i] & (level < 3 | level == 3 & mstatus[3]) |
                  mideleg[i] & (level < 1 | level == 1 & mstatus[1])) // globally enabled
-                intr = {1'b1, 6'(i)};
+                intg = {1'b1, 6'(i)};
+        end
     end
     /* some CSRs change can cause pipeline flush */
     always_comb flush = we & (addr == 12'h300 | addr == 12'h100 | // [m|s]status

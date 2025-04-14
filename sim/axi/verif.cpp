@@ -624,7 +624,9 @@ void memory::posedge()
             if ((axiport.wstrb >> i) & 1)
             {
                 this->ui8(axibuff.awaddr + wbursti * sz + i) = uint8_t(axiport.wdata >> 8 * i);
-                if (smem)
+                /* todo: should distinguish DMA (non-cachable) write using other
+                   value like `awid` instead of `awsize` for robustness */
+                if (smem && sz != 8)
                     smem->ui8(axibuff.awaddr + wbursti * sz + i) = uint8_t(axiport.wdata >> 8 * i);
             }
         wbursti++;
