@@ -561,8 +561,9 @@ void memory::posedge()
 {
     /* handle HTIF requests */
     uint64_t reqaddr = 0;
-    if (owner[htifaddr.tohost >> 6] || owner[htifaddr.fromhost >> 6]) // buffer out-of-date
-        mcport.lock = 1;                                              // start handling HTIF
+    if (htifaddr.tohost && htifaddr.fromhost)
+        if (owner[htifaddr.tohost >> 6] || owner[htifaddr.fromhost >> 6]) // buffer out-of-date
+            mcport.lock = 1;                                              // start handling HTIF
     if (mcport.lock && scport.lock)
     {
         htifexit = htif(*this, htifaddr, args, smem, &owner, &reqaddr);

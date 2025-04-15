@@ -913,7 +913,7 @@ sdctl::sdctl(const char *fnvcd, const char *fnimg)
     bwd = 1;
     blen = 512;
     uint8_t csd_cp[16] = {
-        0x40, 0x0e, 0x00, 0x0b, 0xfb, 0x79, 0x00, 0x01, 0x00, 0x00, 0x7f, 0x80, 0x0a, 0x40, 0x00, 0x00};
+        0x00, 0x00, 0x40, 0x0a, 0x80, 0x7f, 0x00, 0x00, 0x01, 0x00, 0x79, 0xfb, 0x0b, 0x00, 0x0e, 0x40};
     memcpy(csd, csd_cp, sizeof(csd_cp));
     scr = 0x0205000000000000ull;
     if (vcd)
@@ -1281,28 +1281,30 @@ void sdctl::posedge()
         {
             if (di == 0)
             {
-                uint8_t *raw = new uint8_t[blen * 8 > 512 ? blen * 8 : 512];
+                uint64_t len = blen * 8 > 512 ? blen * 8 : 512;
+                uint8_t *raw = new uint8_t[len];
                 uint32_t rawlen;
                 if (raw)
                 {
                     if (dcmd && cmd == 6)
                     {
                         rawlen = 512;
-                        memset(raw, 0, sizeof(raw));
+                        memset(raw, 0, len);
                         for (int i = 400; i < 512; i++)
                             raw[511 - i] = 1;
+                        raw[511 - 376] = 1;
                     }
                     else if (dcmd && cmd == (0x80 | 51))
                     {
                         rawlen = 64;
-                        memset(raw, 0, sizeof(raw));
+                        memset(raw, 0, len);
                         for (int i = 0; i < 64; i++)
                             raw[63 - i] = (scr >> i) & 0x1;
                     }
                     else if (dcmd && cmd == (0x80 | 13))
                     {
                         rawlen = 512;
-                        memset(raw, 0, sizeof(raw));
+                        memset(raw, 0, len);
                         raw[0] = bwd == 4;
                         raw[1] = 0;
                     }
@@ -1489,8 +1491,8 @@ uartctl::uartctl(const char *fnvcd)
 {
     st = cycle = 0;
     div = CPUFREQ / BAUD;
-    cnum = (uint64_t)-1;
-    buf = 0;
+    rnum = tnum = (uint64_t)-1;
+    rxq = 0;
     vcd = fnvcd ? new (std::nothrow) VerilatedVcdC : NULL;
     if (vcd)
     {
@@ -1569,21 +1571,44 @@ void uartctl::negedge() { dut.clk = 0, dut.eval(), st++; }
  */
 void uartctl::posedge()
 {
+    /* get characters from stdin */
+    char ch;
+    if ((ch = nbgetchar()) != EOF)
+        txq.push_back(ch);
+    if (tnum == (uint64_t)-1 && !txq.empty())
+        tnum = 0;
+
+    /* receive and transmit */
     uint8_t txold = dut.TxD;
     dut.clk = 1, dut.eval(), st++, cycle++;
-    if (cnum == (uint64_t)-1 && txold && !dut.TxD) // idle and negedge
+    if (rnum == (uint64_t)-1 && txold && !dut.TxD) // idle and negedge
     {
-        cnum = 0; // receive start bit
-        buf = 0;
+        rnum = 0; // receive start bit
+        rxq = 0;
     }
-    if (cnum != -1) // receiving and counting
-        cnum++;
+    if (rnum != -1) // receiving and counting
+        rnum++;
     for (int i = 0; i < 10; i++)
-        if (cnum == i * div + div / 2) // sampling i-th bit
+        if (rnum == i * div + div / 2) // sampling i-th bit
             if (i == 9)
-                putchar(buf), fflush(stdout), cnum = -1; // stop bit
+                putchar(rxq), fflush(stdout), rnum = -1; // stop bit
             else if (i > 0)
-                buf |= dut.TxD << i - 1;
+                rxq |= dut.TxD << i - 1;
+    for (int i = 0; i < 16; i++)
+        if (tnum == i * div)
+            if (i == 0) // start bit
+                dut.RxD = 0;
+            else if (i < 9) // transmit
+                dut.RxD = txq[0] >> i - 1 & 0x1;
+            else if (i == 9) // stop bit
+                dut.RxD = 1;
+            else if (i == 15) // finish after delay
+            {
+                tnum = (uint64_t)-1;
+                txq.erase(txq.begin());
+            }
+    if (tnum != -1) // transmitting and counting
+        tnum++;
 }
 
 /**
@@ -1620,8 +1645,13 @@ void uartctl::checkpoint(const char *fn)
     fwrite(&st, sizeof(st), 1, fp);
     fwrite(&cycle, sizeof(cycle), 1, fp);
     fwrite(&div, sizeof(div), 1, fp);
-    fwrite(&cnum, sizeof(cnum), 1, fp);
+    fwrite(&rnum, sizeof(rnum), 1, fp);
+    fwrite(&tnum, sizeof(tnum), 1, fp);
+    fwrite(&rxq, sizeof(rxq), 1, fp);
+    uint64_t buf = txq.size();
     fwrite(&buf, sizeof(buf), 1, fp);
+    for (int i = 0; i < buf; i++)
+        fwrite(&txq[i], sizeof(txq[i]), 1, fp);
     fclose(fp);
     delete[] name;
 }
@@ -1652,9 +1682,20 @@ int uartctl::restore(const char *fn)
     if (fread(&st, sizeof(st), 1, fp) != 1 ||
         fread(&cycle, sizeof(cycle), 1, fp) != 1 ||
         fread(&div, sizeof(div), 1, fp) != 1 ||
-        fread(&cnum, sizeof(cnum), 1, fp) != 1 ||
-        fread(&buf, sizeof(buf), 1, fp) != 1)
+        fread(&rnum, sizeof(rnum), 1, fp) != 1 ||
+        fread(&tnum, sizeof(tnum), 1, fp) != 1 ||
+        fread(&rxq, sizeof(rxq), 1, fp) != 1)
         return -1;
+    uint64_t buf;
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        uint8_t c;
+        if (fread(&c, sizeof(c), 1, fp) != 1)
+            return -1;
+        txq.push_back(c);
+    }
     fclose(fp);
     delete[] name;
     return 0;

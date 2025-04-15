@@ -217,11 +217,12 @@ public:
 class uartctl : public axidev
 {
 private:
-    uint64_t st, cycle; // simulation time and cycle
-    Vuart dut;          // design under test
-    VerilatedVcdC *vcd; // trace pointer
-    uint64_t div, cnum; // cycle division and number from start bit
-    uint8_t buf;        // character state and buffer
+    uint64_t st, cycle;       // simulation time and cycle
+    Vuart dut;                // design under test
+    VerilatedVcdC *vcd;       // trace pointer
+    uint64_t div, rnum, tnum; // cycle division and number from start bit
+    uint8_t rxq;              // receive queue (buffer)
+    std::vector<uint8_t> txq; // transmission queue
 public:
     uint8_t &intr = dut.intr;
     uartctl(const char *fnvcd = 0);

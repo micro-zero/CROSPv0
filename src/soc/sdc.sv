@@ -117,9 +117,11 @@ module sdc #(
 
     /* coherence slave interface */
     logic  [7:0] coh_rqst_sb;
-    always_comb s_coh_resp = locked ? 0 : s_coh_rqst;
+    always_comb s_coh_resp = locked ? 0 : coh_rqst_sb;
     always_comb s_coh_mesi = 0; // no cached data
-    always_ff @(posedge clk) if (rst) coh_rqst_sb <= 0; else if (|s_coh_rqst) coh_rqst_sb <= s_coh_rqst;
+    always_ff @(posedge clk) if (rst) coh_rqst_sb <= 0;
+        else if (|s_coh_rqst) coh_rqst_sb <= s_coh_rqst;
+        else if (|s_coh_resp) coh_rqst_sb <= 0;
 
     /* instance */
     sdc_controller sdc_inst(
