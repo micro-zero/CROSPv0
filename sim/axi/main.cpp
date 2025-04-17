@@ -7,7 +7,7 @@
 
 typedef struct
 {
-    const char *file = 0, *dtb = 0, *initrd = 0, *dump = 0;
+    const char *file = 0, *dtb = 0, *initrd = 0, *buildroot = 0, *rom = 0;
     std::vector<const char *> args;
     uint8_t sim = 0, verbose = 0, vcd = 0, help = 0, filetype = MEMINIT_ELF;
     uint64_t mintime = 0, maxtime = INT64_MAX;
@@ -241,8 +241,10 @@ int main(int argc, char *argv[])
                 cmd.dtb = argv[++i];
             else if (strcmp(argv[i] + j, "initrd") == 0)
                 cmd.initrd = argv[++i];
-            else if (strcmp(argv[i] + j, "dump") == 0)
-                cmd.dump = argv[++i];
+            else if (strcmp(argv[i] + j, "br") == 0)
+                cmd.buildroot = argv[++i];
+            else if (strcmp(argv[i] + j, "rom") == 0)
+                cmd.rom = argv[++i];
             else if (strcmp(argv[i] + j, "t") == 0)
             {
                 if (i + 1 < argc)
@@ -277,7 +279,8 @@ int main(int argc, char *argv[])
         printf("    -elf: (default) load RISC-V ELF executable\n");
         printf("    -dtb `binary`: specify device tree binary\n");
         printf("    -initrd `binary`: specify initial rootfs\n");
-        printf("    -dump `binary`: specify memory output file\n");
+        printf("    -br `binary`: specify buildroot image output file\n");
+        printf("    -rom `binary`: specify ROM image output file\n");
         printf("    -t `t1` `t2`: simulation time between `t1` and `t2`\n");
         printf("    -s: run and check with simulator\n");
         printf("    -v: verbose mode\n");
@@ -317,16 +320,27 @@ int main(int argc, char *argv[])
     if (cmd.file) // init memory from file
     {
         err = amem.init(cmd.file, cmd.dtb, cmd.initrd, cmd.filetype, cmd.args, RST_PC, DTBADDR, INITRD);
-        if (cmd.dump)
+        if (cmd.buildroot)
         {
-            fprintf(stderr, "[Info] Dumping memory to file: %s\n", cmd.dump);
-            FILE *fp = fopen(cmd.dump, "wb");
+            fprintf(stderr, "[Info] Dumping memory to file: %s\n", cmd.buildroot);
+            FILE *fp = fopen(cmd.buildroot, "wb");
             if (!fp)
-                return fprintf(stderr, "[Error] Cannot open file %s\n", cmd.dump), 255;
+                return fprintf(stderr, "[Error] Cannot open file %s\n", cmd.buildroot), 255;
             for (int i = 0; i < 0x4000000; i++)
                 fwrite(&amem[(INITRD - 0x80000000 + i) % 0x40000000 + 0x80000000], 1, 1, fp);
             fclose(fp);
             fprintf(stderr, "[Info] Memory dumped\n");
+        }
+        if (cmd.rom)
+        {
+            fprintf(stderr, "[Info] Dumping ROM to file: %s\n", cmd.rom);
+            FILE *fp = fopen(cmd.rom, "wb");
+            if (!fp)
+                return fprintf(stderr, "[Error] Cannot open file %s\n", cmd.rom), 255;
+            for (int i = 0; i < ROMSZ; i++)
+                fwrite(&amem[ROM + i], 1, 1, fp);
+            fclose(fp);
+            fprintf(stderr, "[Info] ROM dumped\n");
         }
     }
     else if (amem.restore("amem.save") < 0 || // init memory and DUTs from checkpoint

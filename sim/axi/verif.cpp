@@ -198,12 +198,30 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
     {
         /* bin code */
         FILE *fp = fopen(fname, "r");
-        if (!this->load(fp, 0x2000000, 0xbe000000)) // initrd at 0xbe000000
-            return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
-        if (!this->load(fp, 0x2000000, 0x80000000)) // boot code at 0x80000000
-            return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
-        fclose(fp);
-        htifaddr = {0x800421b0, 0x800421b8}; // buildroot default
+        if (!fp)
+            return sprintf(errstr, "[Error] Unable to open file %s\n", fname), errstr;
+        else if (strcmp(fname, "br.img") == 0)
+        {
+            if (!this->load(fp, 0x2000000, 0xbe000000)) // initrd at 0xbe000000
+                return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
+            if (!this->load(fp, 0x2000000, 0x80000000)) // boot code at 0x80000000
+                return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
+            fclose(fp);
+            htifaddr = {0x800421b0, 0x800421b8}; // buildroot default
+        }
+        else if (strcmp(fname, "rom.img") == 0)
+        {
+            if (!this->load(fp, 0x10000, 0x10000)) // ROM at 0x10000
+                return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
+            fclose(fp);
+            /* start section: jump from reset address to ELF entry */
+            this->add(0x1000, entry);
+            this->ui32(entry + 0) = 0x100b7;    // lui ra, 0x10
+            this->ui32(entry + 4) = 0x04008093; // addi ra, ra, 0x40
+            this->ui32(entry + 8) = 0x8067;     // ret
+        }
+        else
+            return sprintf(errstr, "[Error] Binary filename should be [br.img, rom.img]\n"), errstr;
     }
     if (dtb)
     {

@@ -39,6 +39,12 @@
 #ifndef UART
 #define UART 0x60010000
 #endif
+#ifndef ROM
+#define ROM 0x00010000
+#endif
+#ifndef ROMSZ
+#define ROMSZ 0x00010000
+#endif
 #ifndef CPUFREQ
 #define CPUFREQ 1000000
 #endif

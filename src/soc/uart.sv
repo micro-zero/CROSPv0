@@ -27,12 +27,11 @@ module uart #(
     output logic  [1:0] s_axi_rresp,
     output logic        s_axi_rvalid,
     input  logic        s_axi_rready,
-    /* RS232 interface */
-    output logic TxD,
-    input  logic RxD,
-    output logic RTSn,
-    input  logic CTSn
+    /* UART interface */
+    output logic uart_tx,
+    input  logic uart_rx
 );
+    logic RTSn;
     axi_uart #(.CPU_FREQ(cpufreq), .BAUD_RATE(baud)) axi_uart_inst(
         .clock(clk),
         .async_resetn(~rst),
@@ -53,9 +52,9 @@ module uart #(
         .s_axi_rresp(s_axi_rresp),
         .s_axi_rvalid(s_axi_rvalid),
         .s_axi_rready(s_axi_rready),
-        .TxD(TxD),
-        .RxD(RxD),
+        .TxD(uart_tx),
+        .RxD(uart_rx),
         .RTSn(RTSn),
-        .CTSn(CTSn)
+        .CTSn(0)
     );
 endmodule

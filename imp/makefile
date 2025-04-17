@@ -1,9 +1,9 @@
-.PHONY : imp sim clean
+.PHONY : project clean
 
 # parameters
 CPUFREQ       = 50
 PARAM_CPUFREQ = $(CPUFREQ)000000
-PARAM_TBFREQ  = 10000000
+PARAM_TBFREQ  = $(CPUFREQ)0000
 PARAM_FWD     = 2
 PARAM_DWD     = 2
 PARAM_RWD     = 2
@@ -11,16 +11,14 @@ PARAM_IWD     = 3
 PARAM_EWD     = 2
 PARAM_CWD     = 2
 PARAM_MWD     = 1
-PARAM_INITRD  = be000000
-PARAM_RSTPC   = 81fff000
-PARAM_DTBADDR = 81ffe000
-PARAM_TOHOST  = 800421b8
-PARAM_FRHOST  = 800421b0
 PARAM_DCBASE  = 80000000
-PARAM_DCSIZE  = 40000000
-PARAM_UART    = 10000000
+PARAM_ETH     = 60020000
+PARAM_UART    = 60010000
+PARAM_SDC     = 60000000
 PARAM_CLINT   = 02000000
-PARAM_BLSIZE  = 04000000
+PARAM_PLIC    = 0c000000
+PARAM_RSTPC   = 00010040
+PARAM_ROM     = 00010000
 
 CORE_SRC = \
 	$(shell realpath ../src/common/types.sv) \
@@ -44,63 +42,95 @@ CORE_SRC = \
 	$(shell realpath ../src/mmu/tlb.sv) \
 	$(shell realpath ../src/mmu/cache.sv) \
 	$(shell realpath ../src/mmu/mmu.sv) \
-	$(shell realpath ../src/soc/crosplite.sv)
-INTC_SRC = $(shell realpath ../src/soc/intc.sv)
-SOCC_SRC = $(shell realpath ../src/soc/socc.sv)
-SIM_IMG = /dev/urandom
+	$(shell realpath ../src/soc/crospaxi.sv)
+CLINT_SRC = $(shell realpath ../src/soc/clint.sv)
+PLIC_SRC  = $(shell realpath ../src/soc/plic.sv)
+COHUB_SRC = $(shell realpath ../src/soc/cohub.sv)
+UART_SRC  = \
+	$(shell realpath ../src/soc/axi_uart/axi_uart.sv) \
+	$(shell realpath ../src/soc/uart.sv)
+SDC_SRC   = \
+	$(shell realpath ../src/soc/axi_sdc/sd_defines.vh) \
+	$(shell realpath ../src/soc/axi_sdc/axi_sd_fifo.sv) \
+	$(shell realpath ../src/soc/axi_sdc/axi_sd_fifo_filler.sv) \
+	$(shell realpath ../src/soc/axi_sdc/sd_cmd_master.sv) \
+	$(shell realpath ../src/soc/axi_sdc/sd_data_master.sv) \
+	$(shell realpath ../src/soc/axi_sdc/sd_cmd_serial_host.sv) \
+	$(shell realpath ../src/soc/axi_sdc/sd_data_serial_host.sv) \
+	$(shell realpath ../src/soc/axi_sdc/sd_data_xfer_trig.sv) \
+	$(shell realpath ../src/soc/axi_sdc/axi_sdc_controller.sv) \
+	$(shell realpath ../src/soc/sdc.sv)
+ETH_SRC   = \
+	$(shell realpath ../src/soc/axi_eth/ethernet.sv) \
+	$(shell realpath ../src/soc/eth.sv)
+DEF_SRC = $(shell realpath ../src/soc/default.sv)
+ROM_IMG = /dev/urandom
 
-define IMP_TCL
+define PRJ_TCL
 	# Create project and add IP
-	create_project .imp .imp -part xc7k325tffg900-2
+	create_project .prj .prj -part xc7k325tffg900-2
 	set_property board_part digilentinc.com:genesys2:part0:1.1 [current_project]
-	set_property ip_repo_paths {.core .intc .socc .sdintf .cohintf} [current_project]
+	set_property ip_repo_paths { \\
+		.core .rom .clint .plic .cohub .uart .sdc .def .uartintf .mdiointf .sdintf .cohintf \\
+	} [current_project]
 	update_ip_catalog
 
 	# Create board design
 	# Custom IP
 	create_bd_design "CROSPv0soc"
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:CROSP:0.1 core
-	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:INTC:0.1 intctl
-	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:SOCC:0.1 socctl
-	set_property CONFIG.dcbase 0x$(PARAM_DCBASE) [get_bd_cells core]
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:ROM:0.1 rom
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:CLINT:0.1 clint
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:PLIC:0.1 plic
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:COHUB:0.1 cohub
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:UART:0.1 uart
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:SDC:0.1 sdc
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:DEF:0.1 def
 	set_property CONFIG.init 0 [get_bd_cells core]
-	set_property CONFIG.fwd $(PARAM_FWD) [get_bd_cells core]
-	set_property CONFIG.dwd $(PARAM_DWD) [get_bd_cells core]
-	set_property CONFIG.rwd $(PARAM_RWD) [get_bd_cells core]
-	set_property CONFIG.iwd $(PARAM_IWD) [get_bd_cells core]
-	set_property CONFIG.ewd $(PARAM_EWD) [get_bd_cells core]
-	set_property CONFIG.mwd $(PARAM_MWD) [get_bd_cells core]
-	set_property CONFIG.cwd $(PARAM_CWD) [get_bd_cells core]
-	set_property CONFIG.rst_pc {0x$(PARAM_RSTPC)} [get_bd_cells core]
-	set_property CONFIG.tohost {0x$(PARAM_TOHOST)} [get_bd_cells core]
-	set_property CONFIG.frhost {0x$(PARAM_FRHOST)} [get_bd_cells core]
-	set_property CONFIG.uart {0x$(PARAM_UART)} [get_bd_cells core]
-	set_property CONFIG.clint {0x$(PARAM_CLINT)} [get_bd_cells intctl]
-	set_property CONFIG.cpufreq {$(PARAM_CPUFREQ)} [get_bd_cells intctl]
-	set_property CONFIG.tbfreq {$(PARAM_TBFREQ)} [get_bd_cells intctl]
-	set_property CONFIG.initrd {0x$(PARAM_INITRD)} [get_bd_cells socctl]
-	set_property CONFIG.blsize {0x$(PARAM_BLSIZE)} [get_bd_cells socctl]
-	set_property CONFIG.dcbase {0x$(PARAM_DCBASE)} [get_bd_cells socctl]
-	set_property CONFIG.dcsize {0x$(PARAM_DCSIZE)} [get_bd_cells socctl]
+	set_property CONFIG.dcbase {0x$(PARAM_DCBASE)} [get_bd_cells core]
+	set_property CONFIG.rst_pc {0x$(PARAM_RSTPC)}  [get_bd_cells core]
+	set_property CONFIG.fwd {$(PARAM_FWD)} [get_bd_cells core]
+	set_property CONFIG.dwd {$(PARAM_DWD)} [get_bd_cells core]
+	set_property CONFIG.rwd {$(PARAM_RWD)} [get_bd_cells core]
+	set_property CONFIG.iwd {$(PARAM_IWD)} [get_bd_cells core]
+	set_property CONFIG.ewd {$(PARAM_EWD)} [get_bd_cells core]
+	set_property CONFIG.mwd {$(PARAM_MWD)} [get_bd_cells core]
+	set_property CONFIG.cwd {$(PARAM_CWD)} [get_bd_cells core]
+	set_property CONFIG.cpufreq {$(PARAM_CPUFREQ)} [get_bd_cells clint]
+	set_property CONFIG.tbfreq  {$(PARAM_TBFREQ)}  [get_bd_cells clint]
+	set_property CONFIG.cpufreq {$(PARAM_CPUFREQ)} [get_bd_cells uart]
 	# Xilinx IP
 	create_bd_cell -type ip -vlnv xilinx.com:ip:mig_7series:4.2 ddr3
-	create_bd_cell -type ip -vlnv xilinx.com:ip:axi_uartlite:2.0 uartlite
-	create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 core_rst_gate_0
+	create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 intcat
+	create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 ipor
 	apply_bd_automation -rule xilinx.com:bd_rule:mig_7series \\
 		-config {Board_Interface "ddr3_sdram"} [get_bd_cells ddr3]
-	set_property CONFIG.XML_INPUT_FILE {$(shell realpath .imp)/mig.prj} [get_bd_cells ddr3]
+	set_property CONFIG.XML_INPUT_FILE {$(shell realpath .prj)/mig.prj} [get_bd_cells ddr3]
 	set_property CONFIG.RESET_BOARD_INTERFACE {Custom} [get_bd_cells ddr3]
 	set_property CONFIG.MIG_DONT_TOUCH_PARAM {Custom} [get_bd_cells ddr3]
 	set_property CONFIG.BOARD_MIG_PARAM {ddr3_sdram} [get_bd_cells ddr3]
-	set_property -dict [list \\
-		CONFIG.C_BAUDRATE {115200} \\
-		CONFIG.UARTLITE_BOARD_INTERFACE {usb_uart} \\
-	] [get_bd_cells uartlite]
-	set_property -dict [list \\
-		CONFIG.C_OPERATION {or} \\
-		CONFIG.C_SIZE {1} \\
-	] [get_bd_cells core_rst_gate_0]
+	set_property CONFIG.NUM_PORTS   {8}  [get_bd_cells intcat]
+	set_property CONFIG.C_OPERATION {or} [get_bd_cells ipor]
+	set_property CONFIG.C_SIZE      {64} [get_bd_cells ipor]
 	# Connection
+	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
+		Clk_master {Auto}                                       \\
+		Clk_slave  {Auto}                                       \\
+		Clk_xbar   {Auto}                                       \\
+		Master     {/core/m_axi}                                \\
+		Slave      {/clint/s_axi}                               \\
+		ddr_seg    {Auto}                                       \\
+		intc_ip    {New AXI SmartConnect}                       \\
+		master_apm {0}                                          \\
+	} [get_bd_intf_pins clint/s_axi]
+	apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { \\
+		Clk      {/ddr3/ui_addn_clk_0 (50 MHz)}                   \\
+		Freq     {50}                                             \\
+	} [get_bd_pins cohub/clk]
+	apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { \\
+		Clk      {/ddr3/ui_addn_clk_0 (50 MHz)}                   \\
+		Freq     {50}                                             \\
+	} [get_bd_pins def/clk]
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
 		Clk_master {Auto}                                       \\
 		Clk_slave  {/ddr3/ui_clk (200 MHz)}                     \\
@@ -109,24 +139,10 @@ define IMP_TCL
 		Slave      {/ddr3/S_AXI}                                \\
 		ddr_seg    {Auto}                                       \\
 		intc_ip    {New AXI SmartConnect}                       \\
-		master_apm {0}                                          
+		master_apm {0}                                          \\
 	} [get_bd_intf_pins ddr3/S_AXI]
-	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
-		Clk_master {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}       \\
-		Clk_slave  {/ddr3/ui_clk (200 MHz)}                     \\
-		Clk_xbar   {/ddr3/ui_clk (200 MHz)}                     \\
-		Master     {/core/m_axi}                                \\
-		Slave      {/uartlite/S_AXI}                            \\
-		ddr_seg    {Auto}                                       \\
-		intc_ip    {/axi_smc}                                   \\
-		master_apm {0}
-	} [get_bd_intf_pins uartlite/S_AXI]
 	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
-		Board_Interface {usb_uart ( USB UART ) }                 \\
-		Manual_Source   {Auto}                                   \\
-	}  [get_bd_intf_pins uartlite/UART]
-	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
-		Board_Interface {reset (Reset)}                          \\
+		Board_Interface {reset ( Reset ) }                       \\
 		Manual_Source   {New External Port (ACTIVE_LOW)}         \\
 	} [get_bd_pins ddr3/sys_rst]
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
@@ -134,55 +150,120 @@ define IMP_TCL
 		Clk_slave  {Auto}                                       \\
 		Clk_xbar   {Auto}                                       \\
 		Master     {/core/m_axi}                                \\
-		Slave      {/intctl/s_axi}                              \\
+		Slave      {/plic/s_axi}                                \\
 		ddr_seg    {Auto}                                       \\
 		intc_ip    {New AXI SmartConnect}                       \\
 		master_apm {0}                                          \\
-	} [get_bd_intf_pins intctl/s_axi]
+	} [get_bd_intf_pins plic/s_axi]
+	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
+		Clk_master {Auto}                                       \\
+		Clk_slave  {Auto}                                       \\
+		Clk_xbar   {Auto}                                       \\
+		Master     {/core/m_axi}                                \\
+		Slave      {/sdc/s_axi}                                 \\
+		ddr_seg    {Auto}                                       \\
+		intc_ip    {New AXI SmartConnect}                       \\
+		master_apm {0}                                          \\
+	} [get_bd_intf_pins sdc/s_axi]
+	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
+		Clk_master {Auto}                                       \\
+		Clk_slave  {Auto}                                       \\
+		Clk_xbar   {Auto}                                       \\
+		Master     {/core/m_axi}                                \\
+		Slave      {/uart/s_axi}                                \\
+		ddr_seg    {Auto}                                       \\
+		intc_ip    {New AXI SmartConnect}                       \\
+		master_apm {0}                                          \\
+	} [get_bd_intf_pins uart/s_axi]
 	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
 		Board_Interface {Custom}                                 \\
 		Manual_Source   {/ddr3/ui_clk_sync_rst (ACTIVE_HIGH)}    \\
-	} [get_bd_pins rst_ddr3_$(CPUFREQ)M/ext_reset_in]
+	} [get_bd_pins rst_ddr3_50M/ext_reset_in]
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
-		Clk_master {Auto}                                       \\
+		Clk_master {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
 		Clk_slave  {/ddr3/ui_clk (200 MHz)}                     \\
-		Clk_xbar   {/ddr3/ui_clk (200 MHz)}                     \\
-		Master     {/socctl/m_axi}                              \\
+		Clk_xbar   {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
+		Master     {/sdc/m_axi}                                 \\
 		Slave      {/ddr3/S_AXI}                                \\
+		dr_seg     {Auto}                                       \\
+		intc_ip    {/axi_smc}                                   \\
+		master_apm {0}                                          \\
+	} [get_bd_intf_pins sdc/m_axi]
+	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
+		Clk_master {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
+		Clk_slave  {Auto}                                       \\
+		Clk_xbar   {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
+		Master     {/core/m_axi}                                \\
+		Slave      {/rom/s_axi}                                 \\
 		ddr_seg    {Auto}                                       \\
 		intc_ip    {/axi_smc}                                   \\
 		master_apm {0}                                          \\
-	} [get_bd_intf_pins socctl/m_axi]
+	} [get_bd_intf_pins rom/s_axi]
 	create_bd_intf_port -mode Master -vlnv mprc.pku.edu.cn:MPRC:sdcard_rtl:1.0 sd
-	create_bd_port -dir I -type rst cpu_rst
+	create_bd_intf_port -mode Master -vlnv mprc.pku.edu.cn:MPRC:uart_rtl:1.0 uart
 	set_property name ddr [get_bd_intf_ports ddr3_sdram]
 	set_property name sys_clk [get_bd_intf_ports sys_diff_clock]
 	set_property name sys_rst [get_bd_ports reset]
-	set_property name uart [get_bd_intf_ports usb_uart]
-	set_property CONFIG.POLARITY ACTIVE_HIGH [get_bd_ports cpu_rst]
 	set_property CONFIG.FREQ_HZ 200000000 [get_bd_intf_ports /sys_clk]
-	disconnect_bd_net /rst_ddr3_$(CPUFREQ)M_peripheral_reset [get_bd_pins core/rst]
-	disconnect_bd_net /rst_ddr3_$(CPUFREQ)M_peripheral_reset [get_bd_pins intctl/rst]
-	connect_bd_intf_net [get_bd_intf_ports sd] [get_bd_intf_pins socctl/sd]
-	connect_bd_intf_net [get_bd_intf_pins socctl/m_coh] [get_bd_intf_pins core/s_coh]
-	connect_bd_intf_net [get_bd_intf_pins socctl/s_coh] [get_bd_intf_pins core/m_coh]
-	connect_bd_net [get_bd_pins ddr3/init_calib_complete] [get_bd_pins socctl/ddr_init]
-	connect_bd_net [get_bd_pins core/mip_ext] [get_bd_pins intctl/int_pend]
-	connect_bd_net [get_bd_pins core/mtime] [get_bd_pins intctl/int_time]
-	connect_bd_net [get_bd_pins core_rst_gate_0/Op1] [get_bd_ports cpu_rst]
-	connect_bd_net [get_bd_pins core_rst_gate_0/Op2] [get_bd_pins socctl/core_rst]
-	connect_bd_net [get_bd_pins core_rst_gate_0/Res] [get_bd_pins core/rst]
-	connect_bd_net [get_bd_pins core_rst_gate_0/Res] [get_bd_pins intctl/rst]
-	assign_bd_address -offset 0x$(PARAM_CLINT) -range 32M [get_bd_addr_segs intctl/s_axi/reg0]
-	assign_bd_address -offset 0x$(PARAM_UART) -range 64K [get_bd_addr_segs uartlite/S_AXI/Reg]
+	connect_bd_net      [get_bd_pins clint/int_time]   [get_bd_pins core/mtime]
+	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In0]
+	connect_bd_net      [get_bd_pins uart/intr]        [get_bd_pins intcat/In1]
+	connect_bd_net      [get_bd_pins sdc/intr]         [get_bd_pins intcat/In2]
+	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In3]
+	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In4]
+	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In5]
+	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In6]
+	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In7]
+	connect_bd_net      [get_bd_pins intcat/dout]      [get_bd_pins plic/int_vect]
+	connect_bd_net      [get_bd_pins plic/int_pend]    [get_bd_pins ipor/Op1]
+	connect_bd_net      [get_bd_pins clint/int_pend]   [get_bd_pins ipor/Op2]
+	connect_bd_net      [get_bd_pins ipor/Res]         [get_bd_pins core/mip_ext]
+	connect_bd_intf_net [get_bd_intf_pins cohub/s_mmu] [get_bd_intf_pins core/m_coh]
+	connect_bd_intf_net [get_bd_intf_pins cohub/s_sdc] [get_bd_intf_pins sdc/m_coh]
+	connect_bd_intf_net [get_bd_intf_pins cohub/m_mmu] [get_bd_intf_pins core/s_coh]
+	connect_bd_intf_net [get_bd_intf_pins cohub/m_sdc] [get_bd_intf_pins sdc/s_coh]
+	connect_bd_intf_net [get_bd_intf_ports sd]         [get_bd_intf_pins sdc/sd]
+	connect_bd_intf_net [get_bd_intf_ports uart]       [get_bd_intf_pins uart/uart]
+	connect_bd_intf_net [get_bd_intf_pins def/s_mem]   [get_bd_intf_pins cohub/m_mem]
+	connect_bd_intf_net [get_bd_intf_pins def/m_mem]   [get_bd_intf_pins cohub/s_mem]
+	assign_bd_address -offset 0x$(PARAM_CLINT) -range 64K [get_bd_addr_segs clint/s_axi/reg0]
+	assign_bd_address -offset 0x$(PARAM_PLIC)  -range 64M [get_bd_addr_segs plic/s_axi/reg0]
+	assign_bd_address -offset 0x$(PARAM_UART)  -range 64K [get_bd_addr_segs uart/s_axi/reg0]
+	assign_bd_address -offset 0x$(PARAM_SDC)   -range 64K [get_bd_addr_segs sdc/s_axi/reg0]
+	assign_bd_address -offset 0x$(PARAM_ROM)   -range 64K [get_bd_addr_segs rom/s_axi/reg0]
+	delete_bd_objs [get_bd_addr_segs sdc/m_axi/SEG_clint_reg0] \\
+		[get_bd_addr_segs sdc/m_axi/SEG_plic_reg0] [get_bd_addr_segs sdc/m_axi/SEG_rom_reg0] \\
+		[get_bd_addr_segs sdc/m_axi/SEG_sdc_reg0] [get_bd_addr_segs sdc/m_axi/SEG_uart_reg0]
 	# Save board design
 	save_bd_design
-	generate_target all [get_files .imp/.imp.srcs/sources_1/bd/CROSPv0soc/CROSPv0soc.bd]
+	generate_target all [get_files .prj/.prj.srcs/sources_1/bd/CROSPv0soc/CROSPv0soc.bd]
+	# Make wrapper and set constraints
+	make_wrapper -files [get_files .prj/.prj.srcs/sources_1/bd/CROSPv0soc/CROSPv0soc.bd] -top
+	add_files .prj/.prj.gen/sources_1/bd/CROSPv0soc/hdl/CROSPv0soc_wrapper.v
+	add_files -fileset constrs_1 .prj/gs2.xdc
 
+	# Create simulation design
+	save_bd_design_as CROSPv0sim -dir {.prj/.prj.srcs/sim_1/bd}
+	add_files -fileset sim_1 -norecurse .prj/.prj.srcs/sim_1/bd/CROSPv0sim/CROSPv0sim.bd
+	open_bd_design {.prj/.prj.srcs/sim_1/bd/CROSPv0sim/CROSPv0sim.bd}
+	remove_files .prj/.prj.srcs/sim_1/bd/CROSPv0sim/ip/CROSPv0sim_ddr3_0/mig.prj
+	delete_bd_objs [get_bd_nets reset_1] [get_bd_intf_nets sys_diff_clock_1] \\
+		[get_bd_nets rst_ddr3_200M_peripheral_aresetn] [get_bd_intf_nets ddr3_DDR3] \\
+		[get_bd_intf_nets axi_smc_M01_AXI] [get_bd_cells ddr3] [get_bd_nets ddr3_mmcm_locked] \\
+		[get_bd_nets ddr3_ui_clk] [get_bd_nets ddr3_ui_clk_sync_rst] [get_bd_cells rst_ddr3_200M] \\
+		[get_bd_nets rst_ddr3_50M_peripheral_aresetn] [get_bd_cells rst_ddr3_50M] \\
+		[get_bd_intf_ports ddr] [get_bd_ports sys_rst] [get_bd_intf_ports sys_clk]
+	create_bd_port -dir I -type clk -freq_hz $(PARAM_CPUFREQ) clk
+	create_bd_port -dir I -type rst rst
+	connect_bd_net [get_bd_pins /core/clk] [get_bd_ports clk]
+	connect_bd_net [get_bd_pins /core/rst] [get_bd_ports rst]
+	save_bd_design
+endef
+export PRJ_TCL
+
+define BLD_TCL
+	open_project .prj/.prj.xpr
 	# Run
-	make_wrapper -files [get_files .imp/.imp.srcs/sources_1/bd/CROSPv0soc/CROSPv0soc.bd] -top
-	add_files .imp/.imp.gen/sources_1/bd/CROSPv0soc/hdl/CROSPv0soc_wrapper.v
-	add_files -fileset constrs_1 .imp/gs2.xdc
 	# # if no optimization is needed, uncomment these lines
 	# set_property STEPS.OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
 	# set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
@@ -195,7 +276,7 @@ define IMP_TCL
 	# # end of extra optimization
 	launch_runs impl_1 -to_step write_bitstream -jobs 32
 endef
-export IMP_TCL
+export BLD_TCL
 
 define SIM_TCL
 	# Create project and add IP
@@ -294,16 +375,16 @@ define CORE_TCL
 endef
 export CORE_TCL
 
-define INTC_TCL
-	# Package interrupt controller
-	ipx::infer_core .intc
-	ipx::current_core .intc/component.xml
+define ROM_TCL
+	# Package boot ROM
+	ipx::infer_core .rom
+	ipx::current_core .rom/component.xml
 	set_property vendor mprc.pku.edu.cn [ipx::current_core]
 	set_property library MPRC [ipx::current_core]
-	set_property name INTC [ipx::current_core]
+	set_property name ROM [ipx::current_core]
 	set_property version 0.1 [ipx::current_core]
-	set_property display_name INTCv0 [ipx::current_core]
-	set_property description {INTerrupt Controller} [ipx::current_core]
+	set_property display_name ROMv0 [ipx::current_core]
+	set_property description {Core-Local INTerruptor} [ipx::current_core]
 	set_property vendor_display_name MPRC [ipx::current_core]
 	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
 	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
@@ -319,33 +400,26 @@ define INTC_TCL
 	ipx::check_integrity [ipx::current_core]
 	ipx::save_core [ipx::current_core]
 endef
-export INTC_TCL
+export ROM_TCL
 
-define SOCC_TCL
-	# Import SD card and coherence interface
-	create_project -in_memory -part xc7k325tffg900-2
-	set_property ip_repo_paths {.sdintf .cohintf} [current_project]
-	update_ip_catalog
-	# Package SoC controller
-	ipx::infer_core .socc
-	ipx::current_core .socc/component.xml
+define CLINT_TCL
+	# Package core-local interruptor
+	ipx::infer_core .clint
+	ipx::current_core .clint/component.xml
 	set_property vendor mprc.pku.edu.cn [ipx::current_core]
 	set_property library MPRC [ipx::current_core]
-	set_property name SOCC [ipx::current_core]
+	set_property name CLINT [ipx::current_core]
 	set_property version 0.1 [ipx::current_core]
-	set_property display_name SOCCv0 [ipx::current_core]
-	set_property description {SOC Controller} [ipx::current_core]
+	set_property display_name CLINTv0 [ipx::current_core]
+	set_property description {Core-Local INTerruptor} [ipx::current_core]
 	set_property vendor_display_name MPRC [ipx::current_core]
 	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
 	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
-	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces core_rst -of_objects [ipx::current_core]]
-	ipx::add_bus_parameter FREQ_HZ [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
 	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
 		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
 	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
 		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
-	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
-		ipx::get_bus_interfaces core_rst -of_objects [ipx::current_core]]]
 	set_property core_revision 2 [ipx::current_core]
 	ipx::update_source_project_archive -component [ipx::current_core]
 	ipx::create_xgui_files [ipx::current_core]
@@ -353,7 +427,267 @@ define SOCC_TCL
 	ipx::check_integrity [ipx::current_core]
 	ipx::save_core [ipx::current_core]
 endef
-export SOCC_TCL
+export CLINT_TCL
+
+define PLIC_TCL
+	# Package core-local interruptor
+	ipx::infer_core .plic
+	ipx::current_core .plic/component.xml
+	set_property vendor mprc.pku.edu.cn [ipx::current_core]
+	set_property library MPRC [ipx::current_core]
+	set_property name PLIC [ipx::current_core]
+	set_property version 0.1 [ipx::current_core]
+	set_property display_name PLICv0 [ipx::current_core]
+	set_property description {Core-Local INTerruptor} [ipx::current_core]
+	set_property vendor_display_name MPRC [ipx::current_core]
+	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
+	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
+		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
+	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
+		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
+	set_property core_revision 2 [ipx::current_core]
+	ipx::update_source_project_archive -component [ipx::current_core]
+	ipx::create_xgui_files [ipx::current_core]
+	ipx::update_checksums [ipx::current_core]
+	ipx::check_integrity [ipx::current_core]
+	ipx::save_core [ipx::current_core]
+endef
+export PLIC_TCL
+
+define UART_TCL
+	# Import UART interface
+	create_project -in_memory -part xc7k325tffg900-2
+	set_property ip_repo_paths {.uartintf} [current_project]
+	update_ip_catalog
+	# Package UART AXI controller
+	ipx::infer_core .uart
+	ipx::current_core .uart/component.xml
+	set_property vendor mprc.pku.edu.cn [ipx::current_core]
+	set_property library MPRC [ipx::current_core]
+	set_property name UART [ipx::current_core]
+	set_property version 0.1 [ipx::current_core]
+	set_property display_name UARTv0 [ipx::current_core]
+	set_property description {UART AXI controller} [ipx::current_core]
+	set_property vendor_display_name MPRC [ipx::current_core]
+	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
+	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
+		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
+	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
+		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
+	set_property core_revision 2 [ipx::current_core]
+	ipx::update_source_project_archive -component [ipx::current_core]
+	ipx::create_xgui_files [ipx::current_core]
+	ipx::update_checksums [ipx::current_core]
+	ipx::check_integrity [ipx::current_core]
+	ipx::save_core [ipx::current_core]
+endef
+export UART_TCL
+
+define SDC_TCL
+	# Import SD card interface
+	create_project -in_memory -part xc7k325tffg900-2
+	set_property ip_repo_paths {.sdintf .cohintf} [current_project]
+	update_ip_catalog
+	# Package SD card controller
+	ipx::infer_core .sdc
+	ipx::current_core .sdc/component.xml
+	set_property vendor mprc.pku.edu.cn [ipx::current_core]
+	set_property library MPRC [ipx::current_core]
+	set_property name SDC [ipx::current_core]
+	set_property version 0.1 [ipx::current_core]
+	set_property display_name SDCv0 [ipx::current_core]
+	set_property description {SD card controller} [ipx::current_core]
+	set_property vendor_display_name MPRC [ipx::current_core]
+	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
+	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
+		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
+	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
+		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
+	set_property core_revision 2 [ipx::current_core]
+	ipx::update_source_project_archive -component [ipx::current_core]
+	ipx::create_xgui_files [ipx::current_core]
+	ipx::update_checksums [ipx::current_core]
+	ipx::check_integrity [ipx::current_core]
+	ipx::save_core [ipx::current_core]
+endef
+export SDC_TCL
+
+define ETH_TCL
+	# Import MDIO interface
+	create_project -in_memory -part xc7k325tffg900-2
+	set_property ip_repo_paths {.mdiointf} [current_project]
+	update_ip_catalog
+	# Package ethernet controller
+	ipx::infer_core .eth
+	ipx::current_core .eth/component.xml
+	set_property vendor mprc.pku.edu.cn [ipx::current_core]
+	set_property library MPRC [ipx::current_core]
+	set_property name ETH [ipx::current_core]
+	set_property version 0.1 [ipx::current_core]
+	set_property display_name ETHv0 [ipx::current_core]
+	set_property description {Ethernet controller} [ipx::current_core]
+	set_property vendor_display_name MPRC [ipx::current_core]
+	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
+	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
+		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
+	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
+		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
+	set_property core_revision 2 [ipx::current_core]
+	ipx::update_source_project_archive -component [ipx::current_core]
+	ipx::create_xgui_files [ipx::current_core]
+	ipx::update_checksums [ipx::current_core]
+	ipx::check_integrity [ipx::current_core]
+	ipx::save_core [ipx::current_core]
+endef
+export ETH_TCL
+
+define DEF_TCL
+	# Import coherence interface
+	create_project -in_memory -part xc7k325tffg900-2
+	set_property ip_repo_paths {.cohintf} [current_project]
+	update_ip_catalog
+	# Package default module
+	ipx::infer_core .def
+	ipx::current_core .def/component.xml
+	set_property vendor mprc.pku.edu.cn [ipx::current_core]
+	set_property library MPRC [ipx::current_core]
+	set_property name DEF [ipx::current_core]
+	set_property version 0.1 [ipx::current_core]
+	set_property display_name DEFv0 [ipx::current_core]
+	set_property description {Default module} [ipx::current_core]
+	set_property vendor_display_name MPRC [ipx::current_core]
+	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
+	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
+		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
+	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
+		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
+	set_property core_revision 2 [ipx::current_core]
+	ipx::update_source_project_archive -component [ipx::current_core]
+	ipx::create_xgui_files [ipx::current_core]
+	ipx::update_checksums [ipx::current_core]
+	ipx::check_integrity [ipx::current_core]
+	ipx::save_core [ipx::current_core]
+endef
+export DEF_TCL
+
+define COHUB_TCL
+	# Import coherence interface
+	create_project -in_memory -part xc7k325tffg900-2
+	set_property ip_repo_paths {.cohintf} [current_project]
+	update_ip_catalog
+	# Package coherence hub
+	ipx::infer_core .cohub
+	ipx::current_core .cohub/component.xml
+	set_property vendor mprc.pku.edu.cn [ipx::current_core]
+	set_property library MPRC [ipx::current_core]
+	set_property name COHUB [ipx::current_core]
+	set_property version 0.1 [ipx::current_core]
+	set_property display_name COHUBv0 [ipx::current_core]
+	set_property description {Coherence hub} [ipx::current_core]
+	set_property vendor_display_name MPRC [ipx::current_core]
+	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
+	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
+		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
+	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
+		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
+	set_property core_revision 2 [ipx::current_core]
+	ipx::update_source_project_archive -component [ipx::current_core]
+	ipx::create_xgui_files [ipx::current_core]
+	ipx::update_checksums [ipx::current_core]
+	ipx::check_integrity [ipx::current_core]
+	ipx::save_core [ipx::current_core]
+endef
+export COHUB_TCL
+
+define ROM_SV_HEAD
+	module rom #(
+		parameter size = 16384 // ROM size
+	)(
+		input  logic clk,
+		input  logic rst,
+		/* AXI interface */
+		input  logic [31:0] s_axi_awaddr,
+		input  logic        s_axi_awvalid,
+		output logic        s_axi_awready,
+		input  logic [63:0] s_axi_wdata,
+		input  logic        s_axi_wvalid,
+		output logic        s_axi_wready,
+		output logic  [1:0] s_axi_bresp,
+		output logic        s_axi_bvalid,
+		input  logic        s_axi_bready,
+		input  logic [31:0] s_axi_araddr,
+		input  logic        s_axi_arvalid,
+		output logic        s_axi_arready,
+		output logic [63:0] s_axi_rdata,
+		output logic  [1:0] s_axi_rresp,
+		output logic        s_axi_rvalid,
+		input  logic        s_axi_rready
+	);
+		logic [63:0] mem[size/8-1:0];
+		logic [31:0] waddr;
+		logic [63:0] wdata;
+		always_ff @(posedge clk)
+			if (rst) begin
+				s_axi_awready <= 1;
+				s_axi_arready <= 1;
+				s_axi_wready  <= 1;
+				s_axi_rvalid  <= 0;
+				s_axi_bvalid  <= 0;
+			end else begin
+				/* AW handshake */
+				if (s_axi_awready & s_axi_awvalid) begin
+					s_axi_awready <= 0;
+					waddr <= s_axi_awaddr;
+				end
+				/* AR handshake */
+				if (s_axi_arready & s_axi_arvalid) begin
+					s_axi_arready <= 0;
+					s_axi_rvalid  <= 1;
+					s_axi_rresp   <= 0;
+					s_axi_rdata   <= mem[s_axi_araddr >> 3];
+				end
+				/* W handshake */
+				if (s_axi_wready & s_axi_wvalid) begin
+					s_axi_wready <= 0;
+					wdata <= s_axi_wdata;
+				end
+				/* R handshake */
+				if (s_axi_rready & s_axi_rvalid) begin
+					s_axi_arready <= 1;
+					s_axi_rvalid  <= 0;
+				end
+				/* AW and W handshake */
+				if (~s_axi_awready & ~s_axi_wready) begin
+					s_axi_bvalid <= 1;
+					s_axi_bresp  <= 1;
+				end
+				/* B handshake */
+				if (s_axi_bready & s_axi_bvalid) begin
+					s_axi_awready <= 1;
+					s_axi_wready  <= 1;
+					s_axi_bvalid  <= 0;
+				end
+			end
+		initial begin
+endef
+export ROM_SV_HEAD
+define ROM_SV_TAIL
+		end
+	endmodule
+endef
+export ROM_SV_TAIL
 
 define TB_SV
 	`timescale 1ns / 1ps
@@ -769,6 +1103,77 @@ define SDINTF_XML
 endef
 export SDINTF_XML
 
+define UARTINTF_RTL
+	<?xml version="1.0" encoding="UTF-8"?>
+	<spirit:abstractionDefinition xmlns:xilinx="http://www.xilinx.com"
+		xmlns:spirit="http://www.spiritconsortium.org/XMLSchema/SPIRIT/1685-2009"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<spirit:vendor>mprc.pku.edu.cn</spirit:vendor>
+	<spirit:library>MPRC</spirit:library>
+	<spirit:name>uart_rtl</spirit:name>
+	<spirit:version>1.0</spirit:version>
+	<spirit:busType spirit:vendor="mprc.pku.edu.cn"
+		spirit:library="MPRC" spirit:name="uart" spirit:version="1.0"/>
+	<spirit:ports>
+		<spirit:port>
+		<spirit:logicalName>rx</spirit:logicalName>
+		<spirit:wire>
+			<spirit:qualifier>
+			<spirit:isData>true</spirit:isData>
+			</spirit:qualifier>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onSlave>
+			<spirit:defaultValue>1</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
+		<spirit:port>
+		<spirit:logicalName>tx</spirit:logicalName>
+		<spirit:wire>
+			<spirit:qualifier>
+			<spirit:isData>true</spirit:isData>
+			</spirit:qualifier>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onSlave>
+			<spirit:defaultValue>1</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
+	</spirit:ports>
+	</spirit:abstractionDefinition>
+endef
+export UARTINTF_RTL
+
+define UARTINTF_XML
+	<?xml version="1.0" encoding="UTF-8"?>
+	<spirit:busDefinition
+		xmlns:xilinx="http://www.xilinx.com"
+		xmlns:spirit="http://www.spiritconsortium.org/XMLSchema/SPIRIT/1685-2009"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<spirit:vendor>mprc.pku.edu.cn</spirit:vendor>
+	<spirit:library>MPRC</spirit:library>
+	<spirit:name>uart</spirit:name>
+	<spirit:version>1.0</spirit:version>
+	<spirit:directConnection>false</spirit:directConnection>
+	<spirit:isAddressable>false</spirit:isAddressable>
+	<spirit:maxMasters>1</spirit:maxMasters>
+	<spirit:maxSlaves>1</spirit:maxSlaves>
+	</spirit:busDefinition>
+endef
+export UARTINTF_XML
+
 define COHINTF_RTL
 	<?xml version="1.0" encoding="UTF-8"?>
 	<spirit:abstractionDefinition xmlns:xilinx="http://www.xilinx.com"
@@ -781,6 +1186,22 @@ define COHINTF_RTL
 	<spirit:busType spirit:vendor="mprc.pku.edu.cn" spirit:library="MPRC"
 		spirit:name="coherence" spirit:version="1.0"/>
 	<spirit:ports>
+		<spirit:port>
+		<spirit:logicalName>lock</spirit:logicalName>
+		<spirit:description>lock signal</spirit:description>
+		<spirit:wire>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onSlave>
+			<spirit:defaultValue>0</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
 		<spirit:port>
 		<spirit:logicalName>rqst</spirit:logicalName>
 		<spirit:description>request ID</spirit:description>
@@ -902,8 +1323,153 @@ define COHINTF_XML
 endef
 export COHINTF_XML
 
+define MDIOINTF_RTL
+	<?xml version="1.0" encoding="UTF-8"?>
+	<spirit:abstractionDefinition
+		xmlns:xilinx="http://www.xilinx.com"
+		xmlns:spirit="http://www.spiritconsortium.org/XMLSchema/SPIRIT/1685-2009"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<spirit:vendor>mprc.pku.edu.cn</spirit:vendor>
+	<spirit:library>MPRC</spirit:library>
+	<spirit:name>mdio_rtl</spirit:name>
+	<spirit:version>1.0</spirit:version>
+	<spirit:busType spirit:vendor="mprc.pku.edu.cn"
+		spirit:library="MPRC" spirit:name="mdio" spirit:version="1.0"/>
+	<spirit:ports>
+		<spirit:port>
+		<spirit:logicalName>clock</spirit:logicalName>
+		<spirit:description>clock signal</spirit:description>
+		<spirit:wire>
+			<spirit:qualifier>
+			<spirit:isClock>true</spirit:isClock>
+			</spirit:qualifier>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onSlave>
+			<spirit:defaultValue>0</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
+		<spirit:port>
+		<spirit:logicalName>reset</spirit:logicalName>
+		<spirit:description>reset signal</spirit:description>
+		<spirit:wire>
+			<spirit:qualifier>
+			<spirit:isReset>true</spirit:isReset>
+			</spirit:qualifier>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onSlave>
+		</spirit:wire>
+		</spirit:port>
+		<spirit:port>
+		<spirit:logicalName>int</spirit:logicalName>
+		<spirit:description>interrupt</spirit:description>
+		<spirit:wire>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onSlave>
+			<spirit:defaultValue>0</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
+		<spirit:port>
+		<spirit:logicalName>data_t</spirit:logicalName>
+		<spirit:description>data tri-state</spirit:description>
+		<spirit:wire>
+			<spirit:qualifier>
+			<spirit:isData>true</spirit:isData>
+			</spirit:qualifier>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onSlave>
+			<spirit:defaultValue>1</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
+		<spirit:port>
+		<spirit:logicalName>data_o</spirit:logicalName>
+		<spirit:description>data output</spirit:description>
+		<spirit:wire>
+			<spirit:qualifier>
+			<spirit:isData>true</spirit:isData>
+			</spirit:qualifier>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onSlave>
+			<spirit:defaultValue>0</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
+		<spirit:port>
+		<spirit:logicalName>data_i</spirit:logicalName>
+		<spirit:description>input data</spirit:description>
+		<spirit:wire>
+			<spirit:qualifier>
+			<spirit:isData>true</spirit:isData>
+			</spirit:qualifier>
+			<spirit:onMaster>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			<spirit:direction>in</spirit:direction>
+			</spirit:onMaster>
+			<spirit:onSlave>
+			<spirit:presence>required</spirit:presence>
+			<spirit:width>1</spirit:width>
+			</spirit:onSlave>
+			<spirit:defaultValue>0</spirit:defaultValue>
+		</spirit:wire>
+		</spirit:port>
+	</spirit:ports>
+	</spirit:abstractionDefinition>
+endef
+export MDIOINTF_RTL
+
+define MDIOINTF_XML
+	<?xml version="1.0" encoding="UTF-8"?>
+	<spirit:busDefinition
+		xmlns:xilinx="http://www.xilinx.com"
+		xmlns:spirit="http://www.spiritconsortium.org/XMLSchema/SPIRIT/1685-2009"
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<spirit:vendor>mprc.pku.edu.cn</spirit:vendor>
+	<spirit:library>MPRC</spirit:library>
+	<spirit:name>mdio</spirit:name>
+	<spirit:version>1.0</spirit:version>
+	<spirit:directConnection>false</spirit:directConnection>
+	<spirit:isAddressable>false</spirit:isAddressable>
+	<spirit:maxMasters>1</spirit:maxMasters>
+	<spirit:maxSlaves>1</spirit:maxSlaves>
+	</spirit:busDefinition>
+endef
+export MDIOINTF_XML
+
 define GS2_XDC
-	set_property -dict {PACKAGE_PIN E18  IOSTANDARD LVCMOS12} [get_ports {cpu_rst}];
 	set_property -dict {PACKAGE_PIN P28  IOSTANDARD LVCMOS33} [get_ports {sd_cd}];
 	set_property -dict {PACKAGE_PIN R29  IOSTANDARD LVCMOS33} [get_ports {sd_cmd_io}];
 	set_property -dict {PACKAGE_PIN R26  IOSTANDARD LVCMOS33} [get_ports {sd_dat_io[0]}];
@@ -912,46 +1478,95 @@ define GS2_XDC
 	set_property -dict {PACKAGE_PIN T30  IOSTANDARD LVCMOS33} [get_ports {sd_dat_io[3]}];
 	set_property -dict {PACKAGE_PIN AE24 IOSTANDARD LVCMOS33} [get_ports {sd_reset}];
 	set_property -dict {PACKAGE_PIN R28  IOSTANDARD LVCMOS33} [get_ports {sd_sclk}];
+	set_property -dict {PACKAGE_PIN Y23  IOSTANDARD LVCMOS33} [get_ports {uart_tx}];
+	set_property -dict {PACKAGE_PIN Y20  IOSTANDARD LVCMOS33} [get_ports {uart_rx}];
 endef
 export GS2_XDC
 
-imp : .core/ .intc/ .socc/ .sdintf/ .cohintf/
-	$(RM) -r .imp/ && mkdir .imp
-	echo "$$MIG_PRJ" > .imp/mig.prj
-	echo "$$IMP_TCL" > .imp/imp.tcl
-	echo "$$GS2_XDC" > .imp/gs2.xdc
-	vivado -mode batch -source .imp/imp.tcl >/dev/null 2>&1
+project : .sdintf/ .cohintf/ .core/ .clint/ .plic/ .cohub/ .rom/ .sdc/ .uart/ .eth/ .def/
+	$(RM) -r .prj/ && mkdir .prj
+	echo "$$MIG_PRJ" > .prj/mig.prj
+	echo "$$PRJ_TCL" > .prj/prj.tcl
+	echo "$$BLD_TCL" > .prj/bld.tcl
+	echo "$$GS2_XDC" > .prj/gs2.xdc
+	echo "$$TB_SV"   > .prj/tb.sv
+	vivado -mode batch -source .prj/prj.tcl >/dev/null 2>&1
 
-sim : .core/ .intc/ .sdintf/ .cohintf/
-	$(RM) -r .sim/ && mkdir .sim
-	dd bs=32M count=1 if=$(realpath $(SIM_IMG)) of=.sim/initrd.img
-	dd bs=32M count=1 if=$(realpath $(SIM_IMG)) of=.sim/code.img skip=1
-	echo "$$TB_SV"   > .sim/tb.sv
-	echo "$$SIM_TCL" > .sim/sim.tcl
-	vivado -mode batch -source .sim/sim.tcl >/dev/null 2>&1
+build : project
+	vivado -mode batch -source .prj/bld.tcl >/dev/null 2>&1
 
-.core/ :
+.core/ : $(CORE_SRC)
 	$(RM) -r .core/ && mkdir .core
 	ln -s $(CORE_SRC) .core/
 	echo "$$CORE_TCL" > .core/core.tcl
 	vivado -mode batch -source .core/core.tcl >/dev/null 2>&1
 
-.intc/ :
-	$(RM) -r .intc/ && mkdir .intc
-	ln -s $(INTC_SRC) .intc/
-	echo "$$INTC_TCL" > .intc/intc.tcl
-	vivado -mode batch -source .intc/intc.tcl >/dev/null 2>&1
+.rom/ :
+	$(RM) -r .rom/ && mkdir .rom
+	echo "$$ROM_SV_HEAD" > .rom/rom.sv
+	hexdump -v -n 65536 -e '2/4 "%08X " "\n"' $(ROM_IMG) | \
+		awk '{printf "\t\t\tmem["NR-1"] <= 0x" $$2$$1 ";\n"}' | \
+		sed "s/0x/64'h/g" >> .rom/rom.sv
+	echo "$$ROM_SV_TAIL" >> .rom/rom.sv
+	echo "$$ROM_TCL" > .rom/rom.tcl
+	vivado -mode batch -source .rom/rom.tcl >/dev/null 2>&1
 
-.socc/ : .sdintf/ .cohintf/
-	$(RM) -r .socc/ && mkdir .socc
-	ln -s $(SOCC_SRC) .socc/
-	echo "$$SOCC_TCL" > .socc/socc.tcl
-	vivado -mode batch -source .socc/socc.tcl >/dev/null 2>&1
+.clint/ : $(CLINT_SRC)
+	$(RM) -r .clint/ && mkdir .clint
+	ln -s $(CLINT_SRC) .clint/
+	echo "$$CLINT_TCL" > .clint/clint.tcl
+	vivado -mode batch -source .clint/clint.tcl >/dev/null 2>&1
+
+.plic/ : $(PLIC_SRC)
+	$(RM) -r .plic/ && mkdir .plic
+	ln -s $(PLIC_SRC) .plic/
+	echo "$$PLIC_TCL" > .plic/plic.tcl
+	vivado -mode batch -source .plic/plic.tcl >/dev/null 2>&1
+
+.uart/ : $(UART_SRC) .uartintf/
+	$(RM) -r .uart/ && mkdir .uart
+	ln -s $(UART_SRC) .uart/
+	echo "$$UART_TCL" > .uart/uart.tcl
+	vivado -mode batch -source .uart/uart.tcl >/dev/null 2>&1
+
+.sdc/ : $(SDC_SRC) .sdintf/ .cohintf/
+	$(RM) -r .sdc/ && mkdir .sdc
+	ln -s $(SDC_SRC) .sdc/
+	echo "$$SDC_TCL" > .sdc/sdc.tcl
+	vivado -mode batch -source .sdc/sdc.tcl >/dev/null 2>&1
+
+.eth/ : $(ETH_SRC) .mdiointf/
+	$(RM) -r .eth/ && mkdir .eth
+	ln -s $(ETH_SRC) .eth/
+	echo "$$ETH_TCL" > .eth/eth.tcl
+	vivado -mode batch -source .eth/eth.tcl >/dev/null 2>&1
+
+.def/ : $(DEF_SRC) .cohintf/
+	$(RM) -r .def/ && mkdir .def
+	ln -s $(DEF_SRC) .def/
+	echo "$$DEF_TCL" > .def/def.tcl
+	vivado -mode batch -source .def/def.tcl >/dev/null 2>&1
+
+.cohub/ : $(COHUB_SRC) .cohintf/
+	$(RM) -r .cohub/ && mkdir .cohub
+	ln -s $(COHUB_SRC) .cohub/
+	echo "$$COHUB_TCL" > .cohub/cohub.tcl
+	vivado -mode batch -source .cohub/cohub.tcl >/dev/null 2>&1
+
+.uartintf/ :
+	$(RM) -r .uartintf/ && mkdir .uartintf
+	echo "$$UARTINTF_RTL" > .uartintf/uart_rtl.xml
+	echo "$$UARTINTF_XML" > .uartintf/uart.xml
 
 .sdintf/ :
 	$(RM) -r .sdintf/ && mkdir .sdintf
 	echo "$$SDINTF_RTL" > .sdintf/sdcard_rtl.xml
 	echo "$$SDINTF_XML" > .sdintf/sdcard.xml
+
+.mdiointf/ :
+	$(RM) -r .mdiointf/ && mkdir .mdiointf
+	echo "$$MDIOINTF_RTL" > .mdiointf/mdio_rtl.xml
+	echo "$$MDIOINTF_XML" > .mdiointf/mdio.xml
 
 .cohintf/:
 	$(RM) -r .cohintf/ && mkdir .cohintf/

@@ -908,6 +908,7 @@ sdctl::sdctl(const char *fnvcd, const char *fnimg)
     img = fnimg ? fopen(fnimg, "ab+") : NULL;
     cnum = rnum = rmax = (uint64_t)-1;
     dnum = dcmd = 0;
+    rca = 0x123;
     cstt = 0;
     acmd = 0;
     bwd = 1;
@@ -1081,6 +1082,7 @@ axidev &sdctl::mcset(const cohport_t &cp)
 void sdctl::reset(uint8_t value)
 {
     dut.rst = value;
+    dut.sd_cd = 0;
     dut.sd_cmd_i = 1;
     dut.sd_dat_i = 0xf;
 }
@@ -1134,11 +1136,15 @@ void sdctl::posedge()
                     cmd |= 0x80; // MSB indicates ACMD
                 }
                 if (cmd == 0)
-                    ;
-                else if (cmd == 7 && rca == arg >> 16 || cmd == 6 || cmd == 55 || // R1 response
+                    cstt = 0;
+                else if (cmd == 7 || cmd == 6 || cmd == 55 || // R1 response
                          cmd == 16 || cmd == 17 || cmd == 18 || cmd == 12 ||
                          cmd == (0x80 | 6) || cmd == (0x80 | 51) || cmd == (0x80 | 13))
                 {
+                    if (cmd == 7 && rca == arg >> 16) // select card
+                        cstt = 4;                     // trans state
+                    if (cmd == 7 && rca == 0)         // deselect card
+                        cstt = 3;                     // stby state
                     if (cmd == 55)
                         acmd = 1; // todo: should check RCA
                     if (cmd == 16)
@@ -1147,24 +1153,28 @@ void sdctl::posedge()
                         bwd = (arg & 3) == 0 ? 1 : 4;
                     if (cmd == 6)
                     {
+                        cstt = 5; // data state
                         dnum = dcmd = 1;
                         di = 0;
                         dblk = 512 + 18;
                     }
                     if (cmd == (0x80 | 51))
                     {
+                        cstt = 5; // data state
                         dnum = dcmd = 1;
                         di = 0;
                         dblk = 64 + 18;
                     }
                     if (cmd == (0x80 | 13))
                     {
+                        cstt = 5; // data state
                         dnum = dcmd = 1;
                         di = 0;
                         dblk = 512 + 18;
                     }
                     if (cmd == 17)
                     {
+                        cstt = 5; // data state
                         dnum = 1; // single block read
                         dcmd = 0;
                         dadd = arg * blen;
@@ -1173,6 +1183,7 @@ void sdctl::posedge()
                     }
                     if (cmd == 18)
                     {
+                        cstt = 5;            // data state
                         dnum = (uint32_t)-1; // continuous block read
                         dcmd = 0;
                         dadd = arg * blen;
@@ -1180,7 +1191,10 @@ void sdctl::posedge()
                         dblk = blen * 8 + 18;
                     }
                     if (cmd == 12)
+                    {
+                        cstt = 4; // trans state
                         dnum = 0;
+                    }
                     rnum = 0; // assemble output
                     rmax = 48;
                     memset(restk, 0, sizeof(restk));
@@ -1199,7 +1213,8 @@ void sdctl::posedge()
                 }
                 else if (cmd == 2 || cmd == 9) // R2 response
                 {
-                    cstt = 2; // ident state
+                    if (cmd == 2)
+                        cstt = 2; // ident state
                     rnum = 0;
                     rmax = 136;
                     memset(restk, 0, sizeof(restk));
@@ -1236,7 +1251,7 @@ void sdctl::posedge()
                     cstt = 3; // stby state
                     rnum = 0;
                     rmax = 48;
-                    rca = arg >> 16;
+                    rca++;
                     memset(restk, 0, sizeof(restk));
                     for (int i = 0; i < 4; i++)
                         restk[27 + i] = (cstt >> 3 - i) & 0x1; // current state
@@ -1365,6 +1380,8 @@ void sdctl::posedge()
                 dnum--;
                 dadd += blen;
                 di = 0;
+                if (dnum == 0)
+                    cstt = 4; // trans state
             }
         }
         else
@@ -1558,7 +1575,7 @@ axidev &uartctl::sset(const axiport_t &ap)
 void uartctl::reset(uint8_t value)
 {
     dut.rst = value;
-    dut.RxD = 1;
+    dut.uart_rx = 1;
 }
 
 /**
@@ -1579,9 +1596,9 @@ void uartctl::posedge()
         tnum = 0;
 
     /* receive and transmit */
-    uint8_t txold = dut.TxD;
+    uint8_t txold = dut.uart_tx;
     dut.clk = 1, dut.eval(), st++, cycle++;
-    if (rnum == (uint64_t)-1 && txold && !dut.TxD) // idle and negedge
+    if (rnum == (uint64_t)-1 && txold && !dut.uart_tx) // idle and negedge
     {
         rnum = 0; // receive start bit
         rxq = 0;
@@ -1593,15 +1610,15 @@ void uartctl::posedge()
             if (i == 9)
                 putchar(rxq), fflush(stdout), rnum = -1; // stop bit
             else if (i > 0)
-                rxq |= dut.TxD << i - 1;
+                rxq |= dut.uart_tx << i - 1;
     for (int i = 0; i < 16; i++)
         if (tnum == i * div)
             if (i == 0) // start bit
-                dut.RxD = 0;
+                dut.uart_rx = 0;
             else if (i < 9) // transmit
-                dut.RxD = txq[0] >> i - 1 & 0x1;
+                dut.uart_rx = txq[0] >> i - 1 & 0x1;
             else if (i == 9) // stop bit
-                dut.RxD = 1;
+                dut.uart_rx = 1;
             else if (i == 15) // finish after delay
             {
                 tnum = (uint64_t)-1;

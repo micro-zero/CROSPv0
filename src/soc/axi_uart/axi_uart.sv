@@ -160,6 +160,10 @@ reg [7:0] tx_rg;
 
 reg CTS0;
 
+/* verilator lint_off WIDTHEXPAND */
+/* verilator lint_off WIDTHTRUNC */
+/* verilator lint_off CASEINCOMPLETE */
+
 always @(posedge clock) begin
     if (reset) begin
         RTSn <= 1;
@@ -174,7 +178,7 @@ always @(posedge clock) begin
         xon_xoff_out <= 0;
     end else begin
         RTSn <= rx_full;
-        if (tx_phase == 16'(`PHASE_MAX)) begin
+        if (tx_phase == `PHASE_MAX) begin
             CTS0 <= CTSn;
             case (tx_state)
             `IDLE:
@@ -207,7 +211,7 @@ always @(posedge clock) begin
         end else begin
             tx_phase <= tx_phase + 1;
         end
-        if (rx_phase == 16'(`PHASE_MAX)) begin
+        if (rx_phase == `PHASE_MAX) begin
             case (rx_state)
             `IDLE: if (RxD == 0) begin rx_state <= `START; end
             `START: begin rx_rg[0] <= RxD; rx_state <= `BIT0; end
@@ -227,7 +231,7 @@ always @(posedge clock) begin
             endcase
             rx_phase <= 0;
         end else if (rx_state == `IDLE && RxD == 1) begin
-            rx_phase <= 16'(`PHASE_RXC);
+            rx_phase <= `PHASE_RXC;
         end else begin
             rx_phase <= rx_phase + 1;
         end
@@ -283,7 +287,6 @@ always @(posedge clock) begin
                 4'h00: if (!rx_empty) begin s_axi_rdata[7:0] <= rx_buf[rx_out_pos]; rx_out_pos <= rx_out_nxt; end
                 4'h08: s_axi_rdata[4:0] <= { !CTSn, tx_full, tx_empty, rx_full, !rx_empty };
                 4'h0c: s_axi_rdata[6:4] <= { tx_stop, irq_enable };
-                default: ;
                 endcase
             end
             s_axi_rresp <= 0;
@@ -318,7 +321,6 @@ always @(posedge clock) begin
                         irq_enable <= write_data[5:4];
                         tx_stop <= write_data[6];
                     end
-                default: ;
                 endcase
             end
             s_axi_bresp <= 0;
@@ -327,5 +329,9 @@ always @(posedge clock) begin
         end
     end
 end
+
+/* verilator lint_on WIDTHEXPAND */
+/* verilator lint_on WIDTHTRUNC */
+/* verilator lint_on CASEINCOMPLETE */
 
 endmodule

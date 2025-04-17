@@ -6,8 +6,7 @@
 
 module plic #(
     parameter ndev = 8,
-    parameter ctxt = 2,
-    parameter plic = 64'hc000000
+    parameter ctxt = 2
 )(
     input logic clk,
     input logic rst,
@@ -28,7 +27,7 @@ module plic #(
     input  logic        s_axi_awvalid,
     output logic        s_axi_awready,
     input  logic [31:0] s_axi_wdata,
-    input  logic  [7:0] s_axi_wstrb,
+    input  logic  [3:0] s_axi_wstrb,
     input  logic        s_axi_wlast,
     input  logic        s_axi_wvalid,
     output logic        s_axi_wready,

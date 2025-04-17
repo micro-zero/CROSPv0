@@ -21,6 +21,8 @@ UART    = 60010000
 SDC     = 60000000
 PLIC    = 0c000000
 CLINT   = 02000000
+ROM     = 00010000
+ROMSZ   = 00010000
 BAUD	= 11520000
 
 # Verilator variables
@@ -32,6 +34,7 @@ CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 		-DUART="0x$(UART)" -DSDC="0x$(SDC)" -DETH="0x$(ETH)" \
 	-I.clint -I.plic -DCLINT="0x$(CLINT)" -DPLIC="0x$(PLIC)" \
 	-I.cohub -I.uart -I.sdc -I.eth -DBAUD="$(BAUD)" \
+	-DROM="0x$(ROM)" -DROMSZ="0x$(ROMSZ)" \
 	-DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
 VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 \
@@ -64,19 +67,19 @@ VCORE_SV = \
 CLINT_SV = ../../src/soc/clint.sv
 PLIC_SV = ../../src/soc/plic.sv
 COHUB_SV = ../../src/soc/cohub.sv
-UART_SV = ../../src/soc/axi_uart/axi_uart.v ../../src/soc/uart.sv
+UART_SV = ../../src/soc/axi_uart/axi_uart.sv ../../src/soc/uart.sv
 SDC_SV = \
-	../../src/soc/axi_sdc/axi_sd_fifo.v \
-	../../src/soc/axi_sdc/axi_sd_fifo_filler.v \
-	../../src/soc/axi_sdc/sd_cmd_master.v \
-	../../src/soc/axi_sdc/sd_data_master.v \
-	../../src/soc/axi_sdc/sd_cmd_serial_host.v \
-	../../src/soc/axi_sdc/sd_data_serial_host.v \
-	../../src/soc/axi_sdc/sd_data_xfer_trig.v \
-	../../src/soc/axi_sdc/axi_sdc_controller.v \
+	../../src/soc/axi_sdc/axi_sd_fifo.sv \
+	../../src/soc/axi_sdc/axi_sd_fifo_filler.sv \
+	../../src/soc/axi_sdc/sd_cmd_master.sv \
+	../../src/soc/axi_sdc/sd_data_master.sv \
+	../../src/soc/axi_sdc/sd_cmd_serial_host.sv \
+	../../src/soc/axi_sdc/sd_data_serial_host.sv \
+	../../src/soc/axi_sdc/sd_data_xfer_trig.sv \
+	../../src/soc/axi_sdc/axi_sdc_controller.sv \
 	../../src/soc/sdc.sv
 ETH_SV = \
-	../../src/soc/axi_eth/ethernet.v \
+	../../src/soc/axi_eth/ethernet.sv \
 	../../src/soc/eth.sv
 
 # Scripts
