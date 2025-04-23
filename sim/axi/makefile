@@ -26,7 +26,6 @@ ROMSZ   = 00010000
 BAUD	= 11520000
 
 # Verilator variables
-MAKE = make -j8
 CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 	-I.vcore -DRST_PC="0x$(RST_PC)" -DDCBASE="0x$(DCBASE)" \
 		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) -DIWD=$(IWD) \
