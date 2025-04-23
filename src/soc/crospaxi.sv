@@ -41,6 +41,22 @@ module crospaxi #(
     output logic [63:0] dbg_pc1,
     output logic  [7:0] dbg_axi_stt,
     output logic  [7:0] dbg_axi_req,
+    output logic [63:0] dbg_ptw_pte,
+    output logic [63:0] dbg_ptw_add,
+    output logic  [7:0] dbg_ptw_stt,
+    output logic  [7:0] dbg_dcrqst,
+    output logic [63:0] dbg_dcaddr,
+    output logic  [7:0] dbg_dcstrb,
+    output logic [63:0] dbg_dcwdat,
+    output logic  [7:0] dbg_dcresp,
+    output logic  [7:0] dbg_dcmiss,
+    output logic [63:0] dbg_dcrdat,
+    output logic  [7:0] dbg_dtrqst,
+    output logic [63:0] dbg_dtvadd,
+    output logic [63:0] dbg_dtsatp,
+    output logic  [7:0] dbg_dtresp,
+    output logic  [7:0] dbg_dtperm,
+    output logic [63:0] dbg_dtpadd,
     /* coherence interface */
     input logic         s_coh_lock,
     input  logic  [7:0] s_coh_rqst,
@@ -252,6 +268,22 @@ module crospaxi #(
     always_comb dbg_cycle = csr_inst.mcycle;
     always_comb dbg_axi_stt = mmu_inst.axi_stt;
     always_comb dbg_axi_req = mmu_inst.axi_req;
+    always_comb dbg_ptw_pte = mmu_inst.ptw_pte;
+    always_comb dbg_ptw_add = mmu_inst.ptw_add;
+    always_comb dbg_ptw_stt = mmu_inst.ptw_stt;
+    always_comb dbg_dcrqst = mmu_inst.s_dc_rqst;
+    always_comb dbg_dcaddr = mmu_inst.s_dc_addr;
+    always_comb dbg_dcstrb = mmu_inst.s_dc_strb;
+    always_comb dbg_dcwdat = mmu_inst.s_dc_wdat;
+    always_comb dbg_dcresp = mmu_inst.s_dc_resp;
+    always_comb dbg_dcmiss = mmu_inst.s_dc_miss;
+    always_comb dbg_dcrdat = mmu_inst.s_dc_rdat;
+    always_comb dbg_dtrqst = mmu_inst.s_dt_rqst;
+    always_comb dbg_dtvadd = mmu_inst.s_dt_vadd;
+    always_comb dbg_dtsatp = mmu_inst.s_dt_satp;
+    always_comb dbg_dtresp = mmu_inst.s_dt_resp;
+    always_comb dbg_dtperm = mmu_inst.s_dt_perm;
+    always_comb dbg_dtpadd = mmu_inst.s_dt_padd;
     always_ff @(posedge clk) if (rst) dbg_pc0 <= 0; else if (com_bundle[0].opid[15]) dbg_pc0 <= com_bundle[0].pc;
     always_ff @(posedge clk) if (rst) dbg_pc1 <= 0; else if (com_bundle[1].opid[15]) dbg_pc1 <= com_bundle[1].pc;
 endmodule

@@ -346,6 +346,7 @@ module mmu #(
                     axi_buf      <= coh_rdat_sb;
                     m_axi_araddr <= coh_addr_sb & ~64'h3f;
                     m_axi_arlen  <= 7;
+                    m_axi_arsize <= 3;
                 end else if (|coh_resp_mb & ~coh_flsh_mb & ~flush[coh_resp_mb]) begin
                     if (coh_mesi_mb == 1) {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
                     /* todo: different transactions from cache can be distinguished */
@@ -357,6 +358,7 @@ module mmu #(
                     axi_buf       <= coh_wdat_mb;
                     m_axi_araddr  <= coh_addr_mb;
                     m_axi_arlen   <= 7;
+                    m_axi_arsize  <= 3;
                     coh_takn_mb   <= 1;
                 end else if (|dc_rqst_f & dc_byps_f & ~flush[dc_rqst_f]) begin
                     axi_stt       <= 1;
@@ -368,6 +370,13 @@ module mmu #(
                     m_axi_arvalid <= 1;
                     m_axi_araddr  <= dc_addr_f;
                     m_axi_arlen   <= 0;
+                    /* todo: this is to avoid misalign transfer but it is more
+                       reasonable to decide narrow burst size according to
+                       load/store width which currently not passed from LSU */
+                    if      (dc_addr_f[0]) m_axi_arsize <= 0;
+                    else if (dc_addr_f[1]) m_axi_arsize <= 1;
+                    else if (dc_addr_f[2]) m_axi_arsize <= 2;
+                    else                   m_axi_arsize <= 3;
                 end
             1: // AXI port request detected, waiting for read address handshake
                 if (m_axi_arready) begin
@@ -388,6 +397,7 @@ module mmu #(
                             m_axi_awvalid <= 1;
                             m_axi_awaddr  <= m_axi_araddr;
                             m_axi_awlen   <= m_axi_arlen;
+                            m_axi_awsize  <= m_axi_arsize;
                         end else axi_stt <= 6;
                 end
             3: // writing enabled, waiting for AW handshake
@@ -395,9 +405,9 @@ module mmu #(
                     axi_stt <= 4;
                     m_axi_awvalid <= 0;
                     m_axi_wvalid  <= 1;
-                    m_axi_wdata   <= axi_buf[m_axi_awaddr[5:0]+7-:8];
+                    m_axi_wdata   <= axi_buf[{m_axi_awaddr[5:3],3'd0}+7-:8];
                     m_axi_wlast   <= m_axi_arlen == 0;
-                    m_axi_wstrb   <= axi_str[m_axi_awaddr[5:0]+7-:8];
+                    m_axi_wstrb   <= axi_str[{m_axi_awaddr[5:3],3'd0}+7-:8];
                     axi_cnt       <= axi_cnt + 8;
                 end
             4: // address sent, transferring data
@@ -425,14 +435,12 @@ module mmu #(
         else if (|axi_stt & (flush[axi_req] | flush[axi_thr])) axi_fls <= 1;
     always_comb m_axi_arid    = 0;
     always_comb m_axi_arburst = 'b01;  // INCR burst
-    always_comb m_axi_arsize  = 'b011; // 8 bytes
     always_comb m_axi_arlock  = 0;
     always_comb m_axi_arcache = 0;
     always_comb m_axi_arprot  = 0;
     always_comb m_axi_arqos   = 0;
     always_comb m_axi_awid    = 0;
     always_comb m_axi_awburst = 'b01;  // INCR burst
-    always_comb m_axi_awsize  = 'b011; // 8 bytes
     always_comb m_axi_awlock  = 0;
     always_comb m_axi_awcache = 0;
     always_comb m_axi_awprot  = 0;
@@ -515,6 +523,6 @@ module mmu #(
     end else if (axi_stt == 6 & |axi_thr & ~axi_fls) begin
         s_dc_resp = axi_thr;
         s_dc_miss = 0;
-        s_dc_rdat = dc_rdat_m[7:0];
+        s_dc_rdat = dc_rdat_m[7:0] >> (6'(m_axi_araddr[2:0]) << 3);
     end else {s_dc_resp, s_dc_miss, s_dc_rdat} = 0;
 endmodule

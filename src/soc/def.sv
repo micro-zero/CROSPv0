@@ -1,9 +1,9 @@
 /**
- * default.sv:
+ * def.sv:
  *   This file handles some default logic.
  */
 
-module ground(
+module def(
     input  logic        clk,
     input  logic        rst,
     output logic        zero1,

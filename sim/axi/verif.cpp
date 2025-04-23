@@ -442,7 +442,7 @@ axidev &memory::mcset(const cohport_t &cp)
 void memory::reset(uint8_t value) {}
 
 /**
- * @brief At clock posedge
+ * @brief At clock negedge
  */
 void memory::negedge() {}
 
@@ -618,14 +618,14 @@ void memory::posedge()
     /* handshake and state change */
     if (axiport.arvalid & axiport.arready)
     {
-        axibuff.araddr = axiport.araddr;
+        axibuff.araddr = axiport.araddr & ~7;
         axibuff.arsize = 1 << axiport.arsize; // signal in "axibuff" may be different from original
         axibuff.arlen = axiport.arlen + 1;
         rbursti = 0;
     }
     if (axiport.awvalid & axiport.awready)
     {
-        axibuff.awaddr = axiport.awaddr;
+        axibuff.awaddr = axiport.awaddr & ~7;
         axibuff.awsize = 1 << axiport.awsize;
         axibuff.awlen = axiport.awlen + 1;
         wbursti = 0;
@@ -664,7 +664,7 @@ void memory::posedge()
     axiport.wready = wbursti < axibuff.awlen;
     axiport.rvalid = rbursti < axibuff.arlen;
     axiport.rlast = rbursti == axibuff.arlen - 1;
-    axiport.rdata = this->ui64(axibuff.araddr + rbursti * axibuff.arsize);
+    axiport.rdata = this->ui64((axibuff.araddr) + rbursti * axibuff.arsize);
     axiport.bvalid = axibuff.bvalid;
 }
 

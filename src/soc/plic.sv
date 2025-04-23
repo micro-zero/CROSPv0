@@ -14,43 +14,20 @@ module plic #(
     input  logic [ndev-1:0] int_vect, // interrupt vector
     output logic     [63:0] int_pend, // interrupt pending bits
     /* slave interface for PLIC */
-    input  logic  [7:0] s_axi_awid,
     input  logic [27:0] s_axi_awaddr,
-    input  logic  [7:0] s_axi_awlen,
-    input  logic  [2:0] s_axi_awsize,
-    input  logic  [1:0] s_axi_awburst,
-    input  logic        s_axi_awlock,
-    input  logic  [3:0] s_axi_awcache,
-    input  logic  [2:0] s_axi_awprot,
-    input  logic  [3:0] s_axi_awregion,
-    input  logic  [3:0] s_axi_awqos,
     input  logic        s_axi_awvalid,
     output logic        s_axi_awready,
     input  logic [31:0] s_axi_wdata,
-    input  logic  [3:0] s_axi_wstrb,
-    input  logic        s_axi_wlast,
     input  logic        s_axi_wvalid,
     output logic        s_axi_wready,
-    output logic  [7:0] s_axi_bid,
     output logic  [1:0] s_axi_bresp,
     output logic        s_axi_bvalid,
     input  logic        s_axi_bready,
-    input  logic  [7:0] s_axi_arid,
     input  logic [27:0] s_axi_araddr,
-    input  logic  [7:0] s_axi_arlen,
-    input  logic  [2:0] s_axi_arsize,
-    input  logic  [1:0] s_axi_arburst,
-    input  logic        s_axi_arlock,
-    input  logic  [3:0] s_axi_arcache,
-    input  logic  [2:0] s_axi_arprot,
-    input  logic  [3:0] s_axi_arregion,
-    input  logic  [3:0] s_axi_arqos,
     input  logic        s_axi_arvalid,
     output logic        s_axi_arready,
-    output logic  [7:0] s_axi_rid,
     output logic [31:0] s_axi_rdata,
     output logic  [1:0] s_axi_rresp,
-    output logic        s_axi_rlast,
     output logic        s_axi_rvalid,
     input  logic        s_axi_rready
 );
@@ -63,11 +40,8 @@ module plic #(
     logic             [31:0] wdata;
     logic [$clog2(ctxt)-1:0] ct;
     logic [$clog2(ndev)-1:0] index[ctxt-1:0];
-    always_comb s_axi_bid = 0;
     always_comb s_axi_bresp = 0;
-    always_comb s_axi_rid = 0;
     always_comb s_axi_rresp = 0;
-    always_comb s_axi_rlast = 1;
     always_comb for (int c = 0; c < ctxt; c++) begin
         /* search for interriupt with maximal priority */
         index[c] = 0;

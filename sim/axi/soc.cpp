@@ -556,15 +556,13 @@ clint::~clint()
 axiport_t clint::s() const
 {
     axiport_t ap;
-    ap.arid = dut.s_axi_arid;
-    ap.awid = dut.s_axi_awid;
     ap.awready = dut.s_axi_awready;
     ap.arready = dut.s_axi_arready;
     ap.wready = dut.s_axi_wready;
     ap.rvalid = dut.s_axi_rvalid;
     ap.rresp = dut.s_axi_rresp;
     ap.rdata = dut.s_axi_rdata;
-    ap.rlast = dut.s_axi_rlast;
+    ap.rlast = 1;
     ap.bvalid = dut.s_axi_bvalid;
     ap.bresp = dut.s_axi_bresp;
     return ap;
@@ -577,22 +575,12 @@ axiport_t clint::s() const
  */
 axidev &clint::sset(const axiport_t &ap)
 {
-    dut.s_axi_awid = ap.awid;
     dut.s_axi_awvalid = ap.awvalid;
     dut.s_axi_awaddr = ap.awaddr;
-    dut.s_axi_awburst = ap.awburst;
-    dut.s_axi_awlen = ap.awlen;
-    dut.s_axi_awsize = ap.awsize;
-    dut.s_axi_arid = ap.arid;
     dut.s_axi_arvalid = ap.arvalid;
     dut.s_axi_araddr = ap.araddr;
-    dut.s_axi_arburst = ap.arburst;
-    dut.s_axi_arlen = ap.arlen;
-    dut.s_axi_arsize = ap.arsize;
     dut.s_axi_wvalid = ap.wvalid;
     dut.s_axi_wdata = ap.wdata;
-    dut.s_axi_wstrb = ap.wstrb;
-    dut.s_axi_wlast = ap.wlast;
     dut.s_axi_rready = ap.rready;
     dut.s_axi_bready = ap.bready;
     return *this;
@@ -631,14 +619,7 @@ void clint::posedge()
     if (dut.s_axi_wvalid && dut.s_axi_wready)
     {
         wrec.v = dut.s_axi_wdata;
-        if (dut.s_axi_wstrb == 0x1)
-            wrec.w = 1;
-        else if (dut.s_axi_wstrb == 0x3)
-            wrec.w = 2;
-        else if (dut.s_axi_wstrb == 0xf)
-            wrec.w = 4;
-        else
-            wrec.w = 8;
+        wrec.w = 8;
     }
     if (dut.s_axi_arvalid && dut.s_axi_arready)
         raddr = dut.s_axi_araddr;
@@ -760,15 +741,13 @@ plic::~plic()
 axiport_t plic::s() const
 {
     axiport_t ap;
-    ap.arid = dut.s_axi_arid;
-    ap.awid = dut.s_axi_awid;
     ap.awready = dut.s_axi_awready;
     ap.arready = dut.s_axi_arready;
     ap.wready = dut.s_axi_wready;
     ap.rvalid = dut.s_axi_rvalid;
     ap.rresp = dut.s_axi_rresp;
-    ap.rdata = dut.s_axi_rdata;
-    ap.rlast = dut.s_axi_rlast;
+    ap.rdata = (uint64_t)dut.s_axi_rdata << (ap.araddr >> 2 & 1) * 32; // todo: also incomplete
+    ap.rlast = 1;
     ap.bvalid = dut.s_axi_bvalid;
     ap.bresp = dut.s_axi_bresp;
     return ap;
@@ -781,22 +760,14 @@ axiport_t plic::s() const
  */
 axidev &plic::sset(const axiport_t &ap)
 {
-    dut.s_axi_awid = ap.awid;
     dut.s_axi_awvalid = ap.awvalid;
     dut.s_axi_awaddr = ap.awaddr;
-    dut.s_axi_awburst = ap.awburst;
-    dut.s_axi_awlen = ap.awlen;
-    dut.s_axi_awsize = ap.awsize;
-    dut.s_axi_arid = ap.arid;
     dut.s_axi_arvalid = ap.arvalid;
     dut.s_axi_araddr = ap.araddr;
-    dut.s_axi_arburst = ap.arburst;
-    dut.s_axi_arlen = ap.arlen;
-    dut.s_axi_arsize = ap.arsize;
     dut.s_axi_wvalid = ap.wvalid;
-    dut.s_axi_wdata = ap.wdata;
-    dut.s_axi_wstrb = ap.wstrb;
-    dut.s_axi_wlast = ap.wlast;
+    /* todo: narrow transfer here and in some other devices is too simple to fit in
+       more situations, because it now requires strict timing of channels (W after AW)*/
+    dut.s_axi_wdata = ap.wdata >> (ap.awaddr >> 2 & 1) * 32;
     dut.s_axi_rready = ap.rready;
     dut.s_axi_bready = ap.bready;
     return *this;
@@ -979,7 +950,7 @@ axiport_t sdctl::s() const
     ap.wready = dut.s_axi_wready;
     ap.rvalid = dut.s_axi_rvalid;
     ap.rresp = dut.s_axi_rresp;
-    ap.rdata = dut.s_axi_rdata;
+    ap.rdata = (uint64_t)dut.s_axi_rdata << (ap.araddr >> 2 & 1) * 32;
     ap.rlast = 1;
     ap.bvalid = dut.s_axi_bvalid;
     ap.bresp = dut.s_axi_bresp;
@@ -1017,7 +988,7 @@ axidev &sdctl::sset(const axiport_t &ap)
     dut.s_axi_arvalid = ap.arvalid;
     dut.s_axi_araddr = ap.araddr;
     dut.s_axi_wvalid = ap.wvalid;
-    dut.s_axi_wdata = ap.wdata;
+    dut.s_axi_wdata = ap.wdata >> (ap.awaddr >> 2 & 1) * 32;
     dut.s_axi_rready = ap.rready;
     dut.s_axi_bready = ap.bready;
     return *this;
@@ -1543,7 +1514,7 @@ axiport_t uartctl::s() const
     ap.wready = dut.s_axi_wready;
     ap.rvalid = dut.s_axi_rvalid;
     ap.rresp = dut.s_axi_rresp;
-    ap.rdata = dut.s_axi_rdata;
+    ap.rdata = (uint64_t)dut.s_axi_rdata << (ap.araddr >> 2 & 1) * 32;
     ap.rlast = 1;
     ap.bvalid = dut.s_axi_bvalid;
     ap.bresp = dut.s_axi_bresp;
@@ -1562,7 +1533,7 @@ axidev &uartctl::sset(const axiport_t &ap)
     dut.s_axi_arvalid = ap.arvalid;
     dut.s_axi_araddr = ap.araddr;
     dut.s_axi_wvalid = ap.wvalid;
-    dut.s_axi_wdata = ap.wdata;
+    dut.s_axi_wdata = ap.wdata >> (ap.awaddr >> 2 & 1) * 32;
     dut.s_axi_rready = ap.rready;
     dut.s_axi_bready = ap.bready;
     return *this;
@@ -1790,7 +1761,7 @@ axiport_t ethctl::s() const
     ap.wready = dut.s_axi_wready;
     ap.rvalid = dut.s_axi_rvalid;
     ap.rresp = dut.s_axi_rresp;
-    ap.rdata = dut.s_axi_rdata;
+    ap.rdata = (uint64_t)dut.s_axi_rdata << (ap.araddr >> 2 & 1) * 32;
     ap.rlast = 1;
     ap.bvalid = dut.s_axi_bvalid;
     ap.bresp = dut.s_axi_bresp;
@@ -1828,7 +1799,7 @@ axidev &ethctl::sset(const axiport_t &ap)
     dut.s_axi_arvalid = ap.arvalid;
     dut.s_axi_araddr = ap.araddr;
     dut.s_axi_wvalid = ap.wvalid;
-    dut.s_axi_wdata = ap.wdata;
+    dut.s_axi_wdata = ap.wdata >> (ap.awaddr >> 2 & 1) * 32;
     dut.s_axi_rready = ap.rready;
     dut.s_axi_bready = ap.bready;
     return *this;

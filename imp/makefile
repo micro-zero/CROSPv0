@@ -63,7 +63,7 @@ SDC_SRC   = \
 ETH_SRC   = \
 	$(shell realpath ../src/soc/axi_eth/ethernet.sv) \
 	$(shell realpath ../src/soc/eth.sv)
-DEF_SRC = $(shell realpath ../src/soc/default.sv)
+DEF_SRC = $(shell realpath ../src/soc/def.sv)
 ROM_IMG = /dev/urandom
 
 define PRJ_TCL
@@ -124,12 +124,12 @@ define PRJ_TCL
 		master_apm {0}                                          \\
 	} [get_bd_intf_pins clint/s_axi]
 	apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { \\
-		Clk      {/ddr3/ui_addn_clk_0 (50 MHz)}                   \\
-		Freq     {50}                                             \\
+		Clk      {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}           \\
+		Freq     {$(CPUFREQ)}                                     \\
 	} [get_bd_pins cohub/clk]
 	apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config { \\
-		Clk      {/ddr3/ui_addn_clk_0 (50 MHz)}                   \\
-		Freq     {50}                                             \\
+		Clk      {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}           \\
+		Freq     {$(CPUFREQ)}                                     \\
 	} [get_bd_pins def/clk]
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
 		Clk_master {Auto}                                       \\
@@ -178,11 +178,11 @@ define PRJ_TCL
 	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
 		Board_Interface {Custom}                                 \\
 		Manual_Source   {/ddr3/ui_clk_sync_rst (ACTIVE_HIGH)}    \\
-	} [get_bd_pins rst_ddr3_50M/ext_reset_in]
+	} [get_bd_pins rst_ddr3_$(CPUFREQ)M/ext_reset_in]
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
-		Clk_master {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
+		Clk_master {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}       \\
 		Clk_slave  {/ddr3/ui_clk (200 MHz)}                     \\
-		Clk_xbar   {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
+		Clk_xbar   {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}       \\
 		Master     {/sdc/m_axi}                                 \\
 		Slave      {/ddr3/S_AXI}                                \\
 		dr_seg     {Auto}                                       \\
@@ -190,9 +190,9 @@ define PRJ_TCL
 		master_apm {0}                                          \\
 	} [get_bd_intf_pins sdc/m_axi]
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
-		Clk_master {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
+		Clk_master {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}       \\
 		Clk_slave  {Auto}                                       \\
-		Clk_xbar   {/ddr3/ui_addn_clk_0 (50 MHz)}               \\
+		Clk_xbar   {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}       \\
 		Master     {/core/m_axi}                                \\
 		Slave      {/rom/s_axi}                                 \\
 		ddr_seg    {Auto}                                       \\
@@ -205,19 +205,21 @@ define PRJ_TCL
 	set_property name sys_clk [get_bd_intf_ports sys_diff_clock]
 	set_property name sys_rst [get_bd_ports reset]
 	set_property CONFIG.FREQ_HZ 200000000 [get_bd_intf_ports /sys_clk]
-	connect_bd_net      [get_bd_pins clint/int_time]   [get_bd_pins core/mtime]
-	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In0]
-	connect_bd_net      [get_bd_pins uart/intr]        [get_bd_pins intcat/In1]
-	connect_bd_net      [get_bd_pins sdc/intr]         [get_bd_pins intcat/In2]
-	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In3]
-	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In4]
-	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In5]
-	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In6]
-	connect_bd_net      [get_bd_pins def/zero1]        [get_bd_pins intcat/In7]
-	connect_bd_net      [get_bd_pins intcat/dout]      [get_bd_pins plic/int_vect]
-	connect_bd_net      [get_bd_pins plic/int_pend]    [get_bd_pins ipor/Op1]
-	connect_bd_net      [get_bd_pins clint/int_pend]   [get_bd_pins ipor/Op2]
-	connect_bd_net      [get_bd_pins ipor/Res]         [get_bd_pins core/mip_ext]
+	connect_bd_net      [get_bd_pins clint/int_time]           [get_bd_pins core/mtime]
+	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In0]
+	connect_bd_net      [get_bd_pins uart/intr]                [get_bd_pins intcat/In1]
+	connect_bd_net      [get_bd_pins sdc/intr]                 [get_bd_pins intcat/In2]
+	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In3]
+	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In4]
+	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In5]
+	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In6]
+	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In7]
+	connect_bd_net      [get_bd_pins intcat/dout]              [get_bd_pins plic/int_vect]
+	connect_bd_net      [get_bd_pins plic/int_pend]            [get_bd_pins ipor/Op1]
+	connect_bd_net      [get_bd_pins clint/int_pend]           [get_bd_pins ipor/Op2]
+	connect_bd_net      [get_bd_pins ipor/Res]                 [get_bd_pins core/mip_ext]
+	connect_bd_net      [get_bd_pins ddr3/init_calib_complete] [get_bd_pins rst_ddr3_$(CPUFREQ)M/aux_reset_in]
+	connect_bd_net      [get_bd_pins ddr3/init_calib_complete] [get_bd_pins rst_ddr3_200M/aux_reset_in]
 	connect_bd_intf_net [get_bd_intf_pins cohub/s_mmu] [get_bd_intf_pins core/m_coh]
 	connect_bd_intf_net [get_bd_intf_pins cohub/s_sdc] [get_bd_intf_pins sdc/m_coh]
 	connect_bd_intf_net [get_bd_intf_pins cohub/m_mmu] [get_bd_intf_pins core/s_coh]
@@ -231,9 +233,11 @@ define PRJ_TCL
 	assign_bd_address -offset 0x$(PARAM_UART)  -range 64K [get_bd_addr_segs uart/s_axi/reg0]
 	assign_bd_address -offset 0x$(PARAM_SDC)   -range 64K [get_bd_addr_segs sdc/s_axi/reg0]
 	assign_bd_address -offset 0x$(PARAM_ROM)   -range 64K [get_bd_addr_segs rom/s_axi/reg0]
-	delete_bd_objs [get_bd_addr_segs sdc/m_axi/SEG_clint_reg0] \\
-		[get_bd_addr_segs sdc/m_axi/SEG_plic_reg0] [get_bd_addr_segs sdc/m_axi/SEG_rom_reg0] \\
-		[get_bd_addr_segs sdc/m_axi/SEG_sdc_reg0] [get_bd_addr_segs sdc/m_axi/SEG_uart_reg0]
+	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs clint/s_axi/reg0]
+	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs plic/s_axi/reg0]
+	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs rom/s_axi/reg0]
+	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs sdc/s_axi/reg0]
+	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs uart/s_axi/reg0]
 	# Save board design
 	save_bd_design
 	generate_target all [get_files .prj/.prj.srcs/sources_1/bd/CROSPv0soc/CROSPv0soc.bd]
@@ -251,13 +255,42 @@ define PRJ_TCL
 		[get_bd_nets rst_ddr3_200M_peripheral_aresetn] [get_bd_intf_nets ddr3_DDR3] \\
 		[get_bd_intf_nets axi_smc_M01_AXI] [get_bd_cells ddr3] [get_bd_nets ddr3_mmcm_locked] \\
 		[get_bd_nets ddr3_ui_clk] [get_bd_nets ddr3_ui_clk_sync_rst] [get_bd_cells rst_ddr3_200M] \\
-		[get_bd_nets rst_ddr3_50M_peripheral_aresetn] [get_bd_cells rst_ddr3_50M] \\
+		[get_bd_nets rst_ddr3_$(CPUFREQ)M_peripheral_aresetn] [get_bd_cells rst_ddr3_$(CPUFREQ)M] \\
 		[get_bd_intf_ports ddr] [get_bd_ports sys_rst] [get_bd_intf_ports sys_clk]
-	create_bd_port -dir I -type clk -freq_hz $(PARAM_CPUFREQ) clk
+	create_bd_cell -type ip -vlnv xilinx.com:ip:axi_vip:1.1 vip
+	create_bd_port -dir I -type clk -freq_hz $(PARAM_CPUFREQ) clk_$(CPUFREQ)M
+	create_bd_port -dir I -type clk -freq_hz 200000000 clk_200M
 	create_bd_port -dir I -type rst rst
-	connect_bd_net [get_bd_pins /core/clk] [get_bd_ports clk]
-	connect_bd_net [get_bd_pins /core/rst] [get_bd_ports rst]
+	set_property CONFIG.init 1 [get_bd_cells core]
+	set_property CONFIG.INTERFACE_MODE {SLAVE} [get_bd_cells vip]
+	set_property CONFIG.SLAVE_SEG_TYPE {MEM} [get_bd_cells vip]
+	set_property CONFIG.POLARITY {ACTIVE_HIGH} [get_bd_ports rst]
+	connect_bd_net [get_bd_pins /core/clk]      [get_bd_ports clk_$(CPUFREQ)M]
+	connect_bd_net [get_bd_pins /axi_smc/aclk1] [get_bd_ports clk_200M]
+	connect_bd_net [get_bd_pins /core/rst]      [get_bd_ports rst]
+	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
+		Clk_master {/clk ($(CPUFREQ) MHz)}                      \\
+		Clk_slave  {Auto}                                       \\
+		Clk_xbar   {/clk ($(CPUFREQ) MHz)}                      \\
+		Master     {/core/m_axi}                                \\
+		Slave      {/vip/S_AXI}                                 \\
+		ddr_seg    {Auto}                                       \\
+		intc_ip    {/axi_smc}                                   \\
+		master_apm {0}                                          \\
+	} [get_bd_intf_pins vip/S_AXI]
+	assign_bd_address -offset 0x$(PARAM_DCBASE) -range 1G [get_bd_addr_segs vip/S_AXI/Mem]
+	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
+		Board_Interface {Custom}                                 \\
+		Manual_Source   {/rst (ACTIVE_LOW)}                      \\
+	} [get_bd_pins rst_clk_$(CPUFREQ)M_$(CPUFREQ)M/ext_reset_in]
+	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
+		Board_Interface {Custom}                                 \\
+		Manual_Source   {/rst (ACTIVE_LOW)}                      \\
+	} [get_bd_pins rst_clk_200M_200M/ext_reset_in]
 	save_bd_design
+	generate_target all [get_files .prj/.prj.srcs/sim_1/bd/CROSPv0sim/CROSPv0sim.bd]
+	add_files -fileset sim_1 .prj/tb.sv
+	set_property top tb [get_filesets sim_1]
 endef
 export PRJ_TCL
 
@@ -277,72 +310,6 @@ define BLD_TCL
 	launch_runs impl_1 -to_step write_bitstream -jobs 32
 endef
 export BLD_TCL
-
-define SIM_TCL
-	# Create project and add IP
-	create_project .sim .sim -part xc7k325tffg900-2
-	set_property board_part digilentinc.com:genesys2:part0:1.1 [current_project]
-	set_property ip_repo_paths {.core .cohintf} [current_project]
-	update_ip_catalog
-
-	# Create board design
-	# Custom IP
-	create_bd_design "CROSPv0soc"
-	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:CROSP:0.1 core
-	create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 zero
-	set_property CONFIG.dcbase 0x$(PARAM_DCBASE) [get_bd_cells core]
-	set_property CONFIG.init 1 [get_bd_cells core]
-	set_property CONFIG.fwd $(PARAM_FWD) [get_bd_cells core]
-	set_property CONFIG.dwd $(PARAM_DWD) [get_bd_cells core]
-	set_property CONFIG.rwd $(PARAM_RWD) [get_bd_cells core]
-	set_property CONFIG.iwd $(PARAM_IWD) [get_bd_cells core]
-	set_property CONFIG.ewd $(PARAM_EWD) [get_bd_cells core]
-	set_property CONFIG.mwd $(PARAM_MWD) [get_bd_cells core]
-	set_property CONFIG.cwd $(PARAM_CWD) [get_bd_cells core]
-	set_property CONFIG.rst_pc {0x$(PARAM_RSTPC)} [get_bd_cells core]
-	set_property CONFIG.tohost {0x$(PARAM_TOHOST)} [get_bd_cells core]
-	set_property CONFIG.frhost {0x$(PARAM_FRHOST)} [get_bd_cells core]
-	set_property CONFIG.uart {0x$(PARAM_UART)} [get_bd_cells core]
-	set_property CONFIG.CONST_VAL {0} [get_bd_cells zero]
-	set_property CONFIG.CONST_WIDTH {64} [get_bd_cells zero]
-	# Xilinx IP
-	create_bd_cell -type ip -vlnv xilinx.com:ip:axi_vip:1.1 axi_vip
-	set_property CONFIG.INTERFACE_MODE {SLAVE} [get_bd_cells axi_vip]
-	set_property CONFIG.HAS_ARESETN {0} [get_bd_cells axi_vip]
-	set_property CONFIG.SLAVE_SEG_TYPE {MEM} [get_bd_cells axi_vip]
-	# Connection
-	create_bd_intf_port -mode Master -vlnv mprc.pku.edu.cn:MPRC:coherence_rtl:1.0 m_coh
-	create_bd_intf_port -mode Slave -vlnv mprc.pku.edu.cn:MPRC:coherence_rtl:1.0 s_coh
-	create_bd_port -dir I -type clk -freq_hz $(PARAM_CPUFREQ) clk
-	create_bd_port -dir I -type rst rstn
-	connect_bd_intf_net [get_bd_intf_ports m_coh] [get_bd_intf_pins core/m_coh]
-	connect_bd_intf_net [get_bd_intf_ports s_coh] [get_bd_intf_pins core/s_coh]
-	connect_bd_net [get_bd_pins core/mip_ext] [get_bd_pins zero/dout]
-	connect_bd_net [get_bd_pins core/mtime] [get_bd_pins zero/dout]
-	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
-		Clk_master {/clk ($(CPUFREQ) MHz)}                      \\
-		Clk_slave  {/clk ($(CPUFREQ) MHz)}                      \\
-		Clk_xbar   {/clk ($(CPUFREQ) MHz)}                      \\
-		Master     {/core/m_axi}                                \\
-		Slave      {/axi_vip/S_AXI}                             \\
-		ddr_seg    {Auto}                                       \\
-		intc_ip    {New AXI SmartConnect}                       \\
-		master_apm {0}                                          \\
-	} [get_bd_intf_pins axi_vip/S_AXI]
-	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
-		Board_Interface {Custom}                                 \\
-		Manual_Source   {/rstn (ACTIVE_LOW)}                     \\
-	} [get_bd_pins rst_clk_$(CPUFREQ)M/ext_reset_in]
-	assign_bd_address -offset 0x0 -range 16E [get_bd_addr_segs axi_vip/S_AXI/Mem]
-	# Save board design
-	save_bd_design
-	generate_target all [get_files .sim/.sim.srcs/sources_1/bd/CROSPv0soc/CROSPv0soc.bd]
-	set_property SOURCE_SET sources_1 [get_filesets sim_1]
-	add_files -fileset sim_1 -norecurse $(shell realpath .sim)/tb.sv
-	add_files -fileset sim_1 -norecurse $(shell realpath .sim)/code.img
-	add_files -fileset sim_1 -norecurse $(shell realpath .sim)/initrd.img
-endef
-export SIM_TCL
 
 define CORE_TCL
 	# Import coherence interface
@@ -612,13 +579,11 @@ endef
 export COHUB_TCL
 
 define ROM_SV_HEAD
-	module rom #(
-		parameter size = 16384 // ROM size
-	)(
+	module rom (
 		input  logic clk,
 		input  logic rst,
 		/* AXI interface */
-		input  logic [31:0] s_axi_awaddr,
+		input  logic [15:0] s_axi_awaddr,
 		input  logic        s_axi_awvalid,
 		output logic        s_axi_awready,
 		input  logic [63:0] s_axi_wdata,
@@ -627,7 +592,7 @@ define ROM_SV_HEAD
 		output logic  [1:0] s_axi_bresp,
 		output logic        s_axi_bvalid,
 		input  logic        s_axi_bready,
-		input  logic [31:0] s_axi_araddr,
+		input  logic [15:0] s_axi_araddr,
 		input  logic        s_axi_arvalid,
 		output logic        s_axi_arready,
 		output logic [63:0] s_axi_rdata,
@@ -635,8 +600,8 @@ define ROM_SV_HEAD
 		output logic        s_axi_rvalid,
 		input  logic        s_axi_rready
 	);
-		logic [63:0] mem[size/8-1:0];
-		logic [31:0] waddr;
+		logic [63:0] mem[8191:0];
+		logic [15:0] waddr;
 		logic [63:0] wdata;
 		always_ff @(posedge clk)
 			if (rst) begin
@@ -694,41 +659,27 @@ define TB_SV
 	module tb;
 		localparam MHz = $(CPUFREQ);
 		import axi_vip_pkg::*;
-		import CROSPv0soc_axi_vip_0_pkg::*;
-		logic clk, reset;
-		logic  [7:0] s_coh_rqst;
-		logic  [7:0] s_coh_trsc;
-		logic [63:0] s_coh_addr;
-		logic  [7:0] s_coh_resp;
-		logic  [7:0] s_coh_mesi;
-		logic  [7:0] m_coh_rqst;
-		logic  [7:0] m_coh_trsc;
-		logic [63:0] m_coh_addr;
-		logic  [7:0] m_coh_resp;
-		logic  [7:0] m_coh_mesi;
-		CROSPv0soc inst(.clk(clk), .rstn(reset),
-			.s_coh_rqst(m_coh_rqst), .s_coh_trsc(m_coh_trsc),
-			.s_coh_addr(m_coh_addr), .s_coh_resp(m_coh_resp),
-			.s_coh_mesi(m_coh_mesi), .m_coh_rqst(s_coh_rqst),
-			.m_coh_trsc(s_coh_trsc), .m_coh_addr(s_coh_addr),
-			.m_coh_resp(s_coh_resp), .m_coh_mesi(s_coh_mesi));
-		CROSPv0soc_axi_vip_0_slv_mem_t agent;
-		initial while (1) begin clk = 0; #(500/MHz); clk = 1; #(500/MHz); end
-		initial begin reset = 0; #100; reset = 1; end
+		import CROSPv0sim_vip_0_pkg::*;
+		logic clk_$(CPUFREQ)M, clk_200M, reset;
+		logic sd_cd, sd_cmd_i, sd_cmd_o, sd_cmd_t, sd_dat_t, sd_reset, sd_sclk;
+		logic [3:0] sd_dat_i, sd_dat_o;
+		logic uart_rx, uart_tx;
+		CROSPv0sim inst(
+			clk_200M, clk_$(CPUFREQ)M, reset,
+			sd_cd, sd_cmd_i, sd_cmd_o, sd_cmd_t,
+			sd_dat_i, sd_dat_o, sd_dat_t, sd_reset, sd_sclk,
+			uart_rx, uart_tx
+		);
+		CROSPv0sim_vip_0_slv_mem_t agent;
+		initial while (1) begin clk_$(CPUFREQ)M = 0; #(500/MHz); clk_$(CPUFREQ)M = 1; #(500/MHz); end
+		initial while (1) begin clk_200M = 0; #2.5; clk_200M = 1; #2.5; end
+		initial begin reset = 1; #100; reset = 0; end
 		initial begin
-			agent = new("axi_slv_agent", inst.axi_vip.inst.IF);
-			agent.mem_model.pre_load_mem("code.img", 64'h$(PARAM_DCBASE));
-			agent.mem_model.pre_load_mem("initrd.img", 64'h$(PARAM_INITRD));
-			agent.mem_model.backdoor_memory_write('h10000008, 'b00000100, 'b1);
+			agent = new("axi_slv_agent", inst.vip.inst.IF);
 			agent.set_agent_tag("AXI Slave VIP");
 			agent.set_verbosity(0);
 			agent.start_slave();
 		end
-		always_ff @(posedge clk) if (~reset) s_coh_resp <= 0; else s_coh_resp <= s_coh_rqst;
-		always_ff @(posedge clk) if (~reset) s_coh_mesi <= 0; else s_coh_mesi <= 1;
-		always_ff @(posedge clk) if (~reset) m_coh_rqst <= 0; else m_coh_rqst <= 0;
-		always_ff @(posedge clk) if (~reset) m_coh_trsc <= 0; else m_coh_trsc <= 0;
-		always_ff @(posedge clk) if (~reset) m_coh_addr <= 0; else m_coh_addr <= 0;
 	endmodule
 endef
 export TB_SV
@@ -1487,12 +1438,12 @@ project : .sdintf/ .cohintf/ .core/ .clint/ .plic/ .cohub/ .rom/ .sdc/ .uart/ .e
 	$(RM) -r .prj/ && mkdir .prj
 	echo "$$MIG_PRJ" > .prj/mig.prj
 	echo "$$PRJ_TCL" > .prj/prj.tcl
-	echo "$$BLD_TCL" > .prj/bld.tcl
 	echo "$$GS2_XDC" > .prj/gs2.xdc
 	echo "$$TB_SV"   > .prj/tb.sv
 	vivado -mode batch -source .prj/prj.tcl >/dev/null 2>&1
 
-build : project
+build :
+	echo "$$BLD_TCL" > .prj/bld.tcl
 	vivado -mode batch -source .prj/bld.tcl >/dev/null 2>&1
 
 .core/ : $(CORE_SRC)

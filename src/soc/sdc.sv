@@ -9,6 +9,16 @@ module sdc #(
     input  logic clk,
     input  logic rst,
     output logic intr,
+    /* debug ports */
+    output logic        dbg_sclk,
+    output logic  [2:0] dbg_cmdtoi,
+    output logic        dbg_datt,
+    output logic  [3:0] dbg_dato,
+    output logic  [3:0] dbg_dati,
+    output logic  [4:0] dbg_cmdint,
+    output logic  [4:0] dbg_cmdiea,
+    output logic  [4:0] dbg_datint,
+    output logic  [4:0] dbg_datiea,
     /* DMA coherence interface */
     input  logic        s_coh_lock,
     input  logic  [7:0] s_coh_rqst,
@@ -124,7 +134,7 @@ module sdc #(
         else if (|s_coh_resp) coh_rqst_sb <= 0;
 
     /* instance */
-    sdc_controller sdc_inst(
+    sdc_controller #(.sdio_card_detect_level(0)) sdc_inst(
         .clock(clk),
         .async_resetn(~rst),
         .interrupt(intr),
@@ -183,4 +193,15 @@ module sdc #(
     always_comb awready = m_axi_awready & |req & (req == (req & own));
     always_comb m_axi_arvalid = arvalid & |req & (req == (req & own));
     always_comb m_axi_awvalid = awvalid & |req & (req == (req & own));
+
+    /* debug signals */
+    always_comb dbg_sclk = sd_sclk;
+    always_comb dbg_cmdtoi = {sd_cmd_t, sd_cmd_o, sd_cmd_i};
+    always_comb dbg_datt = sd_dat_t;
+    always_comb dbg_dato = sd_dat_o;
+    always_comb dbg_dati = sd_dat_i;
+    always_comb dbg_cmdint = sdc_inst.cmd_int_status_reg;
+    always_comb dbg_cmdiea = sdc_inst.cmd_int_enable_reg;
+    always_comb dbg_datint = sdc_inst.data_int_status_reg;
+    always_comb dbg_datiea = sdc_inst.data_int_enable_reg;
 endmodule
