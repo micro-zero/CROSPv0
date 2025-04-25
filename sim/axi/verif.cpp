@@ -592,7 +592,7 @@ void memory::posedge()
     /* handle coherence interface */
     if (scport.rqst)
         scbuff = scport;
-    if (scport.resp)
+    if (scport.resp == scbuff.rqst)
         scbuff.rqst = 0;
     scport.resp = (mcport.lock && scport.lock || mcbuff.rqst) && scbuff.trsc ? 0 : scbuff.rqst;
     scport.mesi = 1;

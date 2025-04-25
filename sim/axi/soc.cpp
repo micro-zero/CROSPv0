@@ -626,9 +626,9 @@ void clint::posedge()
     uint64_t pend = dut.int_pend;
     dut.clk = 1, dut.eval(), st++, cycle++;
     if (~(pend >> 3) & 1 && (dut.int_pend >> 3) & 1)
-        fprintf(stderr, "[Info] Software interrupt detected [cycle: %ld]\n", cycle);
+        fprintf(stderr, "[Info] Machine level software interrupt detected [cycle: %ld]\n", cycle);
     else if (~(pend >> 7) & 1 && (dut.int_pend >> 7) & 1)
-        fprintf(stderr, "[Info] Timer interrupt detected [cycle: %ld]\n", cycle);
+        fprintf(stderr, "[Info] Machine level timer interrupt detected [cycle: %ld]\n", cycle);
 }
 
 /**
@@ -792,7 +792,9 @@ void plic::posedge()
     uint64_t pend = dut.int_pend;
     dut.clk = 1, dut.eval(), st++, cycle++;
     if (~(pend >> 11) & 1 && (dut.int_pend >> 11) & 1)
-        fprintf(stderr, "[Info] External interrupt detected [cycle: %ld]\n", cycle);
+        fprintf(stderr, "[Info] Machine level external interrupt detected [cycle: %ld]\n", cycle);
+    if (~(pend >> 9) & 1 && (dut.int_pend >> 9) & 1)
+        fprintf(stderr, "[Info] Supervisor level external interrupt detected [cycle: %ld]\n", cycle);
 }
 
 /**
@@ -1100,15 +1102,18 @@ void sdctl::posedge()
                     calc = (calc << 1 ^ (cmdtk[i] ^ calc >> 6) ^ (cmdtk[i] ^ calc >> 6) << 3) & 0x7f;
                 if (crc7 != calc)
                     fprintf(stderr, "[Warning] CRC error: CMD=%d ARG=%x CRC7=%x\n", cmd, arg, crc7);
-                fprintf(stderr, "[Info] SD command received: CMD=%d ARG=%x\n", cmd, arg);
+                fprintf(stderr, "[Info] SD command received: CMD=%d ARG=%x [cycle: %ld]\n", cmd, arg, cycle);
                 if (acmd)
                 {
                     acmd = 0;
                     cmd |= 0x80; // MSB indicates ACMD
                 }
-                if (cmd == 0)
+                if (cmd == 0) // go idle
+                {
                     cstt = 0;
-                else if (cmd == 7 || cmd == 6 || cmd == 55 || // R1 response
+                    bwd = 1;
+                }
+                else if (cmd == 13 || cmd == 7 || cmd == 6 || cmd == 55 || // R1 response
                          cmd == 16 || cmd == 17 || cmd == 18 || cmd == 12 ||
                          cmd == (0x80 | 6) || cmd == (0x80 | 51) || cmd == (0x80 | 13))
                 {
@@ -1127,21 +1132,21 @@ void sdctl::posedge()
                         cstt = 5; // data state
                         dnum = dcmd = 1;
                         di = 0;
-                        dblk = 512 + 18;
+                        dblk = 512 / bwd + 18;
                     }
                     if (cmd == (0x80 | 51))
                     {
                         cstt = 5; // data state
                         dnum = dcmd = 1;
                         di = 0;
-                        dblk = 64 + 18;
+                        dblk = 64 / bwd + 18;
                     }
                     if (cmd == (0x80 | 13))
                     {
                         cstt = 5; // data state
                         dnum = dcmd = 1;
                         di = 0;
-                        dblk = 512 + 18;
+                        dblk = 512 / bwd + 18;
                     }
                     if (cmd == 17)
                     {
@@ -1150,7 +1155,7 @@ void sdctl::posedge()
                         dcmd = 0;
                         dadd = arg * blen;
                         di = 0;
-                        dblk = blen * 8 + 18;
+                        dblk = blen * 8 / bwd + 18;
                     }
                     if (cmd == 18)
                     {
@@ -1159,7 +1164,7 @@ void sdctl::posedge()
                         dcmd = 0;
                         dadd = arg * blen;
                         di = 0;
-                        dblk = blen * 8 + 18;
+                        dblk = blen * 8 / bwd + 18;
                     }
                     if (cmd == 12)
                     {
@@ -1209,8 +1214,10 @@ void sdctl::posedge()
                     rnum = 0;
                     rmax = 48;
                     memset(restk, 0, sizeof(restk));
-                    restk[8] = 1; // initialization complete
-                    restk[9] = 1; // SDHC or SDXC
+                    restk[8] = 1;  // initialization complete
+                    restk[9] = 1;  // SDHC or SDXC
+                    restk[18] = 1; // 3.2-3.3V
+                    restk[19] = 1; // 3.3-3.4V
                     for (int i = 0; i < 6; i++)
                         restk[2 + i] = 1;
                     restk[47] = 1;
@@ -1328,16 +1335,21 @@ void sdctl::posedge()
                     else
                     {
                         uint16_t crc[4];
+                        memset(dat, 0, sizeof(dat));
+                        memset(crc, 0, sizeof(crc));
                         for (int i = 0; i < rawlen; i++)
                             crc[i % 4] = crc[i % 4] << 1 ^
                                          (raw[i] ^ crc[i % 4] >> 15) ^
                                          (raw[i] ^ crc[i % 4] >> 15) << 5 ^
                                          (raw[i] ^ crc[i % 4] >> 15) << 12;
-                        dat[0] = 0;
                         for (int i = 0; i < rawlen; i++)
-                            dat[i % 4 + 1] = (dat[i % 4 + 1] << 1) | raw[i];
+                            dat[i / 4 + 1] = (dat[i / 4 + 1] << 1) | raw[i];
                         for (int i = 0; i < 16; i++)
-                            dat[rawlen / 4 + 1 + i] = (crc[0] << 3) | (crc[1] << 2) | (crc[2] << 1) | crc[3];
+                            dat[rawlen / 4 + 1 + i] =
+                                ((crc[0] >> 15 - i & 1) << 3) |
+                                ((crc[1] >> 15 - i & 1) << 2) |
+                                ((crc[2] >> 15 - i & 1) << 1) |
+                                ((crc[3] >> 15 - i & 1) << 0);
                     }
                 }
                 else

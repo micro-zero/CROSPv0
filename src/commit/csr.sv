@@ -226,8 +226,8 @@ module csr(
         if (rst) satp <= 0; else if (we & addr == 12'h180) satp <= wres;
         if (we & addr == 12'h005) utvec <= wres;
     end
-    always_comb mip = in_ip    & 64'b1000_1000_0000 | // MEIP/MTIP from external
-                      mip_base & 64'b0011_0011_1011;
+    always_comb mip = in_ip    & 64'b1010_1000_1000 | // MEIP/SEIP/MTIP/MSIP from external
+                      mip_base & 64'b0001_0011_0011;
     always_comb begin
         intg = 0;
         intl = 0;
