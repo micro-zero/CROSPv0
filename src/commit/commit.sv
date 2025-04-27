@@ -242,6 +242,7 @@ module commit #(
             com_bundle[i].ldid     = dec_rvalue[i].ldid;
             com_bundle[i].stid     = dec_rvalue[i].stid;
             com_bundle[i].pc       = dec_rvalue[i].pc;
+            com_bundle[i].ir       = dec_rvalue[i].ir;
             com_bundle[i].call     = dec_rvalue[i].call;
             com_bundle[i].ret      = dec_rvalue[i].ret;
             com_bundle[i].delta    = dec_rvalue[i].delta;

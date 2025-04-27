@@ -28,8 +28,7 @@ module crospaxi #(
     parameter iqsz   = 16,           // OoO issue queue size
     parameter fnum   = 4,            // fetch number in half-words
     parameter prnum  = 96,           // number of physical registers
-    parameter rst_pc = 64'hc0000000, // PC on reset
-    parameter dcbase = 64'h80000000  // memory base address
+    parameter rst_pc = 64'hc0000000  // PC on reset
 )(
     input  logic        clk,
     input  logic        rst,
@@ -39,6 +38,8 @@ module crospaxi #(
     output logic [63:0] dbg_cycle,
     output logic [63:0] dbg_pc0,
     output logic [63:0] dbg_pc1,
+    output logic [31:0] dbg_ir0,
+    output logic [31:0] dbg_ir1,
     /* coherence interface */
     input logic         s_coh_lock,
     input  logic  [7:0] s_coh_rqst,
@@ -107,7 +108,7 @@ module crospaxi #(
     logic  [7:0] dc_resp; logic  [7:0] ic_resp;
     logic [63:0] dc_rdat; logic [63:0] ic_rdat;
     logic  [7:0] dc_miss;
-    mmu #(.init(init), .tohost(0), .frhost(0), .dcbase(dcbase)) mmu_inst(
+    mmu #(.init(init)) mmu_inst(
         .clk(clk), .rst(rst), .fnci(fnci), .fncv(fncv), .flush(fl_inst | fl_data),
         .s_dt_rqst(dt_rqst), .s_it_rqst(it_rqst),
         .s_dt_vadd(dt_vadd), .s_it_vadd(it_vadd),
@@ -238,7 +239,7 @@ module crospaxi #(
         mul_inst(clk, rst, red_bundle, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
     div #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         div_inst(clk, rst, red_bundle, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
-    lsu #(.iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz), .dcbase(dcbase))
+    lsu #(.iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz))
         lsu_inst(clk, rst, lsu_safe, lsu_unsf, top_opid, saf_opid, red_bundle, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
@@ -248,6 +249,12 @@ module crospaxi #(
 
     /* debug ports */
     always_comb dbg_cycle = csr_inst.mcycle;
-    always_ff @(posedge clk) if (rst) dbg_pc0 <= 0; else if (com_bundle[0].opid[15]) dbg_pc0 <= com_bundle[0].pc;
-    always_ff @(posedge clk) if (rst) dbg_pc1 <= 0; else if (com_bundle[1].opid[15]) dbg_pc1 <= com_bundle[1].pc;
+    always_ff @(posedge clk) if (rst) dbg_pc0 <= 0; else if (com_bundle[0].opid[15]) begin
+        dbg_pc0 <= com_bundle[0].pc;
+        dbg_ir0 <= com_bundle[0].ir;
+    end
+    always_ff @(posedge clk) if (rst) dbg_pc1 <= 0; else if (com_bundle[1].opid[15]) begin
+        dbg_pc1 <= com_bundle[1].pc;
+        dbg_ir1 <= com_bundle[1].ir;
+    end
 endmodule

@@ -625,10 +625,10 @@ void clint::posedge()
         raddr = dut.s_axi_araddr;
     uint64_t pend = dut.int_pend;
     dut.clk = 1, dut.eval(), st++, cycle++;
-    if (~(pend >> 3) & 1 && (dut.int_pend >> 3) & 1)
-        fprintf(stderr, "[Info] Machine level software interrupt detected [cycle: %ld]\n", cycle);
-    else if (~(pend >> 7) & 1 && (dut.int_pend >> 7) & 1)
-        fprintf(stderr, "[Info] Machine level timer interrupt detected [cycle: %ld]\n", cycle);
+    // if (!((pend >> 3) & 1) && ((dut.int_pend >> 3) & 1))
+    //     fprintf(stderr, "[Info] Machine level software interrupt detected [cycle: %ld]\n", cycle);
+    // else if (!((pend >> 7) & 1) && ((dut.int_pend >> 7) & 1))
+    //     fprintf(stderr, "[Info] Machine level timer interrupt detected [cycle: %ld]\n", cycle);
 }
 
 /**
@@ -791,10 +791,10 @@ void plic::posedge()
 {
     uint64_t pend = dut.int_pend;
     dut.clk = 1, dut.eval(), st++, cycle++;
-    if (~(pend >> 11) & 1 && (dut.int_pend >> 11) & 1)
-        fprintf(stderr, "[Info] Machine level external interrupt detected [cycle: %ld]\n", cycle);
-    if (~(pend >> 9) & 1 && (dut.int_pend >> 9) & 1)
-        fprintf(stderr, "[Info] Supervisor level external interrupt detected [cycle: %ld]\n", cycle);
+    // if (!((pend >> 11) & 1) && ((dut.int_pend >> 11) & 1))
+    //     fprintf(stderr, "[Info] Machine level external interrupt detected [cycle: %ld]\n", cycle);
+    // if (!((pend >> 9) & 1) && ((dut.int_pend >> 9) & 1))
+    //     fprintf(stderr, "[Info] Supervisor level external interrupt detected [cycle: %ld]\n", cycle);
 }
 
 /**

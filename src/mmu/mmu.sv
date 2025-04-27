@@ -5,10 +5,7 @@
  */
 
 module mmu #(
-    parameter init,   // initialize RAMs
-    parameter tohost, // bypassed tohost address
-    parameter frhost, // bypassed fromhost address
-    parameter dcbase  // base address of cacheable memory
+    parameter init // initialize RAMs
 )(
     input  logic         clk,
     input  logic         rst,
@@ -109,6 +106,7 @@ module mmu #(
      *   8'b111x_xxxx: DCACHE requests
      * to support LQ/SQ of more than 16 entries, ID width needs extension
      */
+    `include "pma.sv"
 
     /* ITLB */
     logic  [7:0] it_rqst_m;
@@ -183,8 +181,7 @@ module mmu #(
     logic       [7:0] dc_rqst_b, dc_rqst_f; logic       [7:0] ic_rqst_b, ic_rqst_f;
     logic      [63:0] dc_addr_b, dc_addr_f; logic      [63:0] ic_addr_b, ic_addr_f;
     logic      [63:0] dc_strb_b, dc_strb_f;
-    logic [63:0][7:0] dc_wdat_b, dc_wdat_f;
-    logic                        dc_byps_f; logic       [5:0] ic_offset;
+    logic [63:0][7:0] dc_wdat_b, dc_wdat_f; logic       [5:0] ic_offset;
     /* buffered coherence data:
      *   since slave coherence request will not hold, slave request buffer is used
      *     to store coherence requests from other objects, and slave response buffer
@@ -254,7 +251,6 @@ module mmu #(
         .s_ofst(dc_ofst_s), .m_ofst(dc_ofst_m),
         .s_rdat(dc_rdat_s), .m_rdat(dc_rdat_m)
     );
-    always_comb dc_byps_f = dc_addr_f < dcbase | dc_addr_f == tohost | dc_addr_f == frhost;
     always_comb dc_ready = ~|dc_rqst_b | dc_rqst_b == s_dc_resp;
     always_comb dc_rqst_f = dc_ready ? s_dc_rqst : dc_rqst_b;
     always_comb dc_addr_f = dc_ready ? s_dc_addr : dc_addr_b;
@@ -360,7 +356,7 @@ module mmu #(
                     m_axi_arlen   <= 7;
                     m_axi_arsize  <= 3;
                     coh_takn_mb   <= 1;
-                end else if (|dc_rqst_f & dc_byps_f & ~flush[dc_rqst_f]) begin
+                end else if (|dc_rqst_f & ~pma_c(dc_addr_f) & ~flush[dc_rqst_f]) begin
                     axi_stt       <= 1;
                     axi_cnt       <= 0;
                     axi_req       <= 0;
@@ -499,7 +495,7 @@ module mmu #(
         dc_rqst_s = coh_rqst_sb; dc_strb_s = 0;
         dc_addr_s = coh_addr_sb; dc_wdat_s = 0;
         dc_trsc_s = coh_trsc_sb;
-    end else if (|dc_rqst_f & ~dc_byps_f) begin
+    end else if (|dc_rqst_f & pma_c(dc_addr_f)) begin
         dc_rqst_s = dc_rqst_f; dc_strb_s = dc_strb_f;
         dc_addr_s = dc_addr_f; dc_wdat_s = dc_wdat_f;
         dc_trsc_s = 0;

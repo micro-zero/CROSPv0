@@ -2,8 +2,16 @@
 
 # parameters
 CPUFREQ       = 50
+DDR   		  = 80000000
+ETH   		  = 60020000
+UART  		  = 60010000
+SDC   		  = 60000000
+CLINT 		  = 02000000
+PLIC  		  = 0c000000
+ROM   		  = 00010000
 PARAM_CPUFREQ = $(CPUFREQ)000000
 PARAM_TBFREQ  = $(CPUFREQ)0000
+PARAM_RSTPC   = 10040
 PARAM_FWD     = 2
 PARAM_DWD     = 2
 PARAM_RWD     = 2
@@ -11,19 +19,12 @@ PARAM_IWD     = 3
 PARAM_EWD     = 2
 PARAM_CWD     = 2
 PARAM_MWD     = 1
-PARAM_DCBASE  = 80000000
-PARAM_ETH     = 60020000
-PARAM_UART    = 60010000
-PARAM_SDC     = 60000000
-PARAM_CLINT   = 02000000
-PARAM_PLIC    = 0c000000
-PARAM_RSTPC   = 00010040
-PARAM_ROM     = 00010000
 
 CORE_SRC = \
 	$(shell realpath ../src/common/types.sv) \
 	$(shell realpath ../src/common/mwpram.sv) \
 	$(shell realpath ../src/common/firstk.sv) \
+	$(shell realpath ../src/common/pma.sv) \
 	$(shell realpath ../src/frontend/pcgen.sv) \
 	$(shell realpath ../src/frontend/frontend.sv) \
 	$(shell realpath ../src/decoder/ci2i.sv) \
@@ -87,7 +88,6 @@ define PRJ_TCL
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:SDC:0.1 sdc
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:DEF:0.1 def
 	set_property CONFIG.init 0 [get_bd_cells core]
-	set_property CONFIG.dcbase {0x$(PARAM_DCBASE)} [get_bd_cells core]
 	set_property CONFIG.rst_pc {0x$(PARAM_RSTPC)}  [get_bd_cells core]
 	set_property CONFIG.fwd {$(PARAM_FWD)} [get_bd_cells core]
 	set_property CONFIG.dwd {$(PARAM_DWD)} [get_bd_cells core]
@@ -228,11 +228,11 @@ define PRJ_TCL
 	connect_bd_intf_net [get_bd_intf_ports uart]       [get_bd_intf_pins uart/uart]
 	connect_bd_intf_net [get_bd_intf_pins def/s_mem]   [get_bd_intf_pins cohub/m_mem]
 	connect_bd_intf_net [get_bd_intf_pins def/m_mem]   [get_bd_intf_pins cohub/s_mem]
-	assign_bd_address -offset 0x$(PARAM_CLINT) -range 64K [get_bd_addr_segs clint/s_axi/reg0]
-	assign_bd_address -offset 0x$(PARAM_PLIC)  -range 64M [get_bd_addr_segs plic/s_axi/reg0]
-	assign_bd_address -offset 0x$(PARAM_UART)  -range 64K [get_bd_addr_segs uart/s_axi/reg0]
-	assign_bd_address -offset 0x$(PARAM_SDC)   -range 64K [get_bd_addr_segs sdc/s_axi/reg0]
-	assign_bd_address -offset 0x$(PARAM_ROM)   -range 64K [get_bd_addr_segs rom/s_axi/reg0]
+	assign_bd_address -offset 0x$(CLINT) -range 64K [get_bd_addr_segs clint/s_axi/reg0]
+	assign_bd_address -offset 0x$(PLIC)  -range 64M [get_bd_addr_segs plic/s_axi/reg0]
+	assign_bd_address -offset 0x$(UART)  -range 64K [get_bd_addr_segs uart/s_axi/reg0]
+	assign_bd_address -offset 0x$(SDC)   -range 64K [get_bd_addr_segs sdc/s_axi/reg0]
+	assign_bd_address -offset 0x$(ROM)   -range 64K [get_bd_addr_segs rom/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs clint/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs plic/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs rom/s_axi/reg0]
@@ -278,7 +278,7 @@ define PRJ_TCL
 		intc_ip    {/axi_smc}                                   \\
 		master_apm {0}                                          \\
 	} [get_bd_intf_pins vip/S_AXI]
-	assign_bd_address -offset 0x$(PARAM_DCBASE) -range 1G [get_bd_addr_segs vip/S_AXI/Mem]
+	assign_bd_address -offset 0x$(DDR) -range 1G [get_bd_addr_segs vip/S_AXI/Mem]
 	apply_bd_automation -rule xilinx.com:bd_rule:board -config { \\
 		Board_Interface {Custom}                                 \\
 		Manual_Source   {/rst (ACTIVE_LOW)}                      \\

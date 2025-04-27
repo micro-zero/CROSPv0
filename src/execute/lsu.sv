@@ -13,8 +13,7 @@ module lsu #(
     parameter mwd,   // memory access width
     parameter lqsz,  // load queue size
     parameter sqsz,  // store queue size
-    parameter opsz,  // operation ID size
-    parameter dcbase // DCACHE base address
+    parameter opsz   // operation ID size
 )(
     input  logic clk,
     input  logic rst,
@@ -55,6 +54,7 @@ module lsu #(
     input  logic [mwd-1:0][63:0] dc_rdat  // DCACHE read data
 );
     /* utilities */
+    `include "pma.sv"
     function logic succeed(input logic [15:0] opid);
         succeed = red_bundle.opid[15] & opid[15] &
             $clog2(opsz)'(opid)            - $clog2(opsz)'(red_bundle.topid) >=
@@ -414,6 +414,7 @@ module lsu #(
         lq_to_trans = lq_valid & ~lq_trans;
         for (int i = 0; i < lqsz; i++) lq_to_chckd[i] = lq_trans[i] & ~|lq_chck[i];
         for (int i = 0; i < lqsz; i++) lq_to_accsd[i] = lq_trans[i] & ~lq_accsd[i] & ~|lq_miss[i];
+        for (int i = 0; i < lqsz; i++) lq_to_accsd[i] &= pma_i(lq_padd[i]) | lq_opid[i] == saf_opid;
         for (int i = 0; i < lqsz; i++) lq_to_exect[i] = lq_valid[i] & (lq_accsd[i] & lq_chck[i][1] | lq_fail[i]);
         /* do some forwarding */
         for (int i = 0; i < mwd; i++) begin
@@ -421,8 +422,8 @@ module lsu #(
             if (isdcl(ck_resp[i]))                  lq_to_chckd[$clog2(lqsz)'(ck_resp[i])] = 0;
             if (isdcl(dc_resp[i]))                  lq_to_accsd[$clog2(lqsz)'(dc_resp[i])] = 0;
             if (isdtl(dt_resp[i]) & ~ldpf[i])       lq_to_chckd[$clog2(lqsz)'(dt_resp[i])] = 1;
-            if (isdtl(dt_resp[i]) & ~ldpf[i])       lq_to_accsd[$clog2(lqsz)'(dt_resp[i])] = 1;
             if (isdcl(ck_resp[i]) & ck_forw[i][64]) lq_to_exect[$clog2(lqsz)'(ck_resp[i])] = 1;
+            if (isdtl(dt_resp[i]) & ~ldpf[i])       lq_to_accsd[$clog2(lqsz)'(dt_resp[i])] = pma_i(dt_padd[i]);
             if (isdcl(dc_resp[i]) & ~|dc_miss[i])   lq_to_exect[$clog2(lqsz)'(dc_resp[i])] =
                 lq_chck[$clog2(lqsz)'(dc_resp[i])][1] | dc_resp[i] == ck_resp[i] & ck_rslt[i][1];
         end
@@ -654,9 +655,6 @@ module lsu #(
         if (ck_aqrl[i][0])               rslt[i] = 2'b01; // release bit
         for (int j = 0; j < sqsz; j++)                    // acquire bit
             if ($clog2(sqsz)'(j) < ck_stid[i] - sq_front) if (sq_aqrl[sq_index[j]][1]) rslt[i] = 2'b01;
-        /* for convenience of IO operations, load operation (output) does not
-           run speculatively here, even though RVWMO does not constrain this */
-        if (ck_padd[i] < dcbase) rslt[i] = 2'b01;
         if (rslt[i] == 2'b01) forw[i] = 0;
     end
     always_ff @(posedge clk) if (rst) ck_resp <= 0;

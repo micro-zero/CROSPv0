@@ -15,7 +15,7 @@ MWD     = 1
 INITRD  = be000000 # same as in DTB
 RST_PC  = 81fff000
 DTBADDR = 81ffe000 # limited to 4KB
-DCBASE  = 80000000
+DDR     = 80000000
 ETH     = 60020000
 UART    = 60010000
 SDC     = 60000000
@@ -27,7 +27,7 @@ BAUD	= 11520000
 
 # Verilator variables
 CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
-	-I.vcore -DRST_PC="0x$(RST_PC)" -DDCBASE="0x$(DCBASE)" \
+	-I.vcore -DRST_PC="0x$(RST_PC)" -DDDR="0x$(DDR)" \
 		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) -DIWD=$(IWD) \
 		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
 		-DUART="0x$(UART)" -DSDC="0x$(SDC)" -DETH="0x$(ETH)" \
@@ -37,49 +37,50 @@ CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 	-DCPUFREQ="$(CPUFREQ)" -DTBFREQ="$(TBFREQ)" \
 	-DDTBADDR="0x$(DTBADDR)" -DINITRD="0x$(INITRD)"
 VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 256 \
-	-I../../src/common -I../../src/soc/axi_uart \
-	-I../../src/soc/axi_sdc -I../../src/soc/axi_eth
-VCORE_H  = ../../src/common/types.sv
+	-I../src/common -I../src/soc/axi_uart \
+	-I../src/soc/axi_sdc -I../src/soc/axi_eth
+VCORE_H  = ../src/common/types.sv
 VCORE_SV = \
-	../../src/common/mwpram.sv \
-	../../src/common/firstk.sv \
-	../../src/frontend/pcgen.sv \
-	../../src/frontend/frontend.sv \
-	../../src/decoder/ci2i.sv \
-	../../src/decoder/decoder.sv \
-	../../src/rename/rename.sv \
-	../../src/issue/issue.sv \
-	../../src/execute/alu.sv \
-	../../src/execute/mul.sv \
-	../../src/execute/div.sv \
-	../../src/execute/fpu.sv \
-	../../src/execute/lsu.sv \
-	../../src/execute/execute.sv \
-	../../src/commit/prf.sv \
-	../../src/commit/csr.sv \
-	../../src/commit/commit.sv \
-	../../src/mmu/tlb.sv \
-	../../src/mmu/cache.sv \
-	../../src/mmu/mmu.sv \
-	../../src/soc/crospaxi.sv \
+	../src/common/mwpram.sv \
+	../src/common/firstk.sv \
+	../src/common/pma.sv \
+	../src/frontend/pcgen.sv \
+	../src/frontend/frontend.sv \
+	../src/decoder/ci2i.sv \
+	../src/decoder/decoder.sv \
+	../src/rename/rename.sv \
+	../src/issue/issue.sv \
+	../src/execute/alu.sv \
+	../src/execute/mul.sv \
+	../src/execute/div.sv \
+	../src/execute/fpu.sv \
+	../src/execute/lsu.sv \
+	../src/execute/execute.sv \
+	../src/commit/prf.sv \
+	../src/commit/csr.sv \
+	../src/commit/commit.sv \
+	../src/mmu/tlb.sv \
+	../src/mmu/cache.sv \
+	../src/mmu/mmu.sv \
+	../src/soc/crospaxi.sv \
 	vcore.sv
-CLINT_SV = ../../src/soc/clint.sv
-PLIC_SV = ../../src/soc/plic.sv
-COHUB_SV = ../../src/soc/cohub.sv
-UART_SV = ../../src/soc/axi_uart/axi_uart.sv ../../src/soc/uart.sv
+CLINT_SV = ../src/soc/clint.sv
+PLIC_SV = ../src/soc/plic.sv
+COHUB_SV = ../src/soc/cohub.sv
+UART_SV = ../src/soc/axi_uart/axi_uart.sv ../src/soc/uart.sv
 SDC_SV = \
-	../../src/soc/axi_sdc/axi_sd_fifo.sv \
-	../../src/soc/axi_sdc/axi_sd_fifo_filler.sv \
-	../../src/soc/axi_sdc/sd_cmd_master.sv \
-	../../src/soc/axi_sdc/sd_data_master.sv \
-	../../src/soc/axi_sdc/sd_cmd_serial_host.sv \
-	../../src/soc/axi_sdc/sd_data_serial_host.sv \
-	../../src/soc/axi_sdc/sd_data_xfer_trig.sv \
-	../../src/soc/axi_sdc/axi_sdc_controller.sv \
-	../../src/soc/sdc.sv
+	../src/soc/axi_sdc/axi_sd_fifo.sv \
+	../src/soc/axi_sdc/axi_sd_fifo_filler.sv \
+	../src/soc/axi_sdc/sd_cmd_master.sv \
+	../src/soc/axi_sdc/sd_data_master.sv \
+	../src/soc/axi_sdc/sd_cmd_serial_host.sv \
+	../src/soc/axi_sdc/sd_data_serial_host.sv \
+	../src/soc/axi_sdc/sd_data_xfer_trig.sv \
+	../src/soc/axi_sdc/axi_sdc_controller.sv \
+	../src/soc/sdc.sv
 ETH_SV = \
-	../../src/soc/axi_eth/ethernet.sv \
-	../../src/soc/eth.sv
+	../src/soc/axi_eth/ethernet.sv \
+	../src/soc/eth.sv
 
 # Scripts
 define RVTESTS_SCRIPT
@@ -112,7 +113,7 @@ define RVTESTS_SCRIPT
 endef
 define HEXTESTS_SCRIPT
 	err=0
-	for file in ../../util/code/hex/*.hex; do
+	for file in ../util/code/hex/*.hex; do
 		./main -s -hex $$file >/dev/null 2>&1
 		exitcode=$$?
 		if [ $$exitcode -ne 0 ]; then
@@ -132,9 +133,9 @@ all: main
 .vcore : $(VCORE_SV) $(VCORE_H)
 	$(RM) -r .vcore
 	verilator $(VERILATOR_FLAGS) $(VCORE_SV) -lib-create vcore -top-module vcore -Mdir .vcore \
-		-Grst_pc="32'h$(RST_PC)" -Gdcbase="64'h$(DCBASE)" \
+		-Grst_pc="32'h$(RST_PC)" -Gclint="64'h$(CLINT)" \
 		-Gfwd=$(FWD) -Gdwd=$(DWD) -Grwd=$(RWD) -Giwd=$(IWD) \
-		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD) -Gclint="64'h$(CLINT)"
+		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD)
 	$(MAKE) -C .vcore -f Vvcore.mk
 
 .clint : $(CLINT_SV)
@@ -187,8 +188,8 @@ hex : main
 	@bash -c "$$HEXTESTS_SCRIPT"
 
 pk : main
-	@make -C ../../util/dt >/dev/null
-	@./main -s -dtb ../../util/dt/spike.dtb $$RISCV/riscv64-unknown-elf/bin/pk $(PKARG)
+	@make -C ../util/dt >/dev/null
+	@./main -s -dtb ../util/dt/spike.dtb $$RISCV/riscv64-unknown-elf/bin/pk $(PKARG)
 
 sim : sim.o verif.o
 	$(CXX) -O2 sim.o verif.o -o sim

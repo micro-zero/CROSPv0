@@ -423,7 +423,7 @@ int main(int argc, char *argv[])
                     slave = &sdc;
                 else if (addr >= UART && addr < UART + 0x10000)
                     slave = &uart;
-                else if (master->m().awvalid & addr < DCBASE)
+                else if (master->m().awvalid & addr < DDR)
                     fprintf(stderr, "[Warning] Writing to unregistered address %lx\n", addr);
             }
         }
@@ -530,7 +530,7 @@ int main(int argc, char *argv[])
                 uint8_t lsize;
                 uint64_t laddr;
                 delta_t delsim = next(sim, &lsize, &laddr);
-                if (lsize && laddr < DCBASE) // an output operation
+                if (lsize && laddr < DDR) // an output operation
                     delsim.gprv = del.gprv;  // synchronize with DUT
                 if (delsim.memw >> 4 == 0x8) // DUT does not consider LR as memory change instruction
                 {

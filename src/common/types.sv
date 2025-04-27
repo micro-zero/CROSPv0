@@ -141,6 +141,7 @@ typedef struct packed {
     logic [7:0] ldid, stid; // load/store ID
     logic [2:0] delta;      // compressed instruction
     logic call, ret;        // call/ret instruction
+    logic [31:0] ir;        // instruction
     logic [63:0] pc;        // PC and next PC
     logic rollback;         // rollback signal
     logic       [6:0] lrda; // rollback logical register number

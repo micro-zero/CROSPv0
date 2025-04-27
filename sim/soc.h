@@ -21,8 +21,8 @@
 #ifndef RST_PC
 #define RST_PC 0xc0000000
 #endif
-#ifndef DCBASE
-#define DCBASE 0x80000000
+#ifndef DDR
+#define DDR 0x80000000
 #endif
 #ifndef PLIC
 #define PLIC 0x0c000000

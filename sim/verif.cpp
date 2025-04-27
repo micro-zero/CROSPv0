@@ -37,8 +37,14 @@ int64_t bits::sext(int w) const { return ((data >> w - 1) & 1 ? -1ull << w : 0) 
 void bits::write(uint8_t s, uint8_t e, uint64_t x) { (data &= ~((1ull << e - s + 1ull) - 1ull << s)) |= x << s; }
 void bits::write(uint8_t i, uint64_t x) { (data &= ~(1ull << i)) |= x << i; }
 
-axidev &axidev::operator<<(const axiport_t &ap) { return *this; }
-axidev &axidev::operator<=(const axiport_t &ap) { return *this; }
+axiport_t axidev::m() const { return axiport_t{0}; }
+axiport_t axidev::s() const { return axiport_t{0}; }
+axidev &axidev::mset(const axiport_t &ap) { return *this; }
+axidev &axidev::sset(const axiport_t &ap) { return *this; }
+cohport_t axidev::mc() const { return cohport_t{0}; }
+cohport_t axidev::sc() const { return cohport_t{0}; }
+axidev &axidev::mcset(const cohport_t &ap) { return *this; }
+axidev &axidev::scset(const cohport_t &ap) { return *this; }
 
 /**
  * @brief abstract memory default constructor
@@ -49,9 +55,11 @@ memory::memory()
     memset(&axiport, 0, sizeof(axiport));
     memset(&axibuff, 0, sizeof(axibuff));
     rbursti = wbursti = 0;
-    scrqstr = mcrqstr = 0;
-    scrqst = mcresp = 0;
-    scsent = thbusy = 0;
+    memset(&mcbuff, 0, sizeof(mcbuff));
+    memset(&scbuff, 0, sizeof(scbuff));
+    memset(&mcport, 0, sizeof(mcport));
+    memset(&scport, 0, sizeof(scport));
+    scsent = 0;
     memset(&errstr, 0, sizeof(errstr));
 }
 
@@ -69,18 +77,16 @@ memory::memory(const memory &b) { *this = b; }
  * @param entry entry code position
  * @param dtbaddr device tree base address
  * @param initrdaddr initramdisk base address
- * @param uartaddr UART-lite base address
  * @return error string, NULL if successful
  */
 const char *memory::init(const char *fname, const char *dtb, const char *initrd,
                          uint8_t ftype, std::vector<const char *> args, uint64_t entry,
-                         uint64_t dtbaddr, uint64_t initrdaddr, uint64_t uartaddr)
+                         uint64_t dtbaddr, uint64_t initrdaddr)
 {
     this->args = args;
     this->entry = entry;
     this->dtbaddr = dtbaddr;
     this->initrdaddr = initrdaddr;
-    this->uartaddr = uartaddr;
     this->htifexit = 0;
     if (ftype == MEMINIT_ELF)
     {
@@ -90,7 +96,7 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
         FILE *fp = fopen(fname, "r");
         if (!fp)
             return sprintf(errstr, "[Error] Unable to open file %s\n", fname), errstr;
-        if (fread(&elf_h, sizeof(elf_h), 1, fp) < 0)
+        if (fread(&elf_h, sizeof(elf_h), 1, fp) != 1)
             return sprintf(errstr, "[Error] Fread failed\n"), errstr;
         if (strncmp((char *)elf_h.e_ident, ELFMAG, strlen(ELFMAG)) ||
             elf_h.e_ident[EI_CLASS] != ELFCLASS64)
@@ -102,7 +108,7 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
         /* sections from ELF file */
         Elf64_Shdr *shdr = new (std::nothrow) Elf64_Shdr[elf_h.e_shnum]; // section headers
         fseek(fp, elf_h.e_shoff, SEEK_SET);
-        if (fread(shdr, sizeof(Elf64_Shdr) * elf_h.e_shnum, 1, fp) < 0)
+        if (fread(shdr, sizeof(Elf64_Shdr) * elf_h.e_shnum, 1, fp) != 1)
             return sprintf(errstr, "[Error] Fread failed\n"), errstr;
         for (int i = 0; i < elf_h.e_shnum; i++)
             if (shdr[i].sh_flags & SHF_ALLOC)
@@ -132,7 +138,7 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
                 {
                     Elf64_Sym sym;
                     fseek(fp, shdr[i].sh_offset + j * shdr[i].sh_entsize, SEEK_SET);
-                    if (fread(&sym, sizeof(sym), 1, fp) < 0)
+                    if (fread(&sym, sizeof(sym), 1, fp) != 1)
                         return sprintf(errstr, "[Error] Fread failed\n"), errstr;
                     fseek(fp, shdr[shdr[i].sh_link].sh_offset + sym.st_name, SEEK_SET);
                     if (fscanf(fp, "%1023s", name) <= 0)
@@ -192,12 +198,30 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
     {
         /* bin code */
         FILE *fp = fopen(fname, "r");
-        if (!this->load(fp, 0x2000000, 0xbe000000)) // initrd at 0xbe000000
-            return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
-        if (!this->load(fp, 0x2000000, 0x80000000)) // boot code at 0x80000000
-            return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
-        fclose(fp);
-        htifaddr = {0x800421b0, 0x800421b8}; // buildroot default
+        if (!fp)
+            return sprintf(errstr, "[Error] Unable to open file %s\n", fname), errstr;
+        else if (strcmp(fname, "br.img") == 0)
+        {
+            if (!this->load(fp, 0x2000000, 0xbe000000)) // initrd at 0xbe000000
+                return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
+            if (!this->load(fp, 0x2000000, 0x80000000)) // boot code at 0x80000000
+                return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
+            fclose(fp);
+            htifaddr = {0x800421b0, 0x800421b8}; // buildroot default
+        }
+        else if (strcmp(fname, "rom.img") == 0)
+        {
+            if (!this->load(fp, 0x10000, 0x10000)) // ROM at 0x10000
+                return sprintf(errstr, "[Error] Adding memory from file failed\n"), errstr;
+            fclose(fp);
+            /* start section: jump from reset address to ELF entry */
+            this->add(0x1000, entry);
+            this->ui32(entry + 0) = 0x100b7;    // lui ra, 0x10
+            this->ui32(entry + 4) = 0x04008093; // addi ra, ra, 0x40
+            this->ui32(entry + 8) = 0x8067;     // ret
+        }
+        else
+            return sprintf(errstr, "[Error] Binary filename should be [br.img, rom.img]\n"), errstr;
     }
     if (dtb)
     {
@@ -224,7 +248,6 @@ const char *memory::init(const char *fname, const char *dtb, const char *initrd,
         fclose(fp);
     }
     this->ui64(htifaddr.fromhost) = this->ui64(htifaddr.tohost) = 0;
-    this->ui64(uartaddr) = this->ui64(uartaddr + 1) = 0;
     return NULL;
 }
 
@@ -301,7 +324,7 @@ bool memory::load(FILE *fp, uint64_t size, uint64_t base)
 {
     if (!add(size, base))
         return false;
-    if (fread(&(*this)[base], size, 1, fp) < 0)
+    if (fread(&(*this)[base], size, 1, fp) != 1)
         return false;
     return true;
 }
@@ -344,14 +367,14 @@ memory &memory::operator=(const memory &b)
  * @brief Get AXI port values sending to master
  * @return values on AXI port
  */
-memory::operator axiport_t() const { return axiport; }
+axiport_t memory::s() const { return axiport; }
 
 /**
  * @brief Set AXI port values from master
  * @param ap the AXI port values
  * @return self reference
  */
-axidev &memory::operator<<(const axiport_t &ap)
+axidev &memory::sset(const axiport_t &ap)
 {
     axiport.awid = ap.arid;
     axiport.awvalid = ap.awvalid;
@@ -375,13 +398,51 @@ axidev &memory::operator<<(const axiport_t &ap)
 }
 
 /**
+ * @brief Get coherence port values sending to master
+ * @return values on coherence port
+ */
+cohport_t memory::sc() const { return scport; }
+
+/**
+ * @brief Get coherence port values sending to slave
+ * @return values on coherence port
+ */
+cohport_t memory::mc() const { return mcport; }
+
+/**
+ * @brief Set coherence port values from master
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &memory::scset(const cohport_t &cp)
+{
+    scport.lock = cp.lock;
+    scport.rqst = cp.rqst;
+    scport.addr = cp.addr;
+    scport.trsc = cp.trsc;
+    return *this;
+}
+
+/**
+ * @brief Set coherence port values from slave
+ * @param cp the coherence port values
+ * @return self reference
+ */
+axidev &memory::mcset(const cohport_t &cp)
+{
+    mcport.resp = cp.resp;
+    mcport.mesi = cp.mesi;
+    return *this;
+}
+
+/**
  * @brief At reset
  * @param value value of reset signal
  */
 void memory::reset(uint8_t value) {}
 
 /**
- * @brief At clock posedge
+ * @brief At clock negedge
  */
 void memory::negedge() {}
 
@@ -412,13 +473,9 @@ void memory::checkpoint(const char *fn)
     fwrite(&axibuff, sizeof(axibuff), 1, fp);
     fwrite(&rbursti, sizeof(rbursti), 1, fp);
     fwrite(&wbursti, sizeof(wbursti), 1, fp);
-    fwrite(&scrqstr, sizeof(scrqstr), 1, fp);
-    fwrite(&mcrqstr, sizeof(mcrqstr), 1, fp);
-    fwrite(&scaddrr, sizeof(scaddrr), 1, fp);
-    fwrite(&mctrscr, sizeof(mctrscr), 1, fp);
-    fwrite(&mcaddrr, sizeof(mcaddrr), 1, fp);
+    fwrite(&mcbuff, sizeof(mcbuff), 1, fp);
+    fwrite(&scbuff, sizeof(scbuff), 1, fp);
     fwrite(&scsent, sizeof(scsent), 1, fp);
-    fwrite(&thbusy, sizeof(thbusy), 1, fp);
     buf = owner.size();
     fwrite(&buf, sizeof(buf), 1, fp);
     for (auto iter : owner)
@@ -426,21 +483,12 @@ void memory::checkpoint(const char *fn)
         fwrite(&iter.first, sizeof(iter.first), 1, fp);
         fwrite(&iter.second, sizeof(iter.second), 1, fp);
     }
-    fwrite(&scrqst, sizeof(scrqst), 1, fp);
-    fwrite(&mcrqst, sizeof(mcrqst), 1, fp);
-    fwrite(&sctrsc, sizeof(sctrsc), 1, fp);
-    fwrite(&mctrsc, sizeof(mctrsc), 1, fp);
-    fwrite(&scresp, sizeof(scresp), 1, fp);
-    fwrite(&mcresp, sizeof(mcresp), 1, fp);
-    fwrite(&scmesi, sizeof(scmesi), 1, fp);
-    fwrite(&mcmesi, sizeof(mcmesi), 1, fp);
-    fwrite(&scaddr, sizeof(scaddr), 1, fp);
-    fwrite(&mcaddr, sizeof(mcaddr), 1, fp);
+    fwrite(&mcport, sizeof(mcport), 1, fp);
+    fwrite(&scport, sizeof(scport), 1, fp);
     fwrite(&entry, sizeof(entry), 1, fp);
     fwrite(&hexsz, sizeof(hexsz), 1, fp);
     fwrite(&dtbaddr, sizeof(dtbaddr), 1, fp);
     fwrite(&initrdaddr, sizeof(initrdaddr), 1, fp);
-    fwrite(&uartaddr, sizeof(uartaddr), 1, fp);
     fwrite(&htifaddr, sizeof(htifaddr), 1, fp);
     buf = args.size();
     fwrite(&buf, sizeof(buf), 1, fp);
@@ -465,73 +513,60 @@ int memory::restore(const char *fn)
     if (!fp)
         return -1;
     uint64_t buf;
-    if (fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t b, s;
-        if (fread(&b, sizeof(b), 1, fp) < 0 ||
-            fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&b, sizeof(b), 1, fp) != 1 ||
+            fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         add(s, b);
-        if (fread(&this->ui8(b), s, 1, fp) < 0)
+        if (fread(&this->ui8(b), s, 1, fp) != 1)
             return -1;
     }
-    if (fread(&axiport, sizeof(axiport), 1, fp) < 0 ||
-        fread(&axibuff, sizeof(axibuff), 1, fp) < 0 ||
-        fread(&rbursti, sizeof(rbursti), 1, fp) < 0 ||
-        fread(&wbursti, sizeof(wbursti), 1, fp) < 0 ||
-        fread(&scrqstr, sizeof(scrqstr), 1, fp) < 0 ||
-        fread(&mcrqstr, sizeof(mcrqstr), 1, fp) < 0 ||
-        fread(&scaddrr, sizeof(scaddrr), 1, fp) < 0 ||
-        fread(&mctrscr, sizeof(mctrscr), 1, fp) < 0 ||
-        fread(&mcaddrr, sizeof(mcaddrr), 1, fp) < 0 ||
-        fread(&scsent, sizeof(scsent), 1, fp) < 0 ||
-        fread(&thbusy, sizeof(thbusy), 1, fp) < 0 ||
-        fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&axiport, sizeof(axiport), 1, fp) != 1 ||
+        fread(&axibuff, sizeof(axibuff), 1, fp) != 1 ||
+        fread(&rbursti, sizeof(rbursti), 1, fp) != 1 ||
+        fread(&wbursti, sizeof(wbursti), 1, fp) != 1 ||
+        fread(&mcbuff, sizeof(mcbuff), 1, fp) != 1 ||
+        fread(&scbuff, sizeof(scbuff), 1, fp) != 1 ||
+        fread(&scsent, sizeof(scsent), 1, fp) != 1 ||
+        fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t f;
         uint8_t s;
-        if (fread(&f, sizeof(f), 1, fp) < 0 ||
-            fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&f, sizeof(f), 1, fp) != 1 ||
+            fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         owner[f] = s;
     }
-    if (fread(&scrqst, sizeof(scrqst), 1, fp) < 0 ||
-        fread(&mcrqst, sizeof(mcrqst), 1, fp) < 0 ||
-        fread(&sctrsc, sizeof(sctrsc), 1, fp) < 0 ||
-        fread(&mctrsc, sizeof(mctrsc), 1, fp) < 0 ||
-        fread(&scresp, sizeof(scresp), 1, fp) < 0 ||
-        fread(&mcresp, sizeof(mcresp), 1, fp) < 0 ||
-        fread(&scmesi, sizeof(scmesi), 1, fp) < 0 ||
-        fread(&mcmesi, sizeof(mcmesi), 1, fp) < 0 ||
-        fread(&scaddr, sizeof(scaddr), 1, fp) < 0 ||
-        fread(&mcaddr, sizeof(mcaddr), 1, fp) < 0 ||
-        fread(&entry, sizeof(entry), 1, fp) < 0 ||
-        fread(&hexsz, sizeof(hexsz), 1, fp) < 0 ||
-        fread(&dtbaddr, sizeof(dtbaddr), 1, fp) < 0 ||
-        fread(&initrdaddr, sizeof(initrdaddr), 1, fp) < 0 ||
-        fread(&uartaddr, sizeof(uartaddr), 1, fp) < 0 ||
-        fread(&htifaddr, sizeof(htifaddr), 1, fp) < 0 ||
-        fread(&buf, sizeof(buf), 1, fp) < 0)
+    if (fread(&mcport, sizeof(mcport), 1, fp) != 1 ||
+        fread(&scport, sizeof(scport), 1, fp) != 1 ||
+        fread(&entry, sizeof(entry), 1, fp) != 1 ||
+        fread(&hexsz, sizeof(hexsz), 1, fp) != 1 ||
+        fread(&dtbaddr, sizeof(dtbaddr), 1, fp) != 1 ||
+        fread(&initrdaddr, sizeof(initrdaddr), 1, fp) != 1 ||
+        fread(&htifaddr, sizeof(htifaddr), 1, fp) != 1 ||
+        fread(&buf, sizeof(buf), 1, fp) != 1)
         return -1;
     for (int i = 0; i < buf; i++)
     {
         uint64_t s;
-        if (fread(&s, sizeof(s), 1, fp) < 0)
+        if (fread(&s, sizeof(s), 1, fp) != 1)
             return -1;
         char *b = new char[s + 1]; // todo: memory here will leak
         if (!b)
             return -1;
         args.push_back(b);
-        if (fread(b, s, 1, fp) < 0)
+        if (fread(b, s, 1, fp) != 1)
             return -1;
         b[s] = 0;
     }
-    if (fread(&smem, sizeof(smem), 1, fp) < 0 ||
-        fread(&htifexit, sizeof(htifexit), 1, fp) < 0)
+    if (fread(&smem, sizeof(smem), 1, fp) != 1 ||
+        fread(&htifexit, sizeof(htifexit), 1, fp) != 1)
         return -1;
     fclose(fp);
     return 0;
@@ -544,57 +579,53 @@ void memory::posedge()
 {
     /* handle HTIF requests */
     uint64_t reqaddr = 0;
-    if (owner[htifaddr.tohost >> 6] || owner[htifaddr.fromhost >> 6]) // buffer out-of-date
-        thbusy = 1;                                                   // start handling HTIF
-    if (thbusy)
+    if (htifaddr.tohost && htifaddr.fromhost)
+        if (owner[htifaddr.tohost >> 6] || owner[htifaddr.fromhost >> 6]) // buffer out-of-date
+            mcport.lock = 1;                                              // start handling HTIF
+    if (mcport.lock && scport.lock)
     {
         htifexit = htif(*this, htifaddr, args, smem, &owner, &reqaddr);
         if (!reqaddr) // HTIF requests handled
-            thbusy = 0;
+            mcport.lock = 0;
     }
 
     /* handle coherence interface */
-    if (mcrqst)
+    if (scport.rqst)
+        scbuff = scport;
+    if (scport.resp == scbuff.rqst)
+        scbuff.rqst = 0;
+    scport.resp = (mcport.lock && scport.lock || mcbuff.rqst) && scbuff.trsc ? 0 : scbuff.rqst;
+    scport.mesi = 1;
+    if (mcport.rqst)
     {
-        mcrqstr = mcrqst;
-        mcaddrr = mcaddr;
-        mctrscr = mctrsc;
-    }
-    if (mcresp)
-        mcrqstr = 0;
-    mcresp = (thbusy || scrqstr) && mctrscr ? 0 : mcrqstr;
-    mcmesi = 1;
-    if (scrqst)
-    {
-        scrqstr = scrqst;
-        scaddrr = scaddr;
-        scrqst = 0;
+        mcbuff = mcport;
+        mcport.rqst = 0;
     }
     if (reqaddr && !scsent)
     {
         scsent = 1;
-        scrqst = 0b1;
-        scaddr = reqaddr << 6;
-        sctrsc = 1; // issue GetV transaction
+        mcport.rqst = 0b1;
+        mcport.addr = reqaddr << 6;
+        mcport.trsc = 1; // issue GetV transaction
     }
-    if (scresp)
+    if (mcport.resp)
     {
-        if (!scmesi) // core also do not have valid line (caused by flushing maybe)
-            owner[scaddrr >> 6] = 0;
-        scrqstr = scsent = 0;
+        if (!mcport.mesi) // core also do not have valid line (caused by flushing maybe)
+            owner[mcbuff.addr >> 6] = 0;
+        mcbuff.rqst = scsent = 0;
     }
 
     /* handshake and state change */
     if (axiport.arvalid & axiport.arready)
     {
-        axibuff.araddr = axiport.araddr;
+        axibuff.araddr = axiport.araddr & ~7;
         axibuff.arsize = 1 << axiport.arsize; // signal in "axibuff" may be different from original
         axibuff.arlen = axiport.arlen + 1;
         rbursti = 0;
     }
     if (axiport.awvalid & axiport.awready)
     {
-        axibuff.awaddr = axiport.awaddr;
+        axibuff.awaddr = axiport.awaddr & ~7;
         axibuff.awsize = 1 << axiport.awsize;
         axibuff.awlen = axiport.awlen + 1;
         wbursti = 0;
@@ -607,11 +638,16 @@ void memory::posedge()
     }
     if (axiport.wvalid & axiport.wready)
     {
-        if (axibuff.awaddr == uartaddr) // UART-lite Rx/Tx FIFO
-            putchar((uint8_t)(axiport.wdata >> 32)), fflush(stdout);
-        for (int i = 0; i < 8; i++)
+        uint8_t sz = axibuff.awsize;
+        for (int i = 0; i < sz; i++)
             if ((axiport.wstrb >> i) & 1)
-                this->ui8(axibuff.awaddr + wbursti * 8 + i) = uint8_t(axiport.wdata >> 8 * i);
+            {
+                this->ui8(axibuff.awaddr + wbursti * sz + i) = uint8_t(axiport.wdata >> 8 * i);
+                /* todo: should distinguish DMA (non-cachable) write using other
+                   value like `awid` instead of `awsize` for robustness */
+                if (smem && sz != 8)
+                    smem->ui8(axibuff.awaddr + wbursti * sz + i) = uint8_t(axiport.wdata >> 8 * i);
+            }
         wbursti++;
     }
     if (axiport.wlast || axibuff.awlen == 1)
@@ -628,18 +664,7 @@ void memory::posedge()
     axiport.wready = wbursti < axibuff.awlen;
     axiport.rvalid = rbursti < axibuff.arlen;
     axiport.rlast = rbursti == axibuff.arlen - 1;
-    axiport.rdata = this->ui64(axibuff.araddr + rbursti * 8);
-    char ch;
-    static std::queue<char> chbuf;
-#ifdef FRHOST
-    if (FRHOST && (ch = nbgetchar()) != EOF)
-        chbuf.push(ch);
-#endif
-    if (axibuff.araddr == uartaddr) // UART-lite Rx/Tx FIFO
-        if (!chbuf.empty())
-            axiport.rdata = chbuf.front(), chbuf.pop();
-    if (axibuff.araddr == uartaddr + 8) // UART-lite status
-        axiport.rdata = !chbuf.empty();
+    axiport.rdata = this->ui64((axibuff.araddr) + rbursti * axibuff.arsize);
     axiport.bvalid = axibuff.bvalid;
 }
 
@@ -1187,9 +1212,11 @@ inline delta_t &genx(state_t &state, delta_t &del, uint8_t level, uint64_t cause
 /**
  * @brief calculate a next state
  * @param s the current state
+ * @param plsize pointer of size of load instruction (record for IO synchronization)
+ * @param pladdr pointer of address of load instruction
  * @return a possible delta for next state
  */
-delta_t next(state_t &s)
+delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
 {
     /* initialize */
     delta_t ret;
@@ -1200,7 +1227,10 @@ delta_t next(state_t &s)
     bool mintena = s.level < 3 || s.level == 3 && s.csr["mstatus"][3];
     bool sintena = s.level < 1 || s.level == 1 && s.csr["mstatus"][1];
     if (s.csr["mie"] & s.csr["mip"])
-        for (int i = 0; i < 64; i++)
+        for (int i = 63; i >= 0; i--)
+            /* although RV-spec defines the simultaneous interrupt priority,
+               for convenience of implementation, the priority implemented
+               is following ascending priority by MIP bit positions */
             if (s.csr["mie"][i] && s.csr["mip"][i])
                 if (s.csr["mideleg"][i] && sintena)
                 {
@@ -1576,6 +1606,10 @@ delta_t next(state_t &s)
             ret.gprv = (int64_t)(int32_t)ret.gprv;
         else if (funct3 == 0b110) // LWU
             ret.gprv = (uint32_t)ret.gprv;
+        if (plsize)
+            *plsize = 1 << ir.range(12, 13);
+        if (pladdr)
+            *pladdr = pa;
         break;
     case 0b0000111: // LOAD-FP
         if (!fs)
@@ -1591,6 +1625,10 @@ delta_t next(state_t &s)
             ret.gprv = s.mem.ui64(pa) | (-1llu << 32);
         else if (funct3 == 0b011) // FLD
             ret.gprv = s.mem.ui64(pa);
+        if (plsize)
+            *plsize = 1 << ir.range(12, 13);
+        if (pladdr)
+            *pladdr = pa;
         break;
     case 0b0001111: // MISC-MEM
         break;
@@ -1667,6 +1705,10 @@ delta_t next(state_t &s)
             ret.mema = pa;
             if (funct3 == 0b010) // LR.W
                 ret.gprv = (int64_t)(int32_t)ret.gprv;
+            if (plsize)
+                *plsize = 1 << ir.range(12, 13);
+            if (pladdr)
+                *pladdr = pa;
             break;
         case 0b00011: // SC
             if (va >> (funct3 & 3) << (funct3 & 3) != va)
@@ -1727,6 +1769,10 @@ delta_t next(state_t &s)
                 ret.memv = rs2 > ret.gprv ? (uint64_t)rs2 : ret.gprv;
             if (ret.memw < 8)
                 ret.memv &= ~((uint64_t)-1 << (8 * ret.memw));
+            if (plsize)
+                *plsize = 1 << ir.range(12, 13);
+            if (pladdr)
+                *pladdr = pa;
             break;
         }
         break;
@@ -2099,14 +2145,6 @@ delta_t next(state_t &s)
  */
 void apply(state_t &s, delta_t d)
 {
-#ifdef TOHOST
-    if (d.mema == TOHOST)
-        d.memw = 0;
-#endif
-#ifdef FRHOST
-    if (d.mema == FRHOST)
-        d.memw = 0;
-#endif
     s.pc = d.pc;
     s.level = d.level;
     if (d.gprw)

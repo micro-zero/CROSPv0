@@ -27,10 +27,6 @@ module vcore #(
     parameter cwd,
     parameter mwd,
     parameter rst_pc,
-    parameter tohost,
-    parameter frhost,
-    parameter dcbase,
-    parameter uart,
     parameter clint
 )(
     input  logic        clk,
@@ -38,11 +34,13 @@ module vcore #(
     input  logic [63:0] mip_ext,
     input  logic [63:0] mtime,
     /* interface propagation */
+    input  logic        s_coh_lock,
     input  logic  [7:0] s_coh_rqst,
     input  logic  [7:0] s_coh_trsc,
     input  logic [63:0] s_coh_addr,
     output logic  [7:0] s_coh_resp,
     output logic  [7:0] s_coh_mesi,
+    output logic        m_coh_lock,
     output logic  [7:0] m_coh_rqst,
     output logic  [7:0] m_coh_trsc,
     output logic [63:0] m_coh_addr,
@@ -141,14 +139,14 @@ module vcore #(
     output logic [63:0] ldmisp   // load misprediction
 );
     /* instantiate core with direct memory interface */
-    logic [63:0] dbg_cycle, dbg_pc0,dbg_pc1;
-    logic  [7:0] dbg_axi_stt, dbg_axi_req;
-    crosplite #(.fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd),
-        .rst_pc(rst_pc), .dcbase(dcbase), .tohost(tohost), .frhost(frhost), .uart(uart)) inst(
+    logic [63:0] dbg_cycle, dbg_pc0, dbg_pc1;
+    logic [31:0] dbg_ir0, dbg_ir1;
+    crospaxi #(.rst_pc(rst_pc),
+        .fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd)) inst(
         clk, rst, mip_ext, mtime,
-        dbg_cycle, dbg_pc0, dbg_pc1, dbg_axi_stt, dbg_axi_req,
-        s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
-        m_coh_rqst, m_coh_trsc, m_coh_addr, m_coh_resp, m_coh_mesi,
+        dbg_cycle, dbg_pc0, dbg_pc1, dbg_ir0, dbg_ir1,
+        s_coh_lock, s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
+        m_coh_lock, m_coh_rqst, m_coh_trsc, m_coh_addr, m_coh_resp, m_coh_mesi,
         m_axi_awid, m_axi_awaddr, m_axi_awlen, m_axi_awsize, m_axi_awburst,
         m_axi_awlock, m_axi_awcache, m_axi_awprot, m_axi_awqos,
         m_axi_awvalid, m_axi_awready,
