@@ -34,12 +34,13 @@ module mul #(
     logic [$clog2(eqsz):0] rr_num, rr_in, rr_out;
     logic [eqsz-1:0][15:0] rr_opid;
     logic [eqsz-1:0]       rr_bubble;
-    logic        [ewd-1:0][$clog2(eqsz)-1:0] rr_raddr, rr_waddr;
-    reg_bundle_t [ewd-1:0]                   rr_rvalue, rr_wvalue;
+    reg_bundle_t           rr_rvalue;
+    logic        [ewd-1:0][$clog2(eqsz)-1:0] rr_waddr;
+    reg_bundle_t [ewd-1:0]                   rr_wvalue;
     logic        [ewd-1:0]                   rr_wena;
-    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(ewd), .wports(ewd))
+    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(1), .wports(ewd))
         rr_inst(.clk(clk), .rst(rst),
-            .raddr(rr_raddr), .rvalue(rr_rvalue),
+            .raddr(rr_front), .rvalue(rr_rvalue),
             .waddr(rr_waddr), .wvalue(rr_wvalue), .wena(rr_wena));
     always_comb begin
         rr_in = 0; rr_wvalue = 0;
@@ -49,8 +50,7 @@ module mul #(
                 rr_in++;
             end
     end
-    always_comb for (int i = 0; i < ewd; i++) rr_raddr[i] = rr_front + $clog2(eqsz)'(i);
-    always_comb for (int i = 0; i < ewd; i++) rr_waddr[i] = rr_raddr[i] + $clog2(eqsz)'(rr_num);
+    always_comb for (int i = 0; i < ewd; i++) rr_waddr[i] = rr_front + $clog2(eqsz)'(rr_num) + $clog2(eqsz)'(i);
     always_comb for (int i = 0; i < ewd; i++) rr_wena [i] = i < 32'(rr_in);
     always_ff @(posedge clk) if (rst) rr_opid <= 0;
         else for (int i = 0; i < ewd; i++) if (rr_wena[i]) rr_opid[rr_waddr[i]] <= rr_wvalue[i].opid;
@@ -67,9 +67,9 @@ module mul #(
     logic [127:0] r, a, b;
     mul_funct_t f;
     always_comb begin
-        f = $bits(mul_funct_t)'(rr_rvalue[0].funct);
-        a = 128'(rr_rvalue[0].prs[0]);
-        b = 128'(rr_rvalue[0].prs[1]);
+        f = $bits(mul_funct_t)'(rr_rvalue.funct);
+        a = 128'(rr_rvalue.prs[0]);
+        b = 128'(rr_rvalue.prs[1]);
         if (f.mul | f.mulw | f.mulh | f.mulhsu) a[127:64] = {64{a[63]}};
         if (f.mul | f.mulw | f.mulh)            b[127:64] = {64{b[63]}};
         r = a * b;
@@ -78,16 +78,16 @@ module mul #(
     end
     always_comb begin
         result = 0;
-        if (|rr_num) result.opid = rr_rvalue[0].opid;
-        if (succeed(rr_opid[rr_raddr[0]]) | rr_bubble[rr_raddr[0]]) result.opid = 0;
-        result.brid = rr_rvalue[0].brid;
-        result.ldid = rr_rvalue[0].ldid;
-        result.stid = rr_rvalue[0].stid;
-        result.delta = rr_rvalue[0].delta;
-        result.pat = rr_rvalue[0].pat;
-        result.pc = rr_rvalue[0].pc;
-        result.npc = rr_rvalue[0].base[63:0] + 63'(rr_rvalue[0].delta);
-        result.prda = rr_rvalue[0].prda[1];
+        if (|rr_num) result.opid = rr_rvalue.opid;
+        if (succeed(rr_opid[rr_front]) | rr_bubble[rr_front]) result.opid = 0;
+        result.brid = rr_rvalue.brid;
+        result.ldid = rr_rvalue.ldid;
+        result.stid = rr_rvalue.stid;
+        result.delta = rr_rvalue.delta;
+        result.pat = rr_rvalue.pat;
+        result.pc = rr_rvalue.pc;
+        result.npc = rr_rvalue.base[63:0] + 63'(rr_rvalue.delta);
+        result.prda = rr_rvalue.prda[1];
         result.prdv = r[63:0];
     end
     always_comb rr_out = |rr_num & (claim[0] | ~rq[0].opid[15]) ? 1 : 0;

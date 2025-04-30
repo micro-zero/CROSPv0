@@ -197,7 +197,7 @@ module crospaxi #(
     logic  [2:0] csr_func;
     logic [11:0] csr_addr;
     logic [63:0] csr_wdat, csr_rdat;
-    logic [63:0] csr_status, csr_tvec, csr_mepc, csr_sepc;
+    logic [63:0] csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr;
     logic exception;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
@@ -211,7 +211,7 @@ module crospaxi #(
             ic_rqst, ic_addr, ic_resp, ic_rdat);
     decoder #(.fwd(fwd), .dwd(dwd), .cwd(cwd),
         .dqsz(2*dwd), .opsz(opsz), .brsz(brsz), .ldsz(lqsz), .stsz(sqsz))
-        dec_inst(clk, rst, csr_intl, csr_intg, csr_status,
+        dec_inst(clk, rst, csr_intl, csr_intg, csr_status, csr_fcsr,
             com_bundle, red_bundle, dec_ready, fet_bundle, ren_ready, dec_bundle);
     rename #(.dwd(dwd), .rwd(rwd), .cwd(cwd), .prnum(prnum), .brsz(brsz))
         ren_inst(clk, rst, com_bundle, red_bundle, ren_ready, dec_bundle, iss_ready, ren_bundle);
@@ -221,7 +221,8 @@ module crospaxi #(
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret,
         csr_excp, csr_intl, csr_intg, csr_flsh,
-        mip_ext, mtime, 64'(com_inst.rob_out), csr_status, csr_tvec, csr_mepc, csr_sepc, it_satp, dt_satp);
+        mip_ext, mtime, 64'(com_inst.rob_out),
+        csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp);
     issue #(.rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .iqsz(iqsz))
         iss_inst(clk, rst, fu_ready, busy_resp,
             exe_bundle, red_bundle, iss_ready, ren_bundle, (iwd)'(-1), iss_bundle);

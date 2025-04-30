@@ -39,11 +39,12 @@ module decoder #(
     parameter ldsz, // load queue size
     parameter stsz  // store queue size
 )(
-    input logic clk,
-    input logic rst,
-    input logic        intlocal,
-    input logic  [6:0] interrupt,
-    input logic [63:0] mstatus,
+    input  logic clk,
+    input  logic rst,
+    input  logic        intlocal,
+    input  logic  [6:0] interrupt,
+    input  logic [63:0] mstatus,
+    input  logic [63:0] fcsr,
     input  com_bundle_t [cwd-1:0] com_bundle,
     input  red_bundle_t           red_bundle,
     output logic        [fwd-1:0] ready,
@@ -132,7 +133,7 @@ module decoder #(
             fpu_funct[1].fsub = op[`MSUB] | op[`NMADD];
             if (|fpu_funct[1]) begin
                 fpu_funct[1].double = ir[25];
-                fpu_funct[1].rm     = ir[14:12];
+                fpu_funct[1].rm     = ir[14:12] == 3'b111 ? fcsr[7:5] : ir[14:12];
             end
 
             /* AMO requires 3rd operation */
@@ -220,7 +221,9 @@ module decoder #(
             fpu_funct[0].fcvtds = op[`OP_FP] & ir[31:25] == 7'b0100001 & ir[24:20] == 5'd0;
             if (|fpu_funct[0]) begin
                 fpu_funct[0].double = ir[25];
-                fpu_funct[0].rm     = ir[14:12];
+                fpu_funct[0].rm     = ir[14:12] == 3'b111 ? fcsr[7:5] : ir[14:12];
+                if (fpu_funct[0].rm == 3'b101 | fpu_funct[0].rm == 3'b110 | fpu_funct[0].rm == 3'b111)
+                    fpu_funct[0] = 0;
             end
             /* memory operations */
             lsu_funct[0].load  = op[`LOAD]  | op[`LOAD_FP]  | op[`AMO] & (ir[31:27] == 5'b00010 | |alu_funct[1]);

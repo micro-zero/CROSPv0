@@ -30,6 +30,7 @@ module alu #(
     endfunction
 
     /* request selector */
+    localparam eqsz = 2 * (1 << $clog2(ewd));
     reg_bundle_t [ewd-1:0] req_alu;
     logic [$clog2(eqsz):0] num_alu;
     always_comb begin
@@ -119,7 +120,6 @@ module alu #(
     end
 
     /* execution output queue */
-    localparam eqsz = 2 * (1 << $clog2(ewd));
     logic [$clog2(eqsz)-1:0] eq_front;
     logic [$clog2(eqsz):0] eq_num, eq_in, eq_out;
     logic [ewd-1:0][$clog2(eqsz)-1:0] eq_raddr, eq_waddr;

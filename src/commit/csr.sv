@@ -75,6 +75,7 @@ module csr(
     output logic [63:0] out_tvec,   // CSR `mtvec` or `stvec` according to current privilege level
     output logic [63:0] out_mepc,   // CSR `mepc`
     output logic [63:0] out_sepc,   // CSR `sepc`
+    output logic [63:0] out_fcsr,   // CSR `fcsr`
     output logic [63:0] out_isatp,  // CSR `satp` for instruction fetch
     output logic [63:0] out_dsatp   // CSR `satp` for data access
 );
@@ -181,8 +182,8 @@ module csr(
 
         /* M-level CSR */
         if (rst) misa <= {2'h2, 36'h0, 26'b00_0001_0100_0001_0001_0010_1101};
-        /* implemented extension:                U  S      M    I   F  DC A *\
-        \*                                 ZY XWVU TSRQ PONM LKJI HGFE DCBA */
+        /* implemented extension:                U  S      M    I   F  DC A *
+         *                                 ZY XWVU TSRQ PONM LKJI HGFE DCBA */
         if (rst) mvendorid <= 0; if (rst) marchid <= 0;
         if (rst) mimpid    <= 0; if (rst) mhartid <= 0;
         if (rst) mstatus <= {32'ha, 19'h1, 13'h0};
@@ -215,7 +216,7 @@ module csr(
         if (rst) mepc <= 0; else if (we & addr == 12'h341) mepc <= wres;
         if (rst) mcause <= 0; else if (we & addr == 12'h342) mcause <= wres;
         if (rst) mtval <= 0; else if (we & addr == 12'h343) mtval <= wres;
-        // S-level CSR
+        /* S-level CSR */
         if (rst) stvec <= 0; else if (we & addr == 12'h105) begin
             stvec <= wres; stvec[1:0] <= 0; end
         if (rst) scounteren <= 0; else if (we & addr == 12'h106) scounteren <= wres;
@@ -224,7 +225,12 @@ module csr(
         if (rst) scause <= 0; else if (we & addr == 12'h142) scause <= wres;
         if (rst) stval <= 0; else if (we & addr == 12'h143) stval <= wres;
         if (rst) satp <= 0; else if (we & addr == 12'h180) satp <= wres;
-        if (we & addr == 12'h005) utvec <= wres;
+        /* U-level CSR */
+        if (rst) fcsr <= 0;
+        else if (we & addr == 12'h001) fcsr[4:0] <= wres[4:0];
+        else if (we & addr == 12'h002) fcsr[7:5] <= wres[2:0];
+        else if (we & addr == 12'h003) fcsr <= wres;
+        if (rst) utvec <= 0; else if (we & addr == 12'h005) utvec <= wres;
     end
     always_comb mip = in_ip    & 64'b1010_1000_1000 | // MEIP/SEIP/MTIP/MSIP from external
                       mip_base & 64'b0001_0011_0011;
@@ -245,6 +251,7 @@ module csr(
                               addr == 12'h180 |                   // satp
                               addr == 12'h305 | addr == 12'h105); // mtvec
     always_comb out_status = mstatus;
+    always_comb out_fcsr   = fcsr;
     always_comb out_tvec   = trapintos ? stvec : mtvec;
     always_comb out_mepc   = mepc;
     always_comb out_sepc   = sepc;

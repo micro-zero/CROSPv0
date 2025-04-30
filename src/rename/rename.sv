@@ -30,7 +30,7 @@ module rename #(
     always_comb rollback = red_bundle.rollback & rq_empty; // rollback after rename queue empty
 
     /* rename queue */
-    parameter rqsz = 2 * (1 << $clog2(rwd));      // rename queue size
+    localparam rqsz = 2 * (1 << $clog2(rwd));      // rename queue size
     logic [$clog2(rqsz)-1:0] rq_front;            // front index of rename queue
     logic [$clog2(rqsz):0] rq_num, rq_in, rq_out; // several numbers of queue
     logic        [rwd-1:0][$clog2(rqsz)-1:0] rq_raddr, rq_waddr;   // read/write addresses
