@@ -380,6 +380,7 @@ module lsu #(
     logic [lqsz-1:0]            [15:0] lq_opid;              // operatio ID of load queue
     logic [lqsz-1:0]             [7:0] lq_strb;              // strobe part of load queue
     logic [lqsz-1:0]             [2:0] lq_bits;              // functional bits of load queue
+    logic [lqsz-1:0]                   lq_float;             // load to a floating-point register
     logic        [ewd-1:0][$clog2(lqsz)-1:0] lq_raddr;       // load queue read index
     logic        [ewd-1:0][$clog2(lqsz)-1:0] lq_waddr;       // load queue write index
     exe_bundle_t [ewd-1:0]                   lq_rvalue;      // load queue read value
@@ -465,6 +466,8 @@ module lsu #(
             3'b110: lq_rdat_wvalue[i] = {               32'd0, dc_rdat[i][31:0]};
             default: lq_rdat_wvalue[i] = dc_rdat[i];
         endcase
+        if (lq_float[lq_rdat_waddr[i]] & lq_bits[lq_rdat_waddr[i]][1:0] == 2'b10)
+            lq_rdat_wvalue[i][63:32] = -32'd1;
         lq_rdat_waddr [mwd + i] = $clog2(lqsz)'(ck_resp[i]);
         lq_rdat_wena  [mwd + i] = isdcl(ck_resp[i]) & ck_forw[i][64];
         lq_rdat_wvalue[mwd + i] = ck_forw[i][63:0];
@@ -574,8 +577,9 @@ module lsu #(
             2'b10: lq_strb[lq_waddr[i]] <= 8'b0000_1111 << lq_vadd_wvalue[i][2:0];
             2'b11: lq_strb[lq_waddr[i]] <= 8'b1111_1111 << lq_vadd_wvalue[i][2:0];
         endcase
-        lq_stid[lq_waddr[i]] <= $clog2(sqsz)'(req_load[i].stid);
-        lq_bits[lq_waddr[i]] <= func_load[i].bits;
+        lq_stid [lq_waddr[i]] <= $clog2(sqsz)'(req_load[i].stid);
+        lq_bits [lq_waddr[i]] <= func_load[i].bits;
+        lq_float[lq_waddr[i]] <= func_load[i].float;
     end
     always_ff @(posedge clk) if (rst) lq_front <= 0; else lq_front <= lq_front + $clog2(lqsz)'(lq_out);
 

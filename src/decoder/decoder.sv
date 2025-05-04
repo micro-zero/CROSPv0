@@ -230,6 +230,7 @@ module decoder #(
             lsu_funct[0].store = op[`STORE] | op[`STORE_FP] | op[`AMO] &  ir[31:27] == 5'b00011;
             lsu_funct[0].csr   = op[`SYSTEM] & |ir[13:12];
             lsu_funct[0].fence = op[`MISC_MEM] & ir[14:12] == 3'b000;
+            lsu_funct[0].float = op[`LOAD_FP] | op[`STORE_FP];
             if (lsu_funct[0].csr | lsu_funct[0].fence) lsu_funct[0].store = 1; // csrrw/fence will enter store queue
             if (|lsu_funct[0]) begin
                 lsu_funct[0].bits = ir[14:12];

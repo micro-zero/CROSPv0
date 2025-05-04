@@ -26,6 +26,61 @@ module fpu #(
             $clog2(opsz)'(redir.opid) - $clog2(opsz)'(redir.topid) + $clog2(opsz)'(1);
     endfunction
 
+    /* calculation with sticky bit */
+    function logic [63:0] srs(input logic [63:0] mantissa, input logic [11:0] shamt);
+        srs     =   mantissa >> shamt[5:0];
+        srs[0] |= |(mantissa & (64'd1 << shamt[5:0]) - 1);
+        if (shamt >= 64) srs = |mantissa ? 1 : 0; // underflow
+    endfunction
+    function logic [127:0] srs128(input logic [127:0] mantissa, input logic [11:0] shamt);
+        srs128     =   mantissa >> shamt[6:0];
+        srs128[0] |= |(mantissa & (128'd1 << shamt[6:0]) - 1);
+        if (shamt >= 128) srs128 = |mantissa ? 1 : 0;
+    endfunction
+    function logic [63:0] adds(input logic [63:0] ma, input logic [63:0] mb);
+        adds[63:1] = ma[63:1] + mb[63:1];
+        adds[0]    = ma[0] | mb[0];
+    endfunction
+    function logic [63:0] subs(input logic [63:0] ma, input logic [63:0] mb);
+        subs[63:1] = ma[63:1] - mb[63:1];
+        subs[0]    = ma[0] | mb[0];
+    endfunction
+
+    /* assembly function */
+    function logic [63:0] asm(
+        input logic s, input logic [11:0] e, logic [63:0] m,
+        input logic double, input logic [2:0] rm
+    );
+        if (double) begin
+            asm = m;
+            if      (rm == 0) asm += asm[2] & (|asm[1:0] | asm[3]) ? 8 : 0; // RNE
+            else if (rm == 1) asm += 0;                                     // RTZ
+            else if (rm == 2) asm +=  s & |asm[3:0] ? 8 : 0;                // RDN
+            else if (rm == 3) asm += ~s & |asm[3:0] ? 8 : 0;                // RUP
+            else if (rm == 4) asm += asm[2] ? 8 : 0;                        // RMM
+            /* mantissa may be overflowed after rounding */
+            if (asm[56]) e++;
+            if (asm[56]) asm >>= 1;
+            if (e < 1024) asm = e > 960 ? asm >> 1025 - e : 0; // subnormal or underflow
+            if (e < 1024) e = 1024;
+            asm = {s, e[10:0] + 11'd1024, asm[54:3]};
+            if (e >= 3071) asm = {s, -11'd1, 52'd0}; // infinity or overflow
+        end else begin // single
+            asm = m;
+            if      (rm == 0) asm += asm[31] & (|asm[30:0] | asm[32]) ? 1 << 32 : 0; // RNE
+            else if (rm == 1) asm += 0;                                              // RTZ
+            else if (rm == 2) asm +=  s & |asm[32:0] ? 1 << 32 : 0;                  // RDN
+            else if (rm == 3) asm += ~s & |asm[32:0] ? 1 << 32 : 0;                  // RUP
+            else if (rm == 4) asm += asm[31] ? 1 << 32 : 0;                          // RMM
+            if (asm[56]) e++;
+            if (asm[56]) asm >>= 1;
+            if (e < 1920) asm = e > 1856 ? asm >> 1921 - e : 0; // subnormal or underflow
+            if (e < 1920) e = 1920;                             // minimum as 8-bit zero
+            asm = {-32'd1, s, e[7:0] + 8'd128, asm[54:32]};
+            if (e >= 2175) asm = {-32'd1, s, -8'd1, 23'd0}; // infinity or overflow
+        end
+    endfunction
+
     /* register read buffer */
     localparam eqsz = 2 * (1 << $clog2(ewd));
     logic [$clog2(eqsz)-1:0] rr_front;
@@ -73,10 +128,10 @@ module fpu #(
     \*----------------------------------------*/
 
     /* FPU pipeline */
-    `define NSTAGE 5        // normal stage number
-    fpu_funct_t f;          // functional code of RR buffer front
-    logic stuck, stuck_mul; // pipeline stuck
-    logic [63:0] a, b;      // oprands of RR buffer front
+    `define NSTAGE 5            // normal stage number
+    fpu_funct_t f;              // functional code of RR buffer front
+    logic stuck_pip, stuck_mul; // pipeline stuck
+    logic [63:0] a, b;          // oprands of RR buffer front
     always_comb begin
         a = rr_rvalue.prs[0];
         b = rr_rvalue.b[64] ? rr_rvalue.prs[1] : rr_rvalue.b[63:0];
@@ -89,21 +144,21 @@ module fpu #(
     reg_bundle_t [`NSTAGE:1] r_split; // buffer of register read bundle
     fpu_funct_t  [`NSTAGE:1] f_split; // buffer of functional code
     logic [`NSTAGE:1]       as_split, bs_split;
-    logic [`NSTAGE:1][10:0] ae_split, be_split;
+    logic [`NSTAGE:1][11:0] ae_split, be_split;
     logic [`NSTAGE:1][63:0] am_split, bm_split;
     /* 64-bit mantissa:
-     *   m[  0  0 ...  1 .  x  x ... x 0 0 ] * 2 ^ (e - 1023)
-     *    [ 63 62 ... 54 . 53 52 ... 2 1 0 ]
-     * = m[  0  0 ...  1    x  x ... x 0 0 ] * 2 ^ (e - 1023 - 54)
+     *   m[  0  0 ...  1 .  x  x ... x G R S ] * 2 ^ (e - 2047)
+     *    [ 63 62 ... 55 . 54 53 ... 3 2 1 0 ]
+     * = m[  0  0 ...  1    x  x ... 0 0 0 0 ] * 2 ^ (e - 2047 - 55)
      * the LSB is for rounding
-     * for 64-bit integer, exponent is 54 + 1023 */
-    always_ff @(posedge clk) if (rst) r_split <= 0; else if (~stuck) begin
+     * for 64-bit integer, exponent is 55 + 2047 */
+    always_ff @(posedge clk) if (rst) r_split <= 0; else if (~stuck_pip) begin
         for (int i = 2; i <= `NSTAGE; i++)
             r_split[i] <= succeed(r_split[i - 1].opid) ? 0 : r_split[i - 1];
         r_split[1] <= succeed(rr_opid[rr_front]) | rr_bubble[rr_front] | ~|rr_out ? 0 : rr_rvalue;
     end
-    always_ff @(posedge clk) if (~stuck) f_split <= {f_split[`NSTAGE-1:1], f};
-    always_ff @(posedge clk) if (~stuck) begin
+    always_ff @(posedge clk) if (~stuck_pip) f_split <= {f_split[`NSTAGE-1:1], f};
+    always_ff @(posedge clk) if (~stuck_pip) begin
         as_split[`NSTAGE:2] <= as_split[`NSTAGE-1:1];
         bs_split[`NSTAGE:2] <= bs_split[`NSTAGE-1:1];
         ae_split[`NSTAGE:2] <= ae_split[`NSTAGE-1:1];
@@ -112,78 +167,89 @@ module fpu #(
         bm_split[`NSTAGE:2] <= bm_split[`NSTAGE-1:1];
         if (f.fcvtfi) begin // as 64-bit integer
             as_split[1] <= a[63] & ~b[0];
-            ae_split[1] <= 11'd1023 + 11'd54;
+            ae_split[1] <= 12'd2047 + 12'd55;
             am_split[1] <= a[63] & ~b[0] ? ~a + 1 : a;
         end else if (f.fcvtsd | ~f.fcvtds & f.double) begin // as double
-            as_split[1] <= a[63]; ae_split[1] <= a[62:52]; am_split[1] <= {10'd1, a[51:0], 2'b0};
-            bs_split[1] <= b[63]; be_split[1] <= b[62:52]; bm_split[1] <= {10'd1, b[51:0], 2'b0};
+            as_split[1] <= a[63]; am_split[1] <= {9'd1, a[51:0], 3'd0};
+            bs_split[1] <= b[63]; bm_split[1] <= {9'd1, b[51:0], 3'd0};
+            ae_split[1] <= {1'b0, a[62:52]} - 12'd1023 + 12'd2047;
+            be_split[1] <= {1'b0, b[62:52]} - 12'd1023 + 12'd2047;
+            /* subnormal or zero */
+            if (a[62:52] == 0) am_split[1] <= {9'd0, a[51:0], 3'd0} << 1;
+            if (b[62:52] == 0) bm_split[1] <= {9'd0, b[51:0], 3'd0} << 1;
+            /* infinity */
+            if (a[62:52] == -11'd1) ae_split[1] <= 3967;
+            if (b[62:52] == -11'd1) be_split[1] <= 3967;
         end else begin // as single
-            as_split[1] <= a[31]; am_split[1] <= {10'd1, a[22:0], 31'b0};
-            bs_split[1] <= b[31]; bm_split[1] <= {10'd1, b[22:0], 31'b0};
-            ae_split[1] <= {3'd0, a[30:23]} - 11'd127 + 11'd1023;
-            be_split[1] <= {3'd0, b[30:23]} - 11'd127 + 11'd1023;
+            as_split[1] <= a[31]; am_split[1] <= {9'd1, a[22:0], 32'd0};
+            bs_split[1] <= b[31]; bm_split[1] <= {9'd1, b[22:0], 32'd0};
+            ae_split[1] <= {3'd0, a[30:23]} - 12'd127 + 12'd2047;
+            be_split[1] <= {3'd0, b[30:23]} - 12'd127 + 12'd2047;
+            /* subnormal or zero */
+            if (a[30:23] == 0) am_split[1] <= {9'd0, a[22:0], 32'd0} << 1;
+            if (b[30:23] == 0) bm_split[1] <= {9'd0, b[22:0], 32'd0} << 1;
+            /* infinity */
+            if (a[30:23] == -8'd1) ae_split[1] <= 3967;
+            if (b[30:23] == -8'd1) be_split[1] <= 3967;
         end
     end
 
     /* stage 2: oprands alignment */
-    logic [10:0] me;     // maximum exponent
+    logic [11:0] me;     // maximum exponent
     logic [63:0] a2, b2; // 2's complement
     logic [`NSTAGE:2][63:0] a2_align, b2_align;
-    logic [`NSTAGE:2][10:0] me_align;
+    logic [`NSTAGE:2][11:0] me_align;
     always_comb me = ae_split[1] > be_split[1] ? ae_split[1] : be_split[1];
     always_comb begin
-        a2 = am_split[1] >> me - ae_split[1];
-        b2 = bm_split[1] >> me - be_split[1];
-        a2[0] |= |(am_split[1] & (64'd1 << me - ae_split[1]) - 1); // sticky bit
-        b2[0] |= |(bm_split[1] & (64'd1 << me - be_split[1]) - 1);
+        a2 = srs(am_split[1], me - ae_split[1]);
+        b2 = srs(bm_split[1], me - be_split[1]);
         if (as_split[1]) a2 = ~a2 + 1;
         if (bs_split[1]) b2 = ~b2 + 1;
     end
-    always_ff @(posedge clk) if (~stuck) a2_align <= {a2_align[`NSTAGE-1:2], a2};
-    always_ff @(posedge clk) if (~stuck) b2_align <= {b2_align[`NSTAGE-1:2], b2};
-    always_ff @(posedge clk) if (~stuck) me_align <= {me_align[`NSTAGE-1:2], me};
+    always_ff @(posedge clk) if (~stuck_pip) a2_align <= {a2_align[`NSTAGE-1:2], a2};
+    always_ff @(posedge clk) if (~stuck_pip) b2_align <= {b2_align[`NSTAGE-1:2], b2};
+    always_ff @(posedge clk) if (~stuck_pip) me_align <= {me_align[`NSTAGE-1:2], me};
 
     /* stage 3: calculation */
-    logic        rs;
-    logic [10:0] re;
-    logic [63:0] rm;
-    logic [63:0] rt; // truncated bits
+    logic         rs;
+    logic  [11:0] re;
+    logic  [63:0] pip;
+    logic [127:0] ints; // integer result with stick bits
     logic [`NSTAGE:3]       rs_calc;
-    logic [`NSTAGE:3][10:0] re_calc;
+    logic [`NSTAGE:3][11:0] re_calc;
     logic [`NSTAGE:3][63:0] rm_calc;
     int ah; // shifted highest one of first oprand
     always_comb if (f_split[2].fcvtif) begin
         rs = as_split[2]; re = 0; // integer as 1's complement
-        rm = 1023 + 54 > ae_split[2] ?
-            am_split[2] >> 1023 + 54 - ae_split[2] : am_split[2] << ae_split[2] - 1023 - 54;
-        rt = am_split[2] & (64'd1 << 1023 + 54 - ae_split[2]) - 1;
-        if (1023 + 54 > ae_split[2]) // right-shift rounding
-            if (f_split[2].rm == 0) // RNE
-                if (rt == 64'd1 << 1023 + 54 - ae_split[2] - 1) // ties to even
-                    rm = rm[0] ? rm + 1 : rm;
-                else rm = rm + (rt >> 1023 + 54 - ae_split[2] - 1 == 1 ? 1 : 0);
-            else if (f_split[2].rm == 1) rm = rm; // RTZ
-            else if (f_split[2].rm == 2) rm = rm; // RDN
-            else if (f_split[2].rm == 3) rm = rm; // RUP
-            else if (f_split[2].rm == 4) rm = rm; // RMM
+        if (2047 + 55 > ae_split[2])
+            ints = srs128(128'(am_split[2]), 12'd2047 + 12'd53 - 12'(ae_split[2]));
+        else ints = 128'(am_split[2]) << ae_split[2] - 2047 - 53;
+        if (2047 + 55 > ae_split[2]) // right-shift rounding
+            if      (f_split[2].rm == 0) ints += ints[1] & (ints[0] | ints[2]) ? 4 : 0; // RNE
+            else if (f_split[2].rm == 1) ints += 0;                                     // RTZ
+            else if (f_split[2].rm == 2) ints +=  rs & |ints[2:0] ? 4 : 0;              // RDN
+            else if (f_split[2].rm == 3) ints += ~rs & |ints[2:0] ? 4 : 0;              // RUP
+            else if (f_split[2].rm == 4) ints += ints[1] ? 4 : 0;                       // RMM
+        ints >>= 2;
+        pip = 64'(ints);
     end else begin
-        if      (f_split[2].fadd)  rm = a2_align[2] + b2_align[2]; // temporary 2's complement
-        else if (f_split[2].fsub)  rm = a2_align[2] - b2_align[2];
-        else                       rm = 0;
-        rs = rm[63];
+        if      (f_split[2].fadd) pip = adds(a2_align[2], b2_align[2]); // temporary 2's complement
+        else if (f_split[2].fsub) pip = subs(a2_align[2], b2_align[2]);
+        else                      pip = 0;
+        rs = pip[63];
         re = me_align[2];
-        if (rs) rm = ~rm + 1;
-        rt = 0;
+        if (rs) pip = ~pip + 1;
+        ints = 0;
     end
-    always_comb ah = 32'(ae_split[2]) - 1023;
-    always_ff @(posedge clk) if (~stuck) begin
+    always_comb ah = 32'(ae_split[2]) - 2047;
+    always_ff @(posedge clk) if (~stuck_pip) begin
         rs_calc[`NSTAGE:4] <= rs_calc[`NSTAGE-1:3];
         re_calc[`NSTAGE:4] <= re_calc[`NSTAGE-1:3];
         rm_calc[`NSTAGE:4] <= rm_calc[`NSTAGE-1:3];
-        /* result as floating point (default as first oprand: fmvfx fcvtfi fcvtsd fcvtds) */
+        /* result as floating point (default as first oprand: fcvtfi fcvtsd fcvtds) */
         {rs_calc[3], re_calc[3], rm_calc[3]} <= {as_split[2], ae_split[2], am_split[2]};
-        if (f_split[2].fadd)   {rs_calc[3], re_calc[3], rm_calc[3]} <= {rs, re, rm};
-        if (f_split[2].fsub)   {rs_calc[3], re_calc[3], rm_calc[3]} <= {rs, re, rm};
+        if (f_split[2].fadd)   {rs_calc[3], re_calc[3], rm_calc[3]} <= {rs, re, pip};
+        if (f_split[2].fsub)   {rs_calc[3], re_calc[3], rm_calc[3]} <= {rs, re, pip};
         if (f_split[2].fsgnj)  {rs_calc[3], rm_calc[3]} <= {bs_split[2], am_split[2]};
         if (f_split[2].fsgnjn) {rs_calc[3], rm_calc[3]} <= {~bs_split[2], am_split[2]};
         if (f_split[2].fsgnjx) {rs_calc[3], rm_calc[3]} <= {as_split[2] ^ bs_split[2], am_split[2]};
@@ -197,35 +263,35 @@ module fpu #(
         if (f_split[2].feq)    rm_calc[3] <= 64'($signed(a2_align[2]) == $signed(b2_align[2]));
         if (f_split[2].flt)    rm_calc[3] <= 64'($signed(a2_align[2]) <  $signed(b2_align[2]));
         if (f_split[2].fle)    rm_calc[3] <= 64'($signed(a2_align[2]) <= $signed(b2_align[2]));
-        if (f_split[2].fmvxf)  rm_calc[3] <= r_split[2].prs[0];
+        if (f_split[2].fmvxf)  rm_calc[3] <= r_split[2].prs[0]; // todo: higher bits are sign-extended???
         if (f_split[2].fcvtif & r_split[2].b[1:0] == 0) // to word
             if (ah > 30) rm_calc[3] <= rs ? 64'hffff_ffff_8000_0000 : 64'h7fff_ffff;
-            else if (rs) rm_calc[3] <= ~rm + 1;
-            else         rm_calc[3] <=  rm;
+            else if (rs) rm_calc[3] <= ~pip + 1;
+            else         rm_calc[3] <=  pip;
         if (f_split[2].fcvtif & r_split[2].b[1:0] == 1) // to unsigned word
             if           (rs) rm_calc[3] <= 0;
             else if (ah > 31) rm_calc[3] <= 64'hffff_ffff;
-            else              rm_calc[3] <= rm;
+            else              rm_calc[3] <= pip;
         if (f_split[2].fcvtif & r_split[2].b[1:0] == 2) // to long
             if (ah > 62) rm_calc[3] <= rs ? 64'h8000_0000_0000_0000 : 64'h7fff_ffff_ffff_ffff;
-            else if (rs) rm_calc[3] <= ~rm + 1;
-            else         rm_calc[3] <=  rm;
+            else if (rs) rm_calc[3] <= ~pip + 1;
+            else         rm_calc[3] <=  pip;
         if (f_split[2].fcvtif & r_split[2].b[1:0] == 3) // to unsigned long
             if           (rs) rm_calc[3] <= 0;
             else if (ah > 63) rm_calc[3] <= 64'hffff_ffff_ffff_ffff;
-            else              rm_calc[3] <= rm;
+            else              rm_calc[3] <= pip;
         if (f_split[2].fclass) rm_calc[3] <= {
             54'd0,
-            ae_split[2] == -11'd1 & am_split[2][53] == 1,
-            ae_split[2] == -11'd1 & am_split[2][53] == 0,
-            ~as_split[2] & ae_split[2] == -11'd1 & am_split[2][53:2]  == 0,
-            ~as_split[2] & ae_split[2] != -11'd1 & ae_split[2] != 0,
-            ~as_split[2] & ae_split[2] == 0 & am_split[2][53:2] != 0,
-            ~as_split[2] & {ae_split[2], am_split[2][53:2]} == 0,
-            as_split[2] & {ae_split[2], am_split[2][53:2]} == 0,
-            as_split[2] & ae_split[2] == 0 & am_split[2][53:2] != 0,
-            as_split[2] & ae_split[2] != -11'd1 & ae_split[2] != 0,
-            as_split[2] & ae_split[2] == -11'd1 & am_split[2][53:2]  == 0
+            ae_split[2] >= 3967 & am_split[2][54],
+            ae_split[2] > 3967 & ~am_split[2][54] & |am_split[2][54:3],
+            ~as_split[2] & ae_split[2] >= 3967 & am_split[2][54:3] == 0,
+            ~as_split[2] & ae_split[2] <  3967 & ae_split[2] != 0,
+            ~as_split[2] & ae_split[2] == 0 & am_split[2][54:3] != 0,
+            ~as_split[2] & {ae_split[2], am_split[2][54:3]} == 0,
+            as_split[2] & {ae_split[2], am_split[2][54:3]} == 0,
+            as_split[2] & ae_split[2] == 0 & am_split[2][54:3] != 0,
+            as_split[2] & ae_split[2] <  3967 & ae_split[2] != 0,
+            as_split[2] & ae_split[2] >= 3967 & am_split[2][54:3] == 0
         };
     end
 
@@ -234,12 +300,12 @@ module fpu #(
     logic  [6:0] rm_pos;
     logic  [5:0] rh; // position of highest one
     logic [`NSTAGE:4]       rs_uni;
-    logic [`NSTAGE:4][10:0] re_uni;
+    logic [`NSTAGE:4][11:0] re_uni;
     logic [`NSTAGE:4][63:0] rm_uni;
     firstk #(.width(64), .k(1)) rh_inst(.bits(rm_rev), .pos(rm_pos));
     always_comb for (int i = 0; i < 64; i++) rm_rev[i] = rm_calc[3][63 - i];
     always_comb rh = 63 - rm_pos[5:0];
-    always_ff @(posedge clk) if (~stuck) begin
+    always_ff @(posedge clk) if (~stuck_pip) begin
         rs_uni[`NSTAGE:5] <= rs_uni[`NSTAGE-1:4];
         re_uni[`NSTAGE:5] <= re_uni[`NSTAGE-1:4];
         rm_uni[`NSTAGE:5] <= rm_uni[`NSTAGE-1:4];
@@ -248,80 +314,74 @@ module fpu #(
             rm_uni[4] <= rm_calc[3];
         else begin // floating-point result
             rs_uni[4] <= rs_calc[3];
-            re_uni[4] <= re_calc[3] + 11'(rh) - 11'd54;
-            if (rh > 54) begin
-                rm_uni[4] <= rm_calc[3] >> 11'(rh) - 11'd54;
-                rm_uni[4][0] <= rm_calc[3][rh - 54] | |(rm_calc[3] & (64'd1 << 11'(rh) - 11'd54) - 1);
-            end else rm_uni[4] <= rm_calc[3] << 11'd54 - 11'(rh);
+            re_uni[4] <= re_calc[3] + 12'(rh) - 12'd55;
+            rm_uni[4] <= rh > 55 ? srs(rm_calc[3], 12'(rh) - 55) : rm_calc[3] << 12'd55 - 12'(rh);
+            if (13'(re_calc[3]) + 13'(rh) < 13'd55)            re_uni[4] <= 0;    // underflow
+            if (13'(re_calc[3]) + 13'(rh) > 13'd55 + 13'd4095) re_uni[4] <= 3967; // overflow
+            if (~rm_pos[6]) {re_uni[4], rm_uni[4]} <= 0;                          // zero mantissa
         end
     end
 
     /* stage 5: conversion */
     logic [63:0] r;
-    exe_bundle_t result;
+    exe_bundle_t r_pip;
     always_comb
-        if (f_split[4].feq | f_split[4].flt | f_split[4].fle | f_split[4].fmvxf | f_split[4].fcvtif) // integer
+        if (f_split[4].feq   | f_split[4].flt    | f_split[4].fle |
+            f_split[4].fmvxf | f_split[4].fcvtif | f_split[4].fclass) // integer
             r = rm_uni[4];
-        else if (f_split[4].double) begin // double
-            r = {rs_uni[4], re_uni[4], rm_uni[4][53:2]};
-            if (f_split[4].rm == 0) // RNE
-                r[51:0] += rm_uni[4][1] & (rm_uni[4][0] | rm_uni[4][2]) ? 1 : 0;
-        end else begin // single
-            r = {-32'd1, rs_uni[4], re_uni[4][7:0] + 8'd128, rm_uni[4][53:31]};
-            if (f_split[4].rm == 0) // RNE
-                r[22:0] += rm_uni[4][30] & (|rm_uni[4][29:0] | rm_uni[4][31]) ? 1 : 0;
-        end
-    always_ff @(posedge clk) if (~stuck) begin
-        result       <= 0;
-        result.opid  <= r_split[4].opid;
-        result.brid  <= r_split[4].brid;
-        result.ldid  <= r_split[4].ldid;
-        result.stid  <= r_split[4].stid;
-        result.delta <= r_split[4].delta;
-        result.pat   <= r_split[4].pat;
-        result.pc    <= r_split[4].pc;
-        result.npc   <= r_split[4].base[63:0] + 63'(r_split[4].delta);
-        result.prda  <= r_split[4].prda[1];
-        result.prdv  <= r;
-        if (f_split[4].fmul | f_split[4].fnmul) result <= 0;
-        if (f_split[4].fdiv | f_split[4].fsqrt) result <= 0;
+        else if (f_split[4].fmvfx) // fmvfx does not modify original bits
+            r = f_split[4].double ? r_split[4].prs[0] : {-32'd1, r_split[4].prs[0][31:0]};
+        else r = asm(rs_uni[4], re_uni[4], rm_uni[4], f_split[4].double, f_split[4].rm); // floating-point
+    always_ff @(posedge clk) if (~stuck_pip) begin
+        r_pip       <= 0;
+        r_pip.opid  <= r_split[4].opid;
+        r_pip.brid  <= r_split[4].brid;
+        r_pip.ldid  <= r_split[4].ldid;
+        r_pip.stid  <= r_split[4].stid;
+        r_pip.delta <= r_split[4].delta;
+        r_pip.pat   <= r_split[4].pat;
+        r_pip.pc    <= r_split[4].pc;
+        r_pip.npc   <= r_split[4].base[63:0] + 63'(r_split[4].delta);
+        r_pip.prda  <= r_split[4].prda[1];
+        r_pip.prdv  <= r;
+        if (f_split[4].fmul | f_split[4].fnmul) r_pip <= 0;
+        if (f_split[4].fdiv | f_split[4].fsqrt) r_pip <= 0;
     end
 
     /* multiplier:
-     * s1 * m1[  0  0 ...  1 .  x  x ... x 0 0 ] * 2 ^ (e1 - 1023) *
-     *     s2 * m2[  0  0 ...  1 .  x  x ... x 0 0 ] * 2 ^ (e2 - 1023) =
-     * s1 * m1'[  0  0 ...  1  x  x ... x 0 0 ] * 2 ^ (e1 - 1023 - 54) *
-     *     s2 * m2'[  0  0 ...  1  x  x ... x 0 0 ] * 2 ^ (e2 - 1023 - 54) =
-     * s1 * s2 * m1' * m2' * 2 ^ (e1 + e2 - 2046 - 108)
+     * s1 * m1[  0  0 ...  1 .  x  x ... x 0 0 ] * 2 ^ (e1 - 2047) *
+     *     s2 * m2[  0  0 ...  1 .  x  x ... x 0 0 ] * 2 ^ (e2 - 2047) =
+     * s1 * m1'[  0  0 ...  1  x  x ... x 0 0 ] * 2 ^ (e1 - 2047 - 55) *
+     *     s2 * m2'[  0  0 ...  1  x  x ... x 0 0 ] * 2 ^ (e2 - 2047 - 55) =
+     * s1 * s2 * m1' * m2' * 2 ^ (e1 + e2 - 4094 - 110)
      * there maybe a chance to reuse the integer multiplier and divider */
-    `define MSTAGE 5 // multiplier stage number
-    exe_bundle_t [`MSTAGE:1]        r_mul;
-    fpu_funct_t  [`MSTAGE:1]        f_mul;
-    logic        [`MSTAGE:0]        s_mul;
-    logic        [`MSTAGE:0] [10:0] e_mul;
-    logic        [`MSTAGE:0][127:0] m_mul;
+    `define MST 5 // multiplier stage number
+    exe_bundle_t [`MST:1]        r_mul;
+    fpu_funct_t  [`MST:1]        f_mul;
+    logic        [`MST:1]        s_mul;
+    logic        [`MST:1] [11:0] e_mul;
+    logic        [`MST:1][127:0] m_mul;
     logic   [7:0] pos_mul;
     logic [127:0] rev_mul;
-    logic  [10:0] rh_mul; // highest one position in m1' * m2'
+    logic  [11:0] rh_mul; // highest one position in m1' * m2'
+    logic  [63:0] srs_mulh, srs_mul;
     firstk #(.width(128), .k(1)) rh_mul_inst(.bits(rev_mul), .pos(pos_mul));
-    always_comb for (int i = 0; i < 128; i++) rev_mul[i] = m_mul[`MSTAGE - 1][127 - i];
-    always_comb rh_mul = 127 - 11'(pos_mul[6:0]);
+    always_comb for (int i = 0; i < 128; i++) rev_mul[i] = m_mul[`MST-1][127 - i];
+    always_comb rh_mul = 127 - 12'(pos_mul[6:0]);
+    always_comb {srs_mulh, srs_mul} = srs128(m_mul[`MST-1], 12'(rh_mul) - 55);
     always_ff @(posedge clk) if (rst) r_mul <= 0; else if (~stuck_mul) begin
-        /* uniform of [MSTAGE - 1] to [MSTAGE] */
-        r_mul[`MSTAGE] <= r_mul[`MSTAGE - 1];
-        if (f_mul[`MSTAGE - 1].double)
-            r_mul[`MSTAGE].prdv <=
-                {s_mul[`MSTAGE - 1], e_mul[`MSTAGE - 1] + rh_mul, 52'(m_mul[`MSTAGE - 1] >> 7'(rh_mul) - 52)};
-        else r_mul[`MSTAGE].prdv <=
-                {-32'd1, s_mul[`MSTAGE - 1], e_mul[`MSTAGE - 1][7:0] + 8'(rh_mul) + 8'd128,
-                 23'(m_mul[`MSTAGE - 1] >> 7'(rh_mul) - 23)};
-        /* shift of [1 .. MSTAGE - 2] to [2 .. MSTAGE - 1] */
-        for (int i = 2; i < `MSTAGE; i++)
+        /* uniform of [MST-1] to [MST] */
+        r_mul[`MST]      <= r_mul[`MST-1];
+        if (~pos_mul[7]) r_mul[`MST].prdv <= 0;
+        else             r_mul[`MST].prdv <=
+            asm(s_mul[`MST-1], e_mul[`MST-1] + rh_mul, srs_mul, f_mul[`MST-1].double, f_mul[`MST-1].rm);
+        /* shift of [1 .. MST-2] to [2 .. MST-1] */
+        for (int i = 2; i < `MST; i++)
             r_mul[i] <= succeed(r_mul[i - 1].opid) ? 0 : r_mul[i - 1];
-        f_mul[`MSTAGE-1:2] <= f_mul[`MSTAGE-2:1];
-        s_mul[`MSTAGE-1:2] <= s_mul[`MSTAGE-2:1];
-        e_mul[`MSTAGE-1:2] <= e_mul[`MSTAGE-2:1];
-        m_mul[`MSTAGE-1:2] <= m_mul[`MSTAGE-2:1];
+        f_mul[`MST-1:2] <= f_mul[`MST-2:1];
+        s_mul[`MST-1:2] <= s_mul[`MST-2:1];
+        e_mul[`MST-1:2] <= e_mul[`MST-2:1];
+        m_mul[`MST-1:2] <= m_mul[`MST-2:1];
         /* push-in of [1] */
         r_mul[1].opid  <= succeed(r_split[1].opid) | ~f_split[1].fmul & ~f_split[1].fnmul ? 0 : r_split[1].opid;
         r_mul[1].brid  <= r_split[1].brid;
@@ -334,32 +394,39 @@ module fpu #(
         r_mul[1].prda  <= r_split[1].prda[1];
         f_mul[1] <= f_split[1];
         s_mul[1] <= as_split[1] ^ bs_split[1] ^ f_split[1].fnmul;
-        e_mul[1] <= ae_split[1] + be_split[1] - 11'd1023 - 11'd108;
+        e_mul[1] <= ae_split[1] + be_split[1] - 12'd2047 - 12'd110;
         m_mul[1] <= {64'd0, am_split[1]} * {64'd0, bm_split[1]};
+        if (13'(ae_split[1]) + 13'(be_split[1]) < 13'd2047 + 13'd110)            e_mul[1] <= 0;    // underflow
+        if (13'(ae_split[1]) + 13'(be_split[1]) > 13'd2047 + 13'd110 + 13'd4095) e_mul[1] <= 3967; // overflow
+        if (ae_split[1] == 4095 | be_split[1] == 4095)                           e_mul[1] <= 3967; // infinity
     end
 
     /* divider:
-     *   s1 * m1[  0  0 ...  1 .  x  x ... x 0 0 ] * 2 ^ (e1 - 1023)     s1     m1
-     *  ------------------------------------------------------------- = ---- * ---- * 2 ^ (e1 - e2)
-     *   s2 * m2[  0  0 ...  1 .  x  x ... x 0 0 ] * 2 ^ (e2 - 1023)     s2     m2
-     *          [ 63 62 ... 54 . 53 52 ... 2 1 0 ]
+     *   s1 * m1[  0  0 ...  1 .  x  x ... x 0 0 0 ] * 2 ^ (e1 - 2047)     s1     m1
+     *  --------------------------------------------------------------- = ---- * ---- * 2 ^ (e1 - e2)
+     *   s2 * m2[  0  0 ...  1 .  x  x ... x 0 0 0 ] * 2 ^ (e2 - 2047)     s2     m2
+     *          [ 63 62 ... 55 . 54 53 ... 3 2 1 0 ]
      * fixed-point divider uses repeated substraction (same as integer) */
     exe_bundle_t r_div;
     fpu_funct_t  f_div;
-    logic        s_div;
-    logic [10:0] e_div;
+    logic        s_div, borrow;
+    logic [11:0] e_div;
     logic [63:0] m_div, a_div, b_div;
     logic  [6:0] c_div;
+    always_comb borrow = am_split[1] < bm_split[1];
     always_ff @(posedge clk)
         if      (rst | succeed(r_div.opid))                               {r_div, c_div} <= 64;
         else if ( r_div.opid[15] & r_div.opid == resp[0].opid & claim[0]) {r_div, c_div} <= 64;
         else if (~r_div.opid[15] & r_split[1].opid[15] & f_split[1].fdiv) begin
-            s_div       <= as_split[1] ^ bs_split[1];
-            e_div       <= ae_split[1] - be_split[1] + 11'd1023 - (am_split[1] < bm_split[1] ? 1 : 0);
-            m_div       <= 0;
-            a_div       <= am_split[1] < bm_split[1] ? am_split[1] << 1 : am_split[1];
+            s_div <= as_split[1] ^ bs_split[1];
+            e_div <= ae_split[1] - be_split[1] + 12'd2047 - 12'(borrow);
+            m_div <= 0;
+            if (13'(ae_split[1]) + 13'd2047 < 13'(be_split[1]) + 13'(borrow)) e_div <= 0; // underflow
+            if (13'(ae_split[1]) + 13'd2047 > 13'(be_split[1]) + 13'(borrow) + 13'd4095)  // overflow
+                e_div <= 3967;
+            a_div       <= am_split[1] << 6'(borrow);
             b_div       <= bm_split[1];
-            c_div       <= 54;
+            c_div       <= 55;
             f_div       <= f_split[1];
             r_div.opid  <= succeed(r_split[1].opid) ? 0 : r_split[1].opid;
             r_div.brid  <= r_split[1].brid;
@@ -372,19 +439,18 @@ module fpu #(
             r_div.prda  <= r_split[1].prda[1];
         end else if (~c_div[6]) begin // calculating
             c_div             <= c_div - 1;
-            a_div             <= (a_div >= b_div ? a_div - b_div : a_div) << 1;
+            a_div             <= (a_div >= b_div ? subs(a_div, b_div) : a_div) << 1;
             m_div[c_div[5:0]] <=  a_div >= b_div;
         end else if (c_div == -7'd1) begin // rounding
-            c_div <= -7'd2;
-            if (f_div.double) r_div.prdv <= {s_div, e_div, m_div[53:2]};
-            else              r_div.prdv <= {-32'd1, s_div, e_div[7:0] + 8'd128, m_div[53:31]};
+            c_div      <= -7'd2;
+            r_div.prdv <= asm(s_div, e_div, m_div | (|a_div ? 1 : 0), f_div.double, f_div.rm);
         end
 
     /* square root calculation */
     exe_bundle_t r_sqr;
     always_ff @(posedge clk)
         if      (rst | succeed(r_sqr.opid)) r_sqr <= 0;
-        else if ( r_sqr.opid[15] & r_sqr.opid == resp[1].opid & claim[0]) r_sqr <= 0;
+        else if ( r_sqr.opid[15] & r_sqr.opid == resp[1].opid & claim[1]) r_sqr <= 0;
         else if (~r_sqr.opid[15] & r_split[1].opid[15] & f_split[1].fsqrt) begin
             r_sqr.opid  <= succeed(r_split[1].opid) ? 0 : r_split[1].opid;
             r_sqr.brid  <= r_split[1].brid;
@@ -400,15 +466,15 @@ module fpu #(
 
     /* assign response */
     always_comb ready = ewd <= eqsz - 32'(rr_num); // ready when able to holding `ewd` operations
-    always_comb stuck = result.opid[15] & (~claim[0] | c_div == -7'd2);
-    always_comb stuck_mul = r_mul[`MSTAGE].opid[15] & (~claim[0] | r_sqr.opid[15]);
+    always_comb stuck_mul = r_mul[`MST].opid[15] & (~claim[1] | r_sqr.opid[15]);
+    always_comb stuck_pip = stuck_mul | r_pip.opid[15] & (~claim[0] | r_div.opid[15]);
     always_comb begin
-        rr_out = |rr_num & ~stuck ? 1 : 0;
+        rr_out = |rr_num & ~stuck_pip ? 1 : 0;
         if (f.fdiv & r_div.opid[15]) rr_out = 0;
     end
     always_comb begin
         resp = 0;
-        resp[0] = c_div == -7'd2 ? r_div : result;
-        resp[1] = r_sqr.opid[15] ? r_sqr : r_mul[`MSTAGE];
+        resp[0] = c_div == -7'd2 ? r_div : r_pip;
+        resp[1] = r_sqr.opid[15] ? r_sqr : r_mul[`MST];
     end
 endmodule

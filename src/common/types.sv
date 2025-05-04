@@ -213,7 +213,7 @@ typedef struct packed {
 typedef struct packed {
     logic [2:0] bits;       // L/S operation width and sign bits (funct3)
     logic [1:0] rsrv, aqrl; // reservation and ordering required
-    logic csr, fence, store, load;
+    logic csr, fence, float, store, load;
 } lsu_funct_t;
 
 endpackage
