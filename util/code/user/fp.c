@@ -19,5 +19,12 @@ int main()
         m *= i;
     }
     printf("sum1: %.12lf\nsum2: %.12lf\n", sum1, sum2);
+    double a, b, c;
+    printf("Enter a b: ");
+    fflush(stdout);
+    scanf("%lf %lf", &a, &b);
+    c = 0;
+    asm volatile("fsqrt.d %0, %1" : "=f"(c) : "f"(a));
+    printf("a / b = %.12lf, fsqrt(a) = %.12lf\n", a / b, c);
     return 0;
 }
