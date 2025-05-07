@@ -34,7 +34,7 @@ CORE_SRC = \
 	$(shell realpath ../src/execute/alu.sv) \
 	$(shell realpath ../src/execute/mul.sv) \
 	$(shell realpath ../src/execute/div.sv) \
-	$(shell realpath ../src/execute/fpu_synth.sv) \
+	$(shell realpath ../src/execute/fpu.sv) \
 	$(shell realpath ../src/execute/lsu.sv) \
 	$(shell realpath ../src/execute/execute.sv) \
 	$(shell realpath ../src/commit/prf.sv) \
