@@ -35,6 +35,8 @@ module commit #(
     output logic [63:0] cause,     // cause of exception
     /* exception return signals */
     output logic  [2:0] eret,      // exception return bits (MSB is valid bit)
+    /* context status signals */
+    output logic        frd,       // floating-point destination register
     /* ID control */
     input  logic [2*mwd-1:0][15:0] lsu_safe, // LSU early safe operation ID
     input  logic [2*mwd-1:0][15:0] lsu_unsf, // LSU unsafe operation ID
@@ -318,6 +320,11 @@ module commit #(
             red_bundle.delta = rei_bundle.delta;
             red_bundle.npc = rei_bundle.npc & ~64'd1;
         end
+    end
+    always_comb begin
+        frd = 0;
+        for (int i = 0; i < cwd; i++)
+            if (com_bundle[i].opid[15] & dec_rvalue[i].lrda[5]) frd = 1;
     end
     always_comb begin
         /* todo: better to be passed from decoder and do precise sfence.vma in L1 memory from LSU */

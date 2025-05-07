@@ -139,12 +139,11 @@ module vcore #(
     output logic [63:0] ldmisp   // load misprediction
 );
     /* instantiate core with direct memory interface */
-    logic [63:0] dbg_cycle, dbg_pc0, dbg_pc1;
-    logic [31:0] dbg_ir0, dbg_ir1;
+    logic [63:0] dbg_cycle;
+    logic [63:0] dbg_pcir0, dbg_pcir1;
     crospaxi #(.rst_pc(rst_pc),
         .fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd)) inst(
-        clk, rst, mip_ext, mtime,
-        dbg_cycle, dbg_pc0, dbg_pc1, dbg_ir0, dbg_ir1,
+        clk, rst, mip_ext, mtime, dbg_cycle, dbg_pcir0, dbg_pcir1,
         s_coh_lock, s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
         m_coh_lock, m_coh_rqst, m_coh_trsc, m_coh_addr, m_coh_resp, m_coh_mesi,
         m_axi_awid, m_axi_awaddr, m_axi_awlen, m_axi_awsize, m_axi_awburst,

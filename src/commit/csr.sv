@@ -62,6 +62,8 @@ module csr(
     input  logic [63:0] cause, // exception cause
     /* return from exception */
     input  logic  [2:0] ret,
+    /* context status change */
+    input  logic        frd,   // write to floating-point registers
     /* exception caused by CSR module */
     output logic        eout,  // raise exception
     output logic        intl,  // local interrupt detected (for halting wfi)
@@ -84,6 +86,7 @@ module csr(
     logic [64:0] val;  // direct value of input address
     logic trapintos;   // trap into S mode according to current level and delegation registers
     logic we;          // write enable signal for CSRRW
+    logic fsdirty;     // floating-point status dirty
     /* control and status registers */
     logic [63:0] misa, mvendorid, marchid, mimpid, mhartid;
     logic [63:0] mstatus, mtvec, medeleg, mideleg, mip, mip_base, mie;
@@ -140,6 +143,7 @@ module csr(
                        rqst & addr[9:8] > level                              | // violate privilege
                        rqst & addr >= 12'hc00 & addr < 12'hc20 & rdat != wres; // read-only
     always_comb we = rqst & ~eout;
+    always_comb fsdirty = frd | we & (addr == 12'h001 | addr == 12'h002 | addr == 12'h003);
     always_comb mcycle_fwd = mcycle + 1;
     always_comb minstret_fwd = minstret + (mcountinhibit[2] ? 0 : in_instret);
     always_ff @(posedge clk) begin
@@ -179,6 +183,10 @@ module csr(
                 mstatus[3] <= 0;          // MIE -> 0
             end
         if (rst) level <= 2'b11; // M mode on reset
+
+        /* context status */
+        if (fsdirty) mstatus[14:13] <= 3; // FS
+        if (fsdirty) mstatus[63]    <= 1; // SD
 
         /* M-level CSR */
         if (rst) misa <= {2'h2, 36'h0, 26'b00_0001_0100_0001_0001_0010_1101};
@@ -247,9 +255,10 @@ module csr(
         end
     end
     /* some CSRs change can cause pipeline flush */
-    always_comb flush = we & (addr == 12'h300 | addr == 12'h100 | // [m|s]status
-                              addr == 12'h180 |                   // satp
-                              addr == 12'h305 | addr == 12'h105); // mtvec
+    always_comb flush = we & (addr == 12'h300 | addr == 12'h100 |                   // [m|s]status
+                              addr == 12'h180 |                                     // satp
+                              addr == 12'h001 | addr == 12'h002 | addr == 12'h003 | // fcsr
+                              addr == 12'h305 | addr == 12'h105);                   // mtvec
     always_comb out_status = mstatus;
     always_comb out_fcsr   = fcsr;
     always_comb out_tvec   = trapintos ? stvec : mtvec;

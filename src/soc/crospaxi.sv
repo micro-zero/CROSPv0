@@ -36,10 +36,8 @@ module crospaxi #(
     input  logic [63:0] mtime,
     /* debug ports */
     output logic [63:0] dbg_cycle,
-    output logic [63:0] dbg_pc0,
-    output logic [63:0] dbg_pc1,
-    output logic [31:0] dbg_ir0,
-    output logic [31:0] dbg_ir1,
+    output logic [63:0] dbg_pcir0,
+    output logic [63:0] dbg_pcir1,
     /* coherence interface */
     input logic         s_coh_lock,
     input  logic  [7:0] s_coh_rqst,
@@ -198,7 +196,7 @@ module crospaxi #(
     logic [11:0] csr_addr;
     logic [63:0] csr_wdat, csr_rdat;
     logic [63:0] csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr;
-    logic exception;
+    logic exception, frd;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
     logic [15:0] top_opid, saf_opid;
@@ -219,7 +217,7 @@ module crospaxi #(
         prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, red_bundle,
             iss_ready, (iwd)'(-1), busy_resp, reg_resp);
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
-        exception, epc, tval, cause, eret,
+        exception, epc, tval, cause, eret, frd,
         csr_excp, csr_intl, csr_intg, csr_flsh,
         mip_ext, mtime, 64'(com_inst.rob_out),
         csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp);
@@ -230,7 +228,7 @@ module crospaxi #(
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (iwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
-            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret,
+            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, frd,
             lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv);
     alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
@@ -250,12 +248,8 @@ module crospaxi #(
 
     /* debug ports */
     always_comb dbg_cycle = csr_inst.mcycle;
-    always_ff @(posedge clk) if (rst) dbg_pc0 <= 0; else if (com_bundle[0].opid[15]) begin
-        dbg_pc0 <= com_bundle[0].pc;
-        dbg_ir0 <= com_bundle[0].ir;
-    end
-    always_ff @(posedge clk) if (rst) dbg_pc1 <= 0; else if (com_bundle[1].opid[15]) begin
-        dbg_pc1 <= com_bundle[1].pc;
-        dbg_ir1 <= com_bundle[1].ir;
+    always_ff @(posedge clk) if (rst) {dbg_pcir0, dbg_pcir1} <= 0; else begin
+        if (com_bundle[0].opid[15]) dbg_pcir0 <= {com_bundle[0].pc[31:0], com_bundle[0].ir};
+        if (com_bundle[1].opid[15]) dbg_pcir1 <= {com_bundle[1].pc[31:0], com_bundle[1].ir};
     end
 endmodule

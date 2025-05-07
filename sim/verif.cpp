@@ -1614,6 +1614,9 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     case 0b0000111: // LOAD-FP
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+        ret.csr["mstatus"] = s.csr["mstatus"];
+        ret.csr["mstatus"].write(13, 14, 3);
+        ret.csr["mstatus"].write(63, 1);
         va = rs1 + ir.range(20, 31).sext(12);
         if (va >> (funct3 & 3) << (funct3 & 3) != va)
             return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
@@ -1678,6 +1681,9 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     case 0b0100111: // STORE-FP
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+        ret.csr["mstatus"] = s.csr["mstatus"];
+        ret.csr["mstatus"].write(13, 14, 3);
+        ret.csr["mstatus"].write(63, 1);
     case 0b0100011: // STORE
         va = rs1 + bits(ir.range(25, 31) << 5 | ir.range(7, 11)).sext(12);
         if (va >> (funct3 & 3) << (funct3 & 3) != va)
@@ -1880,6 +1886,9 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     case 0b1001111: // NMADD
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+        ret.csr["mstatus"] = s.csr["mstatus"];
+        ret.csr["mstatus"].write(13, 14, 3);
+        ret.csr["mstatus"].write(63, 1);
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
         if (ir.range(2, 3) == 0)
@@ -1894,6 +1903,9 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     case 0b1010011: // OP-FP
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+        ret.csr["mstatus"] = s.csr["mstatus"];
+        ret.csr["mstatus"].write(13, 14, 3);
+        ret.csr["mstatus"].write(63, 1);
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
         switch (ir.range(27, 31))
@@ -2090,6 +2102,12 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
                     return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
             if (addr != 0xb01) // except mtime
                 ret.csr[csrname[addr]] = wvalue;
+            if (addr == 0x001 || addr == 0x002 || addr == 0x003) // fcsr
+            {
+                ret.csr["mstatus"] = s.csr["mstatus"];
+                ret.csr["mstatus"].write(13, 14, 3);
+                ret.csr["mstatus"].write(63, 1);
+            }
         }
         else if ((ir & ~(1 << 20)) == 0x73) // ECALL / EBREAK
             return genx(s, ret, medeleg[ir[20] ? 3 : s.level + 8] ? 1 : 3,
