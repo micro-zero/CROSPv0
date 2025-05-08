@@ -117,37 +117,6 @@ typedef struct packed {
 } reg_bundle_t;
 
 typedef struct packed {
-    logic [15:0] opid;      // operation ID
-    logic [7:0] brid;       // branch ID
-    logic [7:0] ldid, stid; // load and store ID
-    logic [2:0] delta;      // PC delta, 2 or 4
-    logic [63:0] pc, npc;   // PC and next PC
-    logic [15:0] prda;      // physical destination register number
-    logic [63:0] prdv;      // physical destination register value
-    logic  [7:0] cause;     // exception cause, MSB is exception bit, the next is interrupt bit
-    logic  [2:0] eret;      // exception return, MSB is valid bit
-    logic [63:0] tval;      // exception trap value
-    logic  [1:0] pat;       // branch pattern for updating frontend
-    logic specul;           // speculative mark
-    logic misp;             // misprediction of BRANCH and JALR instructions
-    logic mem, csr;         // memory/CSR change
-    logic flush, retry;     // force pipeline flush and retry
-    logic branch, jal, jalr;
-} exe_bundle_t;
-
-typedef struct packed {
-    logic [15:0] opid;      // operation ID
-    logic [7:0] brid;       // branch ID
-    logic [7:0] ldid, stid; // load/store ID
-    logic [2:0] delta;      // compressed instruction
-    logic call, ret;        // call/ret instruction
-    logic [63:0] pc;        // PC and next PC
-    logic rollback;         // rollback signal
-    logic       [6:0] lrda; // rollback logical register number
-    logic [1:0][15:0] prda; // old and new physical register number
-} com_bundle_t;
-
-typedef struct packed {
     logic [15:0] opid, topid;     // operation ID
     logic [7:0] brid, ldid, stid; // branch/load/store ID
     logic [2:0] delta;            // PC delta if not branch
@@ -167,6 +136,7 @@ typedef struct packed {
     logic call, ret;
     logic [1:0][6:0] lrsa;
     logic [6:0] lrda;
+    logic [63:0] funct;
 } rob_dec_t;
 
 typedef struct packed {
@@ -209,11 +179,182 @@ typedef struct packed {
     logic fsqrt, fdiv, fnmul, fmul, fsub, fadd; // FP arithmetics
 } fpu_funct_t;
 
+// Branch update information
+typedef struct packed {
+    logic                        mispredict;
+    logic [11 : 0]   mask;
+    logic [7 : 0]    br_tag;
+    logic [11 : 0]   resolve_mask;
+    logic [11 : 0]   mispredict_mask;
+} brupdate_t;
+
+/*** LSU Structure define ***/
+typedef enum logic[1:0] { 
+    misaligned_load  = 2'b10,
+    misaligned_store = 2'b11
+} mxcpt_t;   
+typedef logic [63 : 0]        data_t;
+typedef logic [63 : 0]        addr_t;
+typedef logic [6 : 0]      prf_id_t;
+
 typedef struct packed {
     logic [2:0] bits;       // L/S operation width and sign bits (funct3)
     logic [1:0] rsrv, aqrl; // reservation and ordering required
-    logic csr, fence, store, load;
+    logic csr, fence; 
+    logic                          store;              // is STORExx or not 
+    logic                          load;               // is LOADxx or not
+    logic                          is_sta;             // is STORE Address or not
+    logic                          is_std;             // is STORE Data or not
+    logic                          is_amo;             // is amo instr or not
+    logic                          is_fence;
+    logic [6:0] rob_idx;
+    // branch
+    logic [11 : 0]     br_mask;            // Branch mask
+    logic [7 : 0]      br_tag;             // Branch tag
+    logic                          taken;              // Branch is predicted taken or not 
+    // register
+    prf_id_t                       pdst;               // Physical DEST
+    // exception
+    logic                          exception;
+    //LSU need
+    logic [2:0]          ldq_idx; // if is_load , where the index is
+    logic [2:0]          stq_idx; // if is_store, where the index is
+    logic [1:0]                    mem_size; 
+
 } lsu_funct_t;
+
+typedef struct packed {
+    logic [15:0] opid;      // operation ID
+    logic [7:0] brid;       // branch ID
+    logic [7:0] ldid, stid; // load and store ID
+    logic [2:0] delta;      // PC delta, 2 or 4
+    logic [63:0] pc, npc;   // PC and next PC
+    logic [15:0] prda;      // physical destination register number
+    logic [63:0] prdv;      // physical destination register value
+    logic  [7:0] cause;     // exception cause, MSB is exception bit, the next is interrupt bit
+    logic  [2:0] eret;      // exception return, MSB is valid bit
+    logic [63:0] tval;      // exception trap value
+    logic  [1:0] pat;       // branch pattern for updating frontend
+    logic specul;           // speculative mark
+    logic misp;             // misprediction of BRANCH and JALR instructions
+    logic mem, csr;         // memory/CSR change
+    logic flush, retry;     // force pipeline flush and retry
+    logic branch, jal, jalr;
+} exe_bundle_t;
+
+typedef struct packed {
+    logic [15:0] opid;      // operation ID
+    logic [7:0] brid;       // branch ID
+    logic [7:0] ldid, stid; // load/store ID
+    logic [2:0] delta;      // compressed instruction
+    logic call, ret;        // call/ret instruction
+    logic [63:0] pc;        // PC and next PC
+    logic rollback;         // rollback signal
+    logic       [6:0] lrda; // rollback logical register number
+    logic [1:0][15:0] prda; // old and new physical register number
+    lsu_funct_t lsu_funct;
+} com_bundle_t;
+
+typedef struct packed {
+    data_t                 data;
+    addr_t                 addr;
+    data_t                 offset;
+    mxcpt_t                mxcpt;      //地址计算异常
+    logic                  mxcpt_valid;//设置了一个exception的有效位
+    logic                  sfence;//
+    lsu_funct_t             uop;   
+    logic                  valid;
+} func_unit_resp_t;
+
+typedef struct packed {
+    logic                  valid;
+    lsu_funct_t             uop;
+    addr_t                 addr;
+    logic                  predicated;// Was this predicated off?
+    data_t                 data;
+    //no floating points
+} exe_unit_resp_t;
+
+typedef struct packed {
+    logic                   valid;
+    lsu_funct_t             bits;
+} memresp_t;
+
+typedef struct packed {
+    logic                  valid;
+    lsu_funct_t             uop;
+    logic[2-1:0]           cause;//发生异常的原因 load exception 还是 addr calculate exception
+    addr_t                 badaddr;//发生异常的地址
+} xcpt_t;
+
+typedef struct packed {
+    logic                  valid;
+    logic[63:0] lsu_idx;//指令在队列中的位置 （4bit）
+    logic                  isload;
+    logic                  cache_nack;//是cache因为miss等原因发送还是LSU因为地址冲突或数据前递发送
+} nack_t;
+
+typedef struct packed {//从这里多加了一些lsu需要的结构
+    lsu_funct_t          uop;
+    addr_t              addr;
+    data_t              data;
+    logic               is_hella;
+    logic               dreq_valid;
+} dc_req_t;
+
+typedef struct packed {
+    lsu_funct_t          uop;
+    data_t              data;
+    logic               is_hella;
+    logic               dresp_valid;
+} dc_resp_t;
+
+typedef struct packed {
+    addr_t                      addr;
+    logic                       addr_valid;
+    logic                       addr_is_virtual;    // Virtual address, we got a TLB miss
+    logic                       addr_is_uncacheable;// Uncacheable, wait until head of ROB to execute
+
+    lsu_funct_t                  uop;
+
+    logic                       executed;           // load sent to memory, reset by NACKs
+    logic                       succeeded;
+    logic                       order_fail;
+    logic                       observed;
+
+    logic [7:0]   st_dep_mask;        // list of stores older than us
+    logic [7:0]       youngest_stq_idx;   // index of the oldest store younger than us
+    logic                       forward_std_val;
+    logic [7:0]       forward_stq_idx;    // Which store did we get the store-load forward from?
+    
+    data_t                      debug_wb_data;
+} LDQEntry;
+
+typedef struct packed {
+    addr_t                      addr;
+    logic                       addr_valid;
+    logic                       addr_is_virtual;
+    data_t                      data;
+    logic                       data_valid;
+
+    lsu_funct_t                  uop;
+
+    logic                       committed;        // committed by ROB
+    logic                       succeeded;        // D$ has ack'd this, we don't need to maintain this anymore
+
+    data_t                      debug_wb_data;
+} STQEntry;
+
+typedef struct packed {
+    LDQEntry                   entry;
+    logic                      entry_valid;
+
+} LDQ_LINE;
+                        
+typedef struct packed {
+    STQEntry                   entry;
+    logic                      entry_valid;
+} STQ_LINE;
 
 endpackage
 

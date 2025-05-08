@@ -137,19 +137,23 @@ module issue #(
     /* issue arbiter */
     always_comb begin
         iss_bundle = 0;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < iwd; i++) begin
             if (iq_ready_pos[i][$clog2(iqsz)]) begin
                 iss_bundle[i] = iq_rvalue[i];
                 iss_bundle[i].prsb = iq_prsb_fwd[iq_raddr[i]];
             end
+            if (iss_bundle[i].fu[1]) break;
+        end
     end
     always_comb begin
         iq_out = $countones(iq_flush);
         iq_out_mask = iq_flush;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < iwd; i++) begin
             if (iq_ready_pos[i][$clog2(iqsz)] & ~iss_bundle[i].prsb[1] & issue[i]) begin
                 iq_out++;
                 iq_out_mask[iq_raddr[i]] = 1;
             end
+            if (iss_bundle[i].fu[1]) break;
+        end
     end
 endmodule

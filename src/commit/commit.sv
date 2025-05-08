@@ -42,7 +42,10 @@ module commit #(
     output logic            [15:0] saf_opid, // first safe operation ID
     /* fences */
     output logic fencei,           // fence.i committed
-    output logic sfence            // sfence.vma committed
+    output logic sfence,           // sfence.vma committed
+    input  logic core_clr_bsy_valid,
+    input  logic [7:0] core_clr_bsy_rob_idx,
+    input exe_unit_resp_t core_exe_iresp
 );
     /* pipeline redirect and rollback */
     function logic succeed(input logic [15:0] opid);
@@ -102,6 +105,7 @@ module commit #(
         dec_wvalue[i].ret   = dec_bundle[i].ret;
         dec_wvalue[i].lrsa  = dec_bundle[i].rsa;
         dec_wvalue[i].lrda  = dec_bundle[i].rda;
+        dec_wvalue[i].funct = dec_bundle[i].funct;
     end
     always_comb begin
         rob_in = 0;                   // allocate ROB entry after decoding
@@ -130,11 +134,11 @@ module commit #(
 
     /* entry modified by execution results */
     exe_bundle_t mis_first, mis_bundle, rei_bundle;       // earliest mispredicted and reinforced EXE bundle
-    rob_exe_t [cwd-1:0]                   exe_rvalue;     // reading values in ROB
-    logic     [iwd-1:0][$clog2(opsz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
-    rob_exe_t [iwd-1:0]                   exe_wvalue;     // writing values in ROB
-    logic     [iwd-1:0]                   exe_wena;       // ROB write enable signals after EXE stage
-    mwpram #(.width($bits(rob_exe_t)), .depth(opsz), .rports(cwd), .wports(iwd))
+    rob_exe_t [cwd-1:0]                 exe_rvalue;     // reading values in ROB
+    logic     [iwd:0][$clog2(opsz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
+    rob_exe_t [iwd:0]                   exe_wvalue;     // writing values in ROB
+    logic     [iwd:0]                   exe_wena;       // ROB write enable signals after EXE stage
+    mwpram #(.width($bits(rob_exe_t)), .depth(opsz), .rports(cwd), .wports(iwd+1))
         rob_exe_inst(.clk(clk), .rst(rst),
             .raddr(rob_raddr), .rvalue(exe_rvalue),
             .waddr(exe_waddr), .wvalue(exe_wvalue), .wena(exe_wena));
@@ -147,6 +151,11 @@ module commit #(
         exe_wvalue[i].retry = exe_bundle[i].retry;
         exe_wvalue[i].mem   = exe_bundle[i].mem;
         exe_wvalue[i].csr   = exe_bundle[i].csr;
+        if (i == iwd) begin
+            exe_waddr[i] = $clog2(opsz)'(core_exe_iresp.uop.rob_idx);
+            exe_wena[i] = core_exe_iresp.valid;
+            exe_wvalue[i] = 0;
+        end
     end
     always_comb begin
         mis_first = 0; // search for earliest misprediction
@@ -177,7 +186,7 @@ module commit #(
         /* store earliest trap value in a single register to save space of ROB */
         eid_new = eid_last;
         tval_new = tval_last;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i <= iwd; i++)
             if (exe_wena[i] & exe_bundle[i].cause[7] & ~rollback) // exception happens
                 if (~eid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(eid_new) - rob_front) begin
                     eid_new = exe_bundle[i].opid;
@@ -187,8 +196,8 @@ module commit #(
     end
     always_comb begin
         saf_fwd = saf;
-        for (int i = 0; i < dwd; i++) if (dec_wena[i]) saf_fwd[$clog2(opsz)'(dec_waddr[i])] = dec_bundle[i].safe;
-        for (int i = 0; i < iwd; i++) if (exe_wena[i]) saf_fwd[$clog2(opsz)'(exe_waddr[i])] =
+        for (int i = 0; i <= dwd; i++) if (dec_wena[i]) saf_fwd[$clog2(opsz)'(dec_waddr[i])] = dec_bundle[i].safe;
+        for (int i = 0; i <= iwd; i++) if (exe_wena[i]) saf_fwd[$clog2(opsz)'(exe_waddr[i])] =
             ~exe_bundle[i].cause[7] & ~exe_bundle[i].eret[2] & ~exe_bundle[i].specul &
             ~exe_bundle[i].misp     & ~exe_bundle[i].flush   & ~exe_bundle[i].retry;
         for (int i = 0; i < 2 * mwd; i++) if (lsu_unsf[i][15]) saf_fwd[$clog2(opsz)'(lsu_unsf[i])] = 0;
@@ -204,10 +213,11 @@ module commit #(
         end
         for (int i = 0; i < rwd; i++) if (ren_wena[i]) // set renaming status
             ren[$clog2(opsz)'(ren_waddr[i])] <= 1;
-        for (int i = 0; i < iwd; i++) if (exe_wena[i]) begin // set execution status
+        for (int i = 0; i <= iwd; i++) if (exe_wena[i]) begin // set execution status
             exe[$clog2(opsz)'(exe_waddr[i])] <= 1;
             spc[$clog2(opsz)'(exe_waddr[i])] <= exe_bundle[i].specul;
         end
+        if (core_clr_bsy_valid) exe[$clog2(opsz)'(core_clr_bsy_rob_idx)] <= 1;
     end
     always_ff @(posedge clk) if (rst | exception | succeed(eid_new))  eid_last <= 0; else  eid_last <=  eid_new;
     always_ff @(posedge clk) if (rst | exception | succeed(eid_new)) tval_last <= 0; else tval_last <= tval_new;
@@ -242,6 +252,7 @@ module commit #(
             com_bundle[i].ldid     = dec_rvalue[i].ldid;
             com_bundle[i].stid     = dec_rvalue[i].stid;
             com_bundle[i].pc       = dec_rvalue[i].pc;
+            com_bundle[i].lsu_funct = $bits(lsu_funct_t)'(dec_rvalue[i].funct);
             com_bundle[i].call     = dec_rvalue[i].call;
             com_bundle[i].ret      = dec_rvalue[i].ret;
             com_bundle[i].delta    = dec_rvalue[i].delta;

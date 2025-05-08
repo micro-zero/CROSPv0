@@ -397,7 +397,8 @@ module crosplite #(
     commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
             csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret,
-            lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv);
+            lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv,
+            core_clr_bsy_valid, core_clr_bsy_rob_idx, core_exe_iresp);
     alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
     fpu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
@@ -406,13 +407,118 @@ module crosplite #(
         mul_inst(clk, rst, red_bundle, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
     div #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         div_inst(clk, rst, red_bundle, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
-    lsu #(.iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz))
-        lsu_inst(clk, rst, lsu_safe, lsu_unsf, top_opid, saf_opid, red_bundle, com_bundle,
-            fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
-            csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
-            fl_data, fl_inst | fl_data,
-            dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
-            dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
+    always_comb fu_ready[1] = 1;
+
+    /* verilator lint_off WIDTHEXPAND */
+    /* verilator lint_off WIDTHTRUNC */
+    logic [dwd-1:0] dis_st_valids_i, dis_ld_valids_i;
+    logic [cwd-1:0] core_commit_valids_i;
+    lsu_funct_t [dwd-1:0] dis_uops_i;
+    lsu_funct_t [cwd-1:0] core_commit_uops_i;
+    logic [7:0] new_ldq_idx_o;
+    logic [7:0] new_stq_idx_o;
+    logic [iwd-1:0] ldq_full_o, stq_full_o;
+    logic lsu_fencei_rdy_o;
+    logic s1_kill_o;
+    func_unit_resp_t exe_req_i;
+    exe_unit_resp_t core_exe_iresp;
+    dc_req_t dmem_req_o;
+    logic dmem_req_valid_o;
+    logic dmem_release_ready_o;
+    logic dmem_release_valid_i;
+    addr_t dmem_release_address_i;
+    dc_resp_t dmem_resp_i;
+    dc_req_t dmem_nack_i;
+    brupdate_t dmem_brupdate_o;
+    logic dmem_exception_o;
+    logic [6:0] dmem_rob_pnr_idx_o;
+    logic [6:0] dmem_rob_head_idx_o;
+    logic dmem_force_order_o;
+    logic dmem_ordered_i;
+    logic core_clr_bsy_valid;
+    logic [7:0] core_clr_bsy_rob_idx;
+    logic core_clr_rob_unsafe_valid_o;
+    logic [6:0] core_clr_rob_unsafe_idx_o;
+    xcpt_t core_lxcpt_o;
+    logic core_lxcpt_valid_o;
+    logic core_spec_ld_wakeup_valid_o;
+    prf_id_t core_spec_ld_wakeup_o;
+    logic core_load_miss_o;
+    always_comb for (int i = 0; i < dwd; i++) begin
+        dis_st_valids_i[i] = dec_bundle[i].opid[15] & ~dec_bundle[i].ldid[7] & dec_bundle[i].stid[7];
+        dis_ld_valids_i[i] = dec_bundle[i].opid[15] & dec_bundle[i].ldid[7];
+        dis_uops_i[i] = dec_bundle[i].funct;
+        dis_uops_i[i].rob_idx = 7'(dec_bundle[i].opid);
+    end
+    always_comb begin
+        exe_req_i = 0;
+        for (int i = 0; i < iwd; i++) if (fu_req[i].fu[1] == 1) begin
+            exe_req_i.data = fu_req[i].prs[1];
+            exe_req_i.addr = fu_req[i].prs[0];
+            exe_req_i.offset = fu_req[i].b[63:0];
+            exe_req_i.mxcpt_valid = 0;
+            exe_req_i.sfence = 0;
+            exe_req_i.uop = fu_req[i].funct;
+            exe_req_i.uop.is_sta = exe_req_i.uop.store;
+            exe_req_i.uop.is_std = exe_req_i.uop.store & ~fu_req[i].prsb[1];
+            exe_req_i.uop.ldq_idx = 7'(fu_req[i].ldid);
+            exe_req_i.uop.stq_idx = 7'(fu_req[i].stid);
+            exe_req_i.valid = fu_req[i].opid[15];
+        end
+    end
+    always_comb begin
+        core_commit_valids_i = 0;
+        core_commit_uops_i = 0;
+        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
+            core_commit_valids_i[i] = 1;
+            core_commit_uops_i[i] = $bits(lsu_funct_t)'(com_bundle[i].lsu_funct);
+        end
+    end
+    LSU lsu_inst(
+        .clk(clk),
+        .rst(~rst),
+        .dis_st_valids_i(dis_st_valids_i),
+        .dis_ld_valids_i(dis_ld_valids_i),
+        .dis_uops_i(dis_uops_i),
+        .new_ldq_idx_o(new_ldq_idx_o),
+        .new_stq_idx_o(new_stq_idx_o),
+        .ldq_almost_full_o(ldq_full_o),
+        .stq_almost_full_o(stq_full_o),
+        .lsu_fencei_rdy_o(lsu_fencei_rdy_o),
+        .core_exception_i(red_bundle.opid[15]),
+        .exe_req_i(exe_req_i),
+        .core_exe_iresp_o(core_exe_iresp),
+        .s1_kill_o(s1_kill_o),
+        .dmem_req_o(dmem_req_o),
+        .dmem_req_valid_o(dmem_req_valid_o),
+        .dmem_release_ready_o(dmem_release_ready_o),
+        .dmem_release_valid_i(0),
+        .dmem_release_address_i(0),
+        .dmem_resp_i(dmem_resp_i),
+        .dmem_req_ready_i(1),
+        .dmem_nack_i(dmem_nack_i),
+        .dmem_brupdate_o(dmem_brupdate_o),
+        .dmem_exception_o(dmem_exception_o),
+        .dmem_rob_pnr_idx_o(dmem_rob_pnr_idx_o),
+        .dmem_rob_head_idx_o(dmem_rob_pnr_idx_o),
+        .dmem_force_order_o(dmem_force_order_o),
+        .dmem_ordered_i(dmem_ordered_i),
+        .core_rob_head_idx_i(com_inst.rob_front),
+        .core_rob_pnr_idx_i(com_inst.rob_front),
+        .commit_load_at_rob_head_i(0),
+        .core_commit_valids_i(core_commit_valids_i),
+        .core_commit_uops_i(core_commit_uops_i),
+        .core_clr_bsy_valid_o(core_clr_bsy_valid),
+        .core_clr_bsy_rob_idx_o(core_clr_bsy_rob_idx),
+        .core_clr_rob_unsafe_valid_o(core_clr_rob_unsafe_valid_o),
+        .core_clr_rob_unsafe_idx_o(core_clr_rob_unsafe_idx_o),
+        .core_lxcpt_o(core_lxcpt_o),
+        .core_lxcpt_valid_o(core_lxcpt_valid_o),
+        .core_brupdate_i(com_bundle[0]),
+        .core_spec_ld_wakeup_valid_o(core_spec_ld_wakeup_valid_o),
+        .core_spec_ld_wakeup_o(core_spec_ld_wakeup_o),
+        .core_load_miss_o(core_load_miss_o)
+    );
 
     /* debug ports */
     always_comb dbg_cycle = csr_inst.mcycle;

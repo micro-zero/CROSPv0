@@ -49,7 +49,7 @@ VCORE_SV = \
 	../src/execute/mul.sv \
 	../src/execute/div.sv \
 	../src/execute/fpu.sv \
-	../src/execute/lsu.sv \
+	../src/execute/lsu.v2.sv \
 	../src/execute/execute.sv \
 	../src/commit/prf.sv \
 	../src/commit/csr.sv \

@@ -297,12 +297,12 @@ module vcore #(
     always_ff @(posedge clk) if (rst) itmiss <= 0; else if (inst.mmu_inst.itlb.fill)       itmiss <= itmiss + 1;
     always_ff @(posedge clk) if (rst) dtmiss <= 0; else if (inst.mmu_inst.dtlb.fill)       dtmiss <= dtmiss + 1;
     always_ff @(posedge clk) if (rst) stmiss <= 0; else if (inst.mmu_inst.stlb.fill)       stmiss <= stmiss + 1;
-    always_ff @(posedge clk) if (rst) {ldck1, ldck2, ldck3} <= 0; else if (|inst.lsu_inst.ck_resp[0])
-        if      (inst.lsu_inst.ck_rslt[0] == 1) ldck1 <= ldck1 + 1;
-        else if (inst.lsu_inst.ck_rslt[0] == 2) ldck2 <= ldck2 + 1;
-        else if (inst.lsu_inst.ck_rslt[0] == 3) ldck3 <= ldck3 + 1;
-    always_ff @(posedge clk) if (rst) ldfwd <= 0;
-        else if (|inst.lsu_inst.ck_resp[0] & inst.lsu_inst.ck_forw[0][64]) ldfwd <= ldfwd + 1;
+    // always_ff @(posedge clk) if (rst) {ldck1, ldck2, ldck3} <= 0; else if (|inst.lsu_inst.ck_resp[0])
+    //     if      (inst.lsu_inst.ck_rslt[0] == 1) ldck1 <= ldck1 + 1;
+    //     else if (inst.lsu_inst.ck_rslt[0] == 2) ldck2 <= ldck2 + 1;
+    //     else if (inst.lsu_inst.ck_rslt[0] == 3) ldck3 <= ldck3 + 1;
+    // always_ff @(posedge clk) if (rst) ldfwd <= 0;
+    //     else if (|inst.lsu_inst.ck_resp[0] & inst.lsu_inst.ck_forw[0][64]) ldfwd <= ldfwd + 1;
     always_ff @(posedge clk) if (rst) ldmisp <= 0;
         else if (inst.com_inst.exe_last.retry & inst.red_bundle.opid[15]) ldmisp <= ldmisp + 1;
 
