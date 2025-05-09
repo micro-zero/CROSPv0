@@ -533,7 +533,7 @@ int main(int argc, char *argv[])
                 /* comparison of FS bit and fcsr is omitted because their change does not flush pipeline */
                 if (del.csr.find("mstatus") == del.csr.end() && delsim.csr.find("mstatus") != delsim.csr.end())
                     del.csr["mstatus"] = delsim.csr["mstatus"]; // FS bit
-                if (del.csr.find("fcsr") == del.csr.end() && delsim.csr.find("fcsr") != delsim.csr.end())
+                if (delsim.csr.find("fcsr") != delsim.csr.end())
                     del.csr["fcsr"] = delsim.csr["fcsr"];
                 del.csr.erase("fflags");
                 del.csr.erase("frm");

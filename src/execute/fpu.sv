@@ -494,7 +494,7 @@ module fpu #(
     always_ff @(posedge clk) if (rst) r_mul <= 0; else if (~stuck_mul) begin
         /* uniform of [MST-1] to [MST] */
         r_mul[`MST]      <= r_mul[`MST-1];
-        if (~pos_mul[7]) r_mul[`MST].prdv <= 0;
+        if (~pos_mul[7]) r_mul[`MST].prdv <= f_mul[`MST-1].double ? 0 : 64'hffff_ffff_0000_0000;
         else             r_mul[`MST].prdv <=
             asm(s_mul[`MST-1], e_mul[`MST-1] + rh_mul, srs_mul, f_mul[`MST-1].double, f_mul[`MST-1].rm);
         r_mul[`MST].fflags[0] <=

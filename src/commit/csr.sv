@@ -133,7 +133,7 @@ module csr(
         12'h142: val = 65'(scause);        12'h143: val = 65'(stval);
         /* U-mode */
         12'h001: val = 65'(fcsr[4:0]);     12'h002: val = 65'(fcsr[7:5]);
-        12'h003: val = 65'(fcsr);          12'h005: val = 65'(utvec);
+        12'h003: val = 65'(fcsr[7:0]);     12'h005: val = 65'(utvec);
         12'hc00: val = 65'(mcycle);        12'hc01: val = 65'(in_time);
         12'hc02: val = 65'(minstret_fwd);
         /* unimplemented CSRs */
@@ -239,7 +239,7 @@ module csr(
         if (rst) fcsr <= 0;
         else if (we & addr == 12'h001) fcsr[4:0] <= wres[4:0];
         else if (we & addr == 12'h002) fcsr[7:5] <= wres[2:0];
-        else if (we & addr == 12'h003) fcsr <= wres;
+        else if (we & addr == 12'h003) fcsr[7:0] <= wres[7:0];
         if (rst) utvec <= 0; else if (we & addr == 12'h005) utvec <= wres;
     end
     always_comb mip = in_ip    & 64'b1010_1000_1000 | // MEIP/SEIP/MTIP/MSIP from external

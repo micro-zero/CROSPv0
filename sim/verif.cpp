@@ -1619,9 +1619,6 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     case 0b0000111: // LOAD-FP
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
-        ret.csr["mstatus"] = s.csr["mstatus"];
-        ret.csr["mstatus"].write(13, 14, 3);
-        ret.csr["mstatus"].write(63, 1);
         va = rs1 + ir.range(20, 31).sext(12);
         if (va >> (funct3 & 3) << (funct3 & 3) != va)
             return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
@@ -1686,9 +1683,6 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     case 0b0100111: // STORE-FP
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
-        ret.csr["mstatus"] = s.csr["mstatus"];
-        ret.csr["mstatus"].write(13, 14, 3);
-        ret.csr["mstatus"].write(63, 1);
     case 0b0100011: // STORE
         va = rs1 + bits(ir.range(25, 31) << 5 | ir.range(7, 11)).sext(12);
         if (va >> (funct3 & 3) << (funct3 & 3) != va)
@@ -1891,9 +1885,6 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     case 0b1001111: // NMADD
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
-        ret.csr["mstatus"] = s.csr["mstatus"];
-        ret.csr["mstatus"].write(13, 14, 3);
-        ret.csr["mstatus"].write(63, 1);
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
         ret.csr["fcsr"] = s.csr["fcsr"];
@@ -1938,9 +1929,6 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         using namespace std;
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
-        ret.csr["mstatus"] = s.csr["mstatus"];
-        ret.csr["mstatus"].write(13, 14, 3);
-        ret.csr["mstatus"].write(63, 1);
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
         ret.csr["fcsr"] = s.csr["fcsr"];
@@ -2271,18 +2259,12 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             if (ir.range(20, 31) >= 0xc00 && ir.range(20, 31) < 0xc20) // write read-only counters
                 if (wvalue != ret.gprv)
                     return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
-            if (addr == 0x001) // fflags
-                ret.csr["fcsr"].write(0, 4, wvalue);
-            else if (addr == 0x002) // frm
-                ret.csr["fcsr"].write(5, 7, wvalue);
+            if (ir.range(20, 31) == 0x001) // fflags
+                ret.csr["fcsr"] = s.csr["fcsr"], ret.csr["fcsr"].write(0, 4, wvalue);
+            else if (ir.range(20, 31) == 0x002) // frm
+                ret.csr["fcsr"] = s.csr["fcsr"], ret.csr["fcsr"].write(5, 7, wvalue);
             else if (addr != 0xb01) // except mtime
                 ret.csr[csrname[addr]] = wvalue;
-            if (addr == 0x001 || addr == 0x002 || addr == 0x003) // fcsr
-            {
-                ret.csr["mstatus"] = s.csr["mstatus"];
-                ret.csr["mstatus"].write(13, 14, 3);
-                ret.csr["mstatus"].write(63, 1);
-            }
         }
         else if ((ir & ~(1 << 20)) == 0x73) // ECALL / EBREAK
             return genx(s, ret, medeleg[ir[20] ? 3 : s.level + 8] ? 1 : 3,
@@ -2316,6 +2298,14 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         ret.gprw = 0;
     ret.csr["mcycle"] = s.csr["mcycle"] + 1;
     ret.csr["minstret"] = s.csr["minstret"] + 1;
+    if (ret.csr.find("fcsr") != ret.csr.end() || ret.gprw && ret.gpra >= 32) // FS change
+    {
+        ret.csr["mstatus"] = s.csr["mstatus"];
+        ret.csr["mstatus"].write(13, 14, 3);
+        ret.csr["mstatus"].write(63, 1);
+    }
+    if (ret.csr.find("fcsr") != ret.csr.end()) // some WARL csr fields
+        ret.csr.at("fcsr").write(8, 63, 0);
     if (ret.csr.find("misa") != ret.csr.end()) // some WARL csr fields
         ret.csr.at("misa") = 0x14112d | (1ull << 63);
     if (ret.csr.find("mstatus") != ret.csr.end()) // some WARL csr fields
@@ -2323,8 +2313,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         ret.csr.at("mstatus").write(6, 0);
         ret.csr.at("mstatus").write(9, 10, 0);
         ret.csr.at("mstatus").write(32, 35, 0xa);
-        ret.csr.at("mstatus").write(63, ret.csr.at("mstatus").range(15, 16) == 3 ||
-                                            ret.csr.at("mstatus").range(13, 14) == 3); // SD bit
+        ret.csr.at("mstatus").write(
+            63, ret.csr.at("mstatus").range(15, 16) == 3 || ret.csr.at("mstatus").range(13, 14) == 3); // SD bit
     }
     if (ret.csr.find("mtvec") != ret.csr.end())
         ret.csr.at("mtvec").write(0, 1, 0);
