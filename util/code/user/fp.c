@@ -20,11 +20,13 @@ int main()
     }
     printf("sum1: %.12lf\nsum2: %.12lf\n", sum1, sum2);
     double a, b, c;
+    long d;
     printf("Enter a b: ");
     fflush(stdout);
     scanf("%lf %lf", &a, &b);
     c = 0;
     asm volatile("fsqrt.d %0, %1" : "=f"(c) : "f"(a));
-    printf("a / b = %.12lf, fsqrt(a) = %.12lf\n", a / b, c);
+    asm volatile("fsflags %0, zero" : "=r"(d));
+    printf("a / b = %.12lf, fsqrt(a) = %.12lf, fcsr = 0x%lx\n", a / b, c, d);
     return 0;
 }

@@ -530,8 +530,13 @@ int main(int argc, char *argv[])
                 uint8_t lsize;
                 uint64_t laddr;
                 delta_t delsim = next(sim, &lsize, &laddr);
+                /* comparison of FS bit and fcsr is omitted because their change does not flush pipeline */
                 if (del.csr.find("mstatus") == del.csr.end() && delsim.csr.find("mstatus") != delsim.csr.end())
-                    del.csr["mstatus"] = delsim.csr["mstatus"];
+                    del.csr["mstatus"] = delsim.csr["mstatus"]; // FS bit
+                if (del.csr.find("fcsr") == del.csr.end() && delsim.csr.find("fcsr") != delsim.csr.end())
+                    del.csr["fcsr"] = delsim.csr["fcsr"];
+                del.csr.erase("fflags");
+                del.csr.erase("frm");
                 if (lsize && laddr < DDR)    // an output operation
                     delsim.gprv = del.gprv;  // synchronize with DUT
                 if (delsim.memw >> 4 == 0x8) // DUT does not consider LR as memory change instruction

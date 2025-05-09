@@ -65,8 +65,8 @@ public:
     bits &operator|=(uint64_t x);
     bits range(uint8_t s, uint8_t e) const;
     int64_t sext(int w) const;
-    void write(uint8_t s, uint8_t e, uint64_t x);
-    void write(uint8_t i, uint64_t x);
+    bits &write(uint8_t s, uint8_t e, uint64_t x);
+    bits &write(uint8_t i, uint64_t x);
 };
 
 /**

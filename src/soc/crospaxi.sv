@@ -199,6 +199,7 @@ module crospaxi #(
     logic exception, frd;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
+    logic [4:0] fflags;
     logic [15:0] top_opid, saf_opid;
     logic [2*mwd-1:0][15:0] lsu_safe, lsu_unsf;
     frontend #(.init(init), .rst_pc(rst_pc), .fwd(fwd), .cwd(cwd),
@@ -217,7 +218,7 @@ module crospaxi #(
         prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, red_bundle,
             iss_ready, (iwd)'(-1), busy_resp, reg_resp);
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
-        exception, epc, tval, cause, eret, frd,
+        exception, epc, tval, cause, eret, frd, fflags,
         csr_excp, csr_intl, csr_intg, csr_flsh,
         mip_ext, mtime, 64'(com_inst.rob_out),
         csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp);
@@ -228,7 +229,7 @@ module crospaxi #(
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (iwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
-            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, frd,
+            csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, frd, fflags,
             lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv);
     alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);

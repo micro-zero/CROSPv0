@@ -127,6 +127,7 @@ typedef struct packed {
     logic  [7:0] cause;     // exception cause, MSB is exception bit, the next is interrupt bit
     logic  [2:0] eret;      // exception return, MSB is valid bit
     logic [63:0] tval;      // exception trap value
+    logic  [4:0] fflags;    // floating point flags
     logic  [1:0] pat;       // branch pattern for updating frontend
     logic specul;           // speculative mark
     logic misp;             // misprediction of BRANCH and JALR instructions
@@ -177,6 +178,7 @@ typedef struct packed {
 typedef struct packed {
     logic [7:0] cause;  // exception and cause (MSB is exception bit)
     logic [2:0] eret;   // exception return (MSB is return bit, `eret[1:0]` is privilege level)
+    logic [4:0] fflags; // floating point flags
     logic mem, csr;     // memory/CSR change
     logic flush, retry; // force pipeline flush
 } rob_exe_t;

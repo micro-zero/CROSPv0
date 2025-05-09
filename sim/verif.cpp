@@ -11,20 +11,8 @@
 
 bits::bits() { this->data = 0; }
 bits::bits(uint64_t ui) { this->data = ui; }
-bits::bits(double d)
-{
-    double data = d;
-    this->data = *(uint64_t *)&data;
-    if (range(52, 62) == 0x7ff && range(0, 51))
-        this->data = 0x7ff8000000000000ul;
-}
-bits::bits(float f)
-{
-    float data = f;
-    this->data = *(uint64_t *)&data | 0xffffffff00000000ull;
-    if (range(23, 30) == 0x0ff && range(0, 22))
-        this->data = 0xffffffff7fc00000ul;
-}
+bits::bits(double d) { this->data = *(uint64_t *)&d; }
+bits::bits(float f) { this->data = *(uint64_t *)&f | 0xffffffff00000000ull; }
 bits::operator uint64_t() const { return data; }
 bits::operator double() const { return *(double *)&data; }
 bits::operator float() const { return *(float *)&data; }
@@ -34,8 +22,16 @@ bits &bits::operator>>=(int x) { return this->data >>= x, *this; }
 bits &bits::operator|=(uint64_t x) { return this->data |= x, *this; }
 bits bits::range(uint8_t s, uint8_t e) const { return data << 63 - e >> 63 - e + s; }
 int64_t bits::sext(int w) const { return ((data >> w - 1) & 1 ? -1ull << w : 0) | data & ~(-1ull << w); }
-void bits::write(uint8_t s, uint8_t e, uint64_t x) { (data &= ~((1ull << e - s + 1ull) - 1ull << s)) |= x << s; }
-void bits::write(uint8_t i, uint64_t x) { (data &= ~(1ull << i)) |= x << i; }
+bits &bits::write(uint8_t s, uint8_t e, uint64_t x)
+{
+    (data &= ~((1ull << e - s + 1ull) - 1ull << s)) |= x << s;
+    return *this;
+}
+bits &bits::write(uint8_t i, uint64_t x)
+{
+    (data &= ~(1ull << i)) |= x << i;
+    return *this;
+}
 
 axiport_t axidev::m() const { return axiport_t{0}; }
 axiport_t axidev::s() const { return axiport_t{0}; }
@@ -1222,6 +1218,7 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     delta_t ret;
     ret.level = s.level;
     ret.gprw = ret.memw = 0;
+    feclearexcept(FE_ALL_EXCEPT);
 
     /* interrupt */
     bool mintena = s.level < 3 || s.level == 3 && s.csr["mstatus"][3];
@@ -1575,12 +1572,20 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     }
 
     /* execute */
-    uint8_t funct3 = ir.range(12, 14), fs = s.csr["mstatus"].range(13, 14);
+    uint8_t funct3 = ir.range(12, 14), fs = s.csr["mstatus"].range(13, 14), rm;
+    float (*rndf)(float);
+    double (*rnd)(double);
     uint64_t rs1 = s.gpr[ir.range(15, 19)], rs2 = s.gpr[ir.range(20, 24)];
     double ds1 = (double)s.gpr[ir.range(15, 19) + 32], ds2 = (double)s.gpr[ir.range(20, 24) + 32],
            ds3 = (double)s.gpr[ir.range(27, 31) + 32];
     float ss1 = (float)s.gpr[ir.range(15, 19) + 32], ss2 = (float)s.gpr[ir.range(20, 24) + 32],
           ss3 = (float)s.gpr[ir.range(27, 31) + 32];
+    if (s.gpr[ir.range(15, 19) + 32].range(32, 63) != 0xffff'ffff) // check NaN boxing
+        ss1 = float(bits(0x7fc00000ul));
+    if (s.gpr[ir.range(20, 24) + 32].range(32, 63) != 0xffff'ffff)
+        ss2 = float(bits(0x7fc00000ul));
+    if (s.gpr[ir.range(27, 31) + 32].range(32, 63) != 0xffff'ffff)
+        ss3 = float(bits(0x7fc00000ul));
     int64_t imm;
     uint64_t va, pa;
     switch (ir.range(0, 6)) // opcode
@@ -1891,6 +1896,22 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         ret.csr["mstatus"].write(63, 1);
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
+        ret.csr["fcsr"] = s.csr["fcsr"];
+        rm = ir.range(12, 14);
+        if (rm == 7)
+            rm = s.csr["fcsr"].range(5, 7);
+        if (rm == 0)
+            fesetround(FE_TONEAREST), rndf = roundf, rnd = round;
+        else if (rm == 1)
+            fesetround(FE_TOWARDZERO), rndf = truncf, rnd = trunc;
+        else if (rm == 2)
+            fesetround(FE_DOWNWARD), rndf = floorf, rnd = floor;
+        else if (rm == 3)
+            fesetround(FE_UPWARD), rndf = ceilf, rnd = ceil;
+        else if (rm == 4)
+            fesetround(FE_TONEAREST), rndf = roundf, rnd = round;
+        else
+            return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
         if (ir.range(2, 3) == 0)
             ret.gprv = ir[25] ? bits(ds1 * ds2 + ds3) : bits(ss1 * ss2 + ss3);
         else if (ir.range(2, 3) == 1)
@@ -1899,8 +1920,22 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             ret.gprv = ir[25] ? bits(-ds1 * ds2 + ds3) : bits(-ss1 * ss2 + ss3);
         else if (ir.range(2, 3) == 3)
             ret.gprv = ir[25] ? bits(-ds1 * ds2 - ds3) : bits(-ss1 * ss2 - ss3);
+        if (ret.csr.find("fcsr") != ret.csr.end())
+        {
+            if (fetestexcept(FE_INVALID))
+                ret.csr["fcsr"].write(4, 1);
+            if (fetestexcept(FE_DIVBYZERO))
+                ret.csr["fcsr"].write(3, 1);
+            if (fetestexcept(FE_OVERFLOW))
+                ret.csr["fcsr"].write(2, 1);
+            if (fetestexcept(FE_UNDERFLOW))
+                ret.csr["fcsr"].write(1, 1);
+            if (fetestexcept(FE_INEXACT))
+                ret.csr["fcsr"].write(0, 1);
+        }
         break;
     case 0b1010011: // OP-FP
+        using namespace std;
         if (!fs)
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
         ret.csr["mstatus"] = s.csr["mstatus"];
@@ -1908,6 +1943,22 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         ret.csr["mstatus"].write(63, 1);
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
+        ret.csr["fcsr"] = s.csr["fcsr"];
+        rm = ir.range(12, 14);
+        if (rm == 7)
+            rm = s.csr["fcsr"].range(5, 7);
+        if (rm == 0)
+            fesetround(FE_TONEAREST), rndf = roundf, rnd = round;
+        else if (rm == 1)
+            fesetround(FE_TOWARDZERO), rndf = truncf, rnd = trunc;
+        else if (rm == 2)
+            fesetround(FE_DOWNWARD), rndf = floorf, rnd = floor;
+        else if (rm == 3)
+            fesetround(FE_UPWARD), rndf = ceilf, rnd = ceil;
+        else if (rm == 4)
+            fesetround(FE_TONEAREST), rndf = roundf, rnd = round;
+        else
+            return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
         switch (ir.range(27, 31))
         {
         case 0b00000: // FADD
@@ -1915,6 +1966,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             break;
         case 0b00001: // FSUB
             ret.gprv = ir[25] ? bits(ds1 - ds2) : bits(ss1 - ss2);
+            if (isnan(ir[25] ? ds1 - ds2 : ss1 - ss2))
+                ret.gprv = ir[25] ? 0x7ff8000000000000ul : 0xffffffff7fc00000ul;
             break;
         case 0b00010: // FMUL
             ret.gprv = ir[25] ? bits(ds1 * ds2) : bits(ss1 * ss2);
@@ -1924,20 +1977,47 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             break;
         case 0b01011: // FSQRT
             ret.gprv = ir[25] ? bits(sqrt(ds1)) : bits(sqrtf(ss1));
+            if (isnan(ir[25] ? sqrt(ds1) : sqrtf(ss1)))
+                ret.gprv = ir[25] ? 0x7ff8000000000000ul : 0xffffffff7fc00000ul;
             break;
         case 0b00100:
             if (funct3 == 0) // FSGNJ
-                ds1 = fabs(ds1), ss1 = fabsf(ss1);
+                ds2 = (ir[25] ? signbit(ds2) : signbit(ss2)) ? -1. : 1.;
             else if (funct3 == 1) // FSGNJN
-                ds1 = -fabs(ds1), ss1 = -fabsf(ss1);
-            if (funct3 == 0 || funct3 == 1 || funct3 == 2) // FSGNJ[NX]
-                ret.gprv = ir[25] ? bits(ds2 < 0 ? -ds1 : ds1) : bits(ss2 < 0 ? -ss1 : ss1);
+                ds2 = (ir[25] ? signbit(ds2) : signbit(ss2)) ? 1. : -1.;
+            else if (funct3 == 2) // FSGNJX
+                ds2 = (ir[25] ? signbit(ds1) ^ signbit(ds2) : signbit(ss1) ^ signbit(ss2)) ? -1. : 1.;
+            if (funct3 == 0 || funct3 == 1 || funct3 == 2)
+                if (ir[25])
+                    ret.gprv = bits(ds1).write(63, signbit(ds2));
+                else
+                    ret.gprv = bits(ss1).write(31, signbit(ds2));
             break;
         case 0b00101:
             if (funct3 == 0) // FMIN
-                ret.gprv = ir[25] ? bits(fmin(ds1, ds2)) : bits(fminf(ss1, ss2));
+            {
+                ret.gprv = ir[25] ? bits(min(ds1, ds2)) : bits(min(ss1, ss2));
+                if (ir[25] ? signbit(ds1) & !signbit(ds2) : signbit(ss1) & !signbit(ss2)) // handle +0 and -0
+                    ret.gprv = ir[25] ? bits(ds1) : bits(ss1);
+                if (ir[25] ? !signbit(ds1) & signbit(ds2) : !signbit(ss1) & signbit(ss2))
+                    ret.gprv = ir[25] ? bits(ds2) : bits(ss2);
+            }
             else if (funct3 == 1) // FMAX
-                ret.gprv = ir[25] ? bits(fmax(ds1, ds2)) : bits(fmaxf(ss1, ss2));
+            {
+                ret.gprv = ir[25] ? bits(max(ds1, ds2)) : bits(max(ss1, ss2));
+                if (ir[25] ? signbit(ds1) & !signbit(ds2) : signbit(ss1) & !signbit(ss2))
+                    ret.gprv = ir[25] ? bits(ds2) : bits(ss2);
+                if (ir[25] ? !signbit(ds1) & signbit(ds2) : !signbit(ss1) & signbit(ss2))
+                    ret.gprv = ir[25] ? bits(ds1) : bits(ss1);
+            }
+            if (ir[25] ? !isnan(ds1) && isnan(ds2) : !isnan(ss1) && isnan(ss2))
+                ret.gprv = ir[25] ? bits(ds1) : bits(ss1);
+            if (ir[25] ? isnan(ds1) && !isnan(ds2) : isnan(ss1) && !isnan(ss2))
+                ret.gprv = ir[25] ? bits(ds2) : bits(ss2);
+            if (ir[25] ? isnan(ds1) && isnan(ds2) : isnan(ss1) && isnan(ss2))
+                ret.gprv = ir[25] ? 0x7ff8000000000000ul : 0xffffffff7fc00000ul;
+            if (ir[25] ? !issignaling(ds1) && !issignaling(ds2) : !issignaling(ss1) && !issignaling(ss2))
+                feclearexcept(FE_INVALID);
             break;
         case 0b10100:
             ret.gpra = ir.range(7, 11);
@@ -1950,34 +2030,101 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             break;
         case 0b01000: // FCVT.D.S / FCVT.S.D
             ret.gprv = ir[25] ? bits(double(ss1)) : bits(float(ds1));
+            if (isnan(ir[25] ? ss1 : ds1))
+                ret.gprv = ir[25] ? 0x7ff8000000000000ul : 0xffffffff7fc00000ul;
             break;
         case 0b11000: // FCVT.I.F
             ret.gpra = ir.range(7, 11);
+            // todo: what is the exact difference of x86 and RV?
             switch ((ir[25] << 2) | ir.range(20, 21))
             {
             case 0b000: // FCVT.W.S
-                ret.gprv = (int32_t)round(ss1);
+                if (rndf(ss1) > INT32_MAX || isnanf(ss1))
+                    ret.gprv = INT32_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rndf(ss1) < INT32_MIN)
+                    ret.gprv = INT32_MIN, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = (int32_t)rndf(ss1);
+                if ((int32_t)ret.gprv < 0)
+                    ret.gprv |= 0xffff'ffff'0000'0000;
+                if (rndf(ss1) != ss1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             case 0b001: // FCVT.WU.S
-                ret.gprv = (uint32_t)round(ss1);
+                if (rndf(ss1) > UINT32_MAX || isnanf(ss1))
+                    ret.gprv = UINT32_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rndf(ss1) < 0)
+                    ret.gprv = 0, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = (uint32_t)rndf(ss1);
+                if ((int32_t)ret.gprv < 0)
+                    ret.gprv |= 0xffff'ffff'0000'0000;
+                if (rndf(ss1) != ss1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             case 0b010: // FCVT.L.S
-                ret.gprv = (int64_t)round(ss1);
+                if (rndf(ss1) > INT64_MAX || isnanf(ss1))
+                    ret.gprv = INT64_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rndf(ss1) < INT64_MIN)
+                    ret.gprv = INT64_MIN, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = (int64_t)rndf(ss1);
+                if (rndf(ss1) != ss1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             case 0b011: // FCVT.LU.S
-                ret.gprv = round(ss1);
+                if (rndf(ss1) > UINT64_MAX || isnanf(ss1))
+                    ret.gprv = UINT64_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rndf(ss1) < 0)
+                    ret.gprv = 0, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = rndf(ss1);
+                if (rndf(ss1) != ss1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             case 0b100: // FCVT.W.D
-                ret.gprv = (int32_t)round(ds1);
+                if (rnd(ds1) > INT32_MAX || isnan(ds1))
+                    ret.gprv = INT32_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rnd(ds1) < INT32_MIN)
+                    ret.gprv = INT32_MIN, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = (int32_t)rnd(ds1);
+                if ((int32_t)ret.gprv < 0)
+                    ret.gprv |= 0xffff'ffff'0000'0000;
+                if (rnd(ds1) != ds1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             case 0b101: // FCVT.WU.D
-                ret.gprv = (uint32_t)round(ds1);
+                if (rnd(ds1) > UINT32_MAX || isnan(ds1))
+                    ret.gprv = UINT32_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rnd(ds1) < 0)
+                    ret.gprv = 0, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = (uint32_t)rnd(ds1);
+                if ((int32_t)ret.gprv < 0)
+                    ret.gprv |= 0xffff'ffff'0000'0000;
+                if (rnd(ds1) != ds1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             case 0b110: // FCVT.L.D
-                ret.gprv = (int64_t)round(ds1);
+                if (rnd(ds1) > INT64_MAX || isnan(ds1))
+                    ret.gprv = INT64_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rnd(ds1) < INT64_MIN)
+                    ret.gprv = INT64_MIN, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = (int64_t)rnd(ds1);
+                if (rnd(ds1) != ds1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             case 0b111: // FCVT.LU.D
-                ret.gprv = round(ds1);
+                if (rnd(ds1) > UINT64_MAX || isnan(ds1))
+                    ret.gprv = UINT64_MAX, ret.csr["fcsr"].write(4, 1);
+                else if (rnd(ds1) < 0)
+                    ret.gprv = 0, ret.csr["fcsr"].write(4, 1);
+                else
+                    ret.gprv = rnd(ds1);
+                if (rnd(ds1) != ds1)
+                    ret.csr["fcsr"].write(0, 1);
                 break;
             }
             break;
@@ -2013,19 +2160,22 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         case 0b11100:
             ret.gpra = ir.range(7, 11);
             if (funct3 == 0) // FMV.X.F
-                ret.gprv = ir[25] ? *(uint64_t *)&ds1 : *(uint32_t *)&ss1 | 0xffffffff00000000;
+                if (ir[25])
+                    ret.gprv = s.gpr[ir.range(15, 19) + 32];
+                else
+                    ret.gprv = s.gpr[ir.range(15, 19) + 32].range(0, 31) |
+                               (s.gpr[ir.range(15, 19) + 32][31] ? 0xffffffff00000000 : 0);
             else if (funct3 == 1) // FCLASS
             {
-                using namespace std;
                 if (ir[25] ? isinf(ds1) && ds1 < 0 : isinf(ss1) && ss1 < 0)
                     ret.gprv = 1;
                 else if (ir[25] ? isnormal(ds1) && ds1 < 0 : isnormal(ss1) && ss1 < 0)
                     ret.gprv = 2;
                 else if (ir[25] ? issubnormal(ds1) && ds1 < 0 : issubnormal(ss1) && ss1 < 0)
                     ret.gprv = 4;
-                else if (ir[25] ? iszero(ds1) && ds1 < 0 : iszero(ss1) && ss1 < 0)
+                else if (ir[25] ? iszero(ds1) && signbit(ds1) : iszero(ss1) && signbit(ss1))
                     ret.gprv = 8;
-                else if (ir[25] ? iszero(ds1) && ds1 > 0 : iszero(ss1) && ss1 > 0)
+                else if (ir[25] ? iszero(ds1) && !signbit(ds1) : iszero(ss1) && !signbit(ss1))
                     ret.gprv = 16;
                 else if (ir[25] ? issubnormal(ds1) && ds1 > 0 : issubnormal(ss1) && ss1 > 0)
                     ret.gprv = 32;
@@ -2037,11 +2187,26 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
                     ret.gprv = 256;
                 else if (ir[25] ? isnan(ds1) && !issignaling(ds1) : isnan(ss1) && !issignaling(ss1))
                     ret.gprv = 512;
+                else
+                    ret.gprv = 0;
             }
             break;
         case 0b11110: // FMV.F.X
             ret.gprv = ir[25] ? bits(rs1) : bits((float)(bits)rs1);
             break;
+        }
+        if (ret.csr.find("fcsr") != ret.csr.end())
+        {
+            if (fetestexcept(FE_INVALID))
+                ret.csr["fcsr"].write(4, 1);
+            if (fetestexcept(FE_DIVBYZERO))
+                ret.csr["fcsr"].write(3, 1);
+            if (fetestexcept(FE_OVERFLOW))
+                ret.csr["fcsr"].write(2, 1);
+            if (fetestexcept(FE_UNDERFLOW))
+                ret.csr["fcsr"].write(1, 1);
+            if (fetestexcept(FE_INEXACT))
+                ret.csr["fcsr"].write(0, 1);
         }
         break;
     case 0b1100011: // BRANCH
@@ -2072,6 +2237,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         if (ir.range(12, 13))
         { // CSRR[WSC]
             uint16_t addr = ir.range(20, 31);
+            if (addr == 0x001 || addr == 0x002) // fflags or frm
+                addr = 0x003;
             if (addr >= 0xc00 && addr < 0xc20) // shadowed counters
                 if (s.level == 3 ||
                     s.csr["mcounteren"][addr & 0x1f] &&
@@ -2087,6 +2254,10 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
                 ret.gprv = s.mem.ui64(s.csr["mtime"]);
             else
                 ret.gprv = s.csr[csrname[addr]];
+            if (ir.range(20, 31) == 0x001) // fflags
+                ret.gprv = ret.gprv & 0x1f;
+            if (ir.range(20, 31) == 0x002) // frm
+                ret.gprv = ret.gprv >> 5;
             rs1 = ir[14] ? (uint64_t)ir.range(15, 19) : rs1;
             uint64_t wvalue;
             if (ir.range(12, 13) == 1) // CSRRW
@@ -2100,7 +2271,11 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             if (ir.range(20, 31) >= 0xc00 && ir.range(20, 31) < 0xc20) // write read-only counters
                 if (wvalue != ret.gprv)
                     return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
-            if (addr != 0xb01) // except mtime
+            if (addr == 0x001) // fflags
+                ret.csr["fcsr"].write(0, 4, wvalue);
+            else if (addr == 0x002) // frm
+                ret.csr["fcsr"].write(5, 7, wvalue);
+            else if (addr != 0xb01) // except mtime
                 ret.csr[csrname[addr]] = wvalue;
             if (addr == 0x001 || addr == 0x002 || addr == 0x003) // fcsr
             {

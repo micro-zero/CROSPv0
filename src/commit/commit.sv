@@ -37,6 +37,7 @@ module commit #(
     output logic  [2:0] eret,      // exception return bits (MSB is valid bit)
     /* context status signals */
     output logic        frd,       // floating-point destination register
+    output logic  [4:0] fflags,    // floating-point flags
     /* ID control */
     input  logic [2*mwd-1:0][15:0] lsu_safe, // LSU early safe operation ID
     input  logic [2*mwd-1:0][15:0] lsu_unsf, // LSU unsafe operation ID
@@ -141,14 +142,15 @@ module commit #(
             .raddr(rob_raddr), .rvalue(exe_rvalue),
             .waddr(exe_waddr), .wvalue(exe_wvalue), .wena(exe_wena));
     always_comb for (int i = 0; i < iwd; i++) begin
-        exe_waddr [i]       = $clog2(opsz)'(exe_bundle[i].opid);
-        exe_wena  [i]       = exe_bundle[i].opid[15];
-        exe_wvalue[i].cause = exe_bundle[i].cause;
-        exe_wvalue[i].eret  = exe_bundle[i].eret;
-        exe_wvalue[i].flush = exe_bundle[i].flush;
-        exe_wvalue[i].retry = exe_bundle[i].retry;
-        exe_wvalue[i].mem   = exe_bundle[i].mem;
-        exe_wvalue[i].csr   = exe_bundle[i].csr;
+        exe_waddr [i]        = $clog2(opsz)'(exe_bundle[i].opid);
+        exe_wena  [i]        = exe_bundle[i].opid[15];
+        exe_wvalue[i].cause  = exe_bundle[i].cause;
+        exe_wvalue[i].eret   = exe_bundle[i].eret;
+        exe_wvalue[i].fflags = exe_bundle[i].fflags;
+        exe_wvalue[i].flush  = exe_bundle[i].flush;
+        exe_wvalue[i].retry  = exe_bundle[i].retry;
+        exe_wvalue[i].mem    = exe_bundle[i].mem;
+        exe_wvalue[i].csr    = exe_bundle[i].csr;
     end
     always_comb begin
         mis_first = 0; // search for earliest misprediction
@@ -323,8 +325,11 @@ module commit #(
     end
     always_comb begin
         frd = 0;
+        fflags = 0;
         for (int i = 0; i < cwd; i++)
             if (com_bundle[i].opid[15] & dec_rvalue[i].lrda[5]) frd = 1;
+        for (int i = 0; i < cwd; i++)
+            if (com_bundle[i].opid[15]) fflags |= exe_rvalue[i].fflags;
     end
     always_comb begin
         /* todo: better to be passed from decoder and do precise sfence.vma in L1 memory from LSU */

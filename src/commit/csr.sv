@@ -50,25 +50,26 @@ module csr(
     input  logic clk,
     input  logic rst,
     /* CSRRW request */
-    input  logic        rqst,  // CSRRW request signal
-    input  logic  [2:0] func,  // CSRRW functional code (funct3)
-    input  logic [11:0] addr,  // CSRRW address
-    input  logic [63:0] wdat,  // CSRRW writing data
-    output logic [63:0] rdat,  // CSRRW reading data
+    input  logic        rqst,       // CSRRW request signal
+    input  logic  [2:0] func,       // CSRRW functional code (funct3)
+    input  logic [11:0] addr,       // CSRRW address
+    input  logic [63:0] wdat,       // CSRRW writing data
+    output logic [63:0] rdat,       // CSRRW reading data
     /* take exception */
-    input  logic        ein,   // encounter an exception
-    input  logic [63:0] epc,   // exception PC
-    input  logic [63:0] tval,  // trap value
-    input  logic [63:0] cause, // exception cause
+    input  logic        ein,        // encounter an exception
+    input  logic [63:0] epc,        // exception PC
+    input  logic [63:0] tval,       // trap value
+    input  logic [63:0] cause,      // exception cause
     /* return from exception */
     input  logic  [2:0] ret,
     /* context status change */
-    input  logic        frd,   // write to floating-point registers
+    input  logic        frd,        // write to floating-point registers
+    input  logic  [4:0] fflags,     // floating-point flags
     /* exception caused by CSR module */
-    output logic        eout,  // raise exception
-    output logic        intl,  // local interrupt detected (for halting wfi)
-    output logic  [6:0] intg,  // raise global interrupt
-    output logic        flush, // cause pipeline flush
+    output logic        eout,       // raise exception
+    output logic        intl,       // local interrupt detected (for halting wfi)
+    output logic  [6:0] intg,       // raise global interrupt
+    output logic        flush,      // cause pipeline flush
     /* input and output not from instructions */
     input  logic [63:0] in_ip,      // interrupt pending
     input  logic [63:0] in_time,    // CSR `mtime` mapped in memory
@@ -234,6 +235,7 @@ module csr(
         if (rst) stval <= 0; else if (we & addr == 12'h143) stval <= wres;
         if (rst) satp <= 0; else if (we & addr == 12'h180) satp <= wres;
         /* U-level CSR */
+        fcsr[4:0] <= fcsr[4:0] | fflags;
         if (rst) fcsr <= 0;
         else if (we & addr == 12'h001) fcsr[4:0] <= wres[4:0];
         else if (we & addr == 12'h002) fcsr[7:5] <= wres[2:0];
