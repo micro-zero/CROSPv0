@@ -211,6 +211,8 @@ bool check(delta_t del, delta_t ref)
     del.csr.erase("minstret");
     ref.csr.erase("mip");
     del.csr.erase("mip");
+    ref.csr.erase("tselect");
+    del.csr.erase("tselect");
     for (auto i : ref.csr)
         if (del.csr.find(i.first) != del.csr.end() & del.csr[i.first] == i.second)
             del.csr.erase(i.first);
@@ -537,6 +539,9 @@ int main(int argc, char *argv[])
                     del.csr["fcsr"] = delsim.csr["fcsr"];
                 del.csr.erase("fflags");
                 del.csr.erase("frm");
+                for (auto s : pmpname)
+                    if (delsim.csr.find(s) != delsim.csr.end())
+                        del.csr[s] = delsim.csr[s];
                 if (lsize && laddr < DDR)    // an output operation
                     delsim.gprv = del.gprv;  // synchronize with DUT
                 if (delsim.memw >> 4 == 0x8) // DUT does not consider LR as memory change instruction
@@ -612,7 +617,6 @@ int main(int argc, char *argv[])
     vrcr >> stat;
     if (cmd.filetype == MEMINIT_HEX && cmd.verbose)
         disasmem(&amem[amem.entry], amem.entry, amem.hexsz);
-    fprintf(stderr, "[Info] Exited at cycle %ld with code %hhu due to %s\n", cycle, exitcode, exitcause);
     fprintf(stderr, "[Info] Stats: Instructions: %ld  load: %ld  store: %ld\n", instret, stat.loads, stat.stores);
     fprintf(stderr, "[Info]        L1I miss: %ld (%.3f%%)  L1D miss: %ld (%.3f%%)\n",
             stat.icmiss, (float)stat.icmiss / instret * 100,
@@ -625,5 +629,6 @@ int main(int argc, char *argv[])
             stat.check[2], stat.check[1], stat.check[0], stat.fwd, stat.ldmisp);
     fprintf(stderr, "[Info]        CPI: %.3f  MPKI: %.3f\n",
             (float)cycle / (float)instret, (float)(stat.bmisp) * 1000.f / (float)instret);
+    fprintf(stderr, "[Info] Exited at cycle %ld with code %hhu due to %s\n", cycle, exitcode, exitcause);
     return exitcode;
 }

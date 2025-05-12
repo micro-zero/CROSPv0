@@ -157,26 +157,6 @@ module vcore #(
         m_axi_rid, m_axi_rdata, m_axi_rresp, m_axi_rlast,
         m_axi_rvalid, m_axi_rready);
 
-    /* extract registers from instance */
-    localparam prnum = 96;
-    logic [prnum-1:0][63:0] pregs;
-    /* verilator tracing_off */
-    logic [63:0] dupregs[iwd-1:0][prnum-1:0]; // forwarded register values
-    logic [$clog2(iwd)-1:0] sel[prnum-1:0];   // forwarded bank selections
-    /* verilator tracing_on */
-    for (genvar i = 0; i < iwd; i++) for (genvar j = 0; j < prnum; j++)
-        always_comb begin
-            dupregs[i][j] = inst.prf_inst.regfile_inst.dupregs[i].regs[j];
-            if (inst.prf_inst.regfile_inst.wena[i])
-                dupregs[i][inst.prf_inst.regfile_inst.waddr[i]] = inst.prf_inst.regfile_inst.wvalue[i];
-        end
-    always_comb begin
-        sel = inst.prf_inst.regfile_inst.sel;
-        for (int i = 0; i < iwd; i++) if (inst.prf_inst.regfile_inst.wena[i])
-            sel[inst.prf_inst.regfile_inst.waddr[i]] = $clog2(iwd)'(i);
-    end
-    always_comb for (int i = 0; i < prnum; i++) pregs[i] = dupregs[sel[i]][i];
-
     /* architectural states change */
     rob_csr_t rob_csr[127:0];
     logic [15:0][63:0] st_addr, st_data;
@@ -197,7 +177,7 @@ module vcore #(
             cmt_mem  [i] = inst.com_inst.exe_rvalue[i].mem;
             del_gprw [i] = cmt[i] & cmt_gpr[i];
             del_gpra [i] = inst.com_inst.dec_rvalue[i].lrda[5:0];
-            del_gprv [i] = pregs[inst.com_inst.ren_rvalue[i].prda[1]];
+            del_gprv [i] = inst.prf_inst.regfile_inst.regs[32'(inst.com_inst.ren_rvalue[i].prda[1])];
         end
         /* commit of exception instructions will sync with CSR taking exception (after rollback) */
         if ((inst.com_inst.exe_last.cause[7] | inst.com_inst.exe_last.eret[2]) & ~inst.com_inst.rollback) begin
@@ -311,4 +291,39 @@ module vcore #(
     int flnum;
     always_comb flnum = $countones(~inst.ren_inst.fl);
     always_ff @(posedge clk) if (~rst) assert(flnum <= 32'(inst.com_inst.rob_num) + 65); // free list leaking
+endmodule
+
+/* firstk module for simulation acceleration */
+module firstk #(
+    parameter width = 64, // data width
+    parameter k     = 4   // the parameter k
+)(
+    input  logic [width-1:0] bits,
+    output logic [k:1][$clog2(width):0] pos // MSB is found bit
+);
+    int j;
+    always_comb begin
+        pos = 0; j = 1;
+        for (int i = 0; i < width; i++) if (bits[i]) begin
+            pos[j] = {1'b1, $clog2(width)'(i)};
+            j++;
+            if (j == k + 1) break;
+        end
+    end
+endmodule
+
+/* mwpram module for simulation acceleration */
+module mwpram #(parameter width = 64, parameter depth = 64,
+    parameter rports = 2, parameter wports = 1) (
+    input  logic clk,
+    input  logic rst,
+    input  logic [rports-1:0][$clog2(depth)-1:0] raddr,  // reading addresses
+    output logic [rports-1:0]        [width-1:0] rvalue, // reading values
+    input  logic [wports-1:0][$clog2(depth)-1:0] waddr,  // writing addresses
+    input  logic [wports-1:0]        [width-1:0] wvalue, // writing values
+    input  logic [wports-1:0]                    wena    // writing enable
+);
+    logic [width-1:0] regs[depth-1:0];
+    always_ff @(posedge clk) for (int i = 0; i < wports; i++) if (wena[i]) regs[waddr[i]] <= wvalue[i];
+    always_comb for (int i = 0; i < rports; i++) rvalue[i] = regs[raddr[i]];
 endmodule

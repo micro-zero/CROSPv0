@@ -89,12 +89,14 @@ module decoder #(
         logic [2:0] delta;      // PC delta in bytes (4 or 2)
 
         /* decompress the instruction */
-        always_comb // assign some HINT instructions for exceptions without instruction data
-            if (fet_bundle[g].pf[0] | fet_bundle[g].pf[1] & &fet_bundle[g].ir[1:0])
-                oir = 32'h00c02013; // instruction page fault
-            else if (interrupt[6])
-                oir = 32'h80002013 | (32'(interrupt[5:0]) << 20);
-            else oir = fet_bundle[g].ir;
+        logic hint_af, hint_pf, hint_int; // some HINT instructions for exceptions without instruction data
+        always_comb hint_af = fet_bundle[g].af[0] | fet_bundle[g].af[1] & &fet_bundle[g].ir[1:0];
+        always_comb hint_pf = fet_bundle[g].pf[0] | fet_bundle[g].pf[1] & &fet_bundle[g].ir[1:0];
+        always_comb hint_int = interrupt[6];
+        always_comb if (hint_pf)  oir = 32'h00c02013; // instruction page fault
+            else    if (hint_af)  oir = 32'h00102013; // instruction access fault
+            else    if (hint_int) oir = 32'h80002013 | (32'(interrupt[5:0]) << 20);
+            else                  oir = fet_bundle[g].ir;
         ci2i ci2i_inst(.ci(oir), .i(ir));
         always_comb delta = &oir[1:0] ? 4 : 2;
 
@@ -175,14 +177,9 @@ module decoder #(
                 if (op[`BRANCH]) alu_funct[0].bneg  = ir[12];
                 alu_funct[0].j = op[`JAL] | op[`JALR];
             end
-            if (fet_bundle[g].pf[0] | fet_bundle[g].pf[1] & &fet_bundle[g].ir[1:0]) begin
-                alu_funct = 0;
-                alu_funct[0].pf = fet_bundle[g].pf;
-            end
-            if (interrupt[6]) begin
-                alu_funct = 0;
-                alu_funct[0].interrupt = interrupt;
-            end
+            if      (hint_pf)  begin alu_funct = 0; alu_funct[0].pf = fet_bundle[g].pf; end
+            else if (hint_af)  begin alu_funct = 0; alu_funct[0].af = fet_bundle[g].af; end
+            else if (hint_int) begin alu_funct = 0; alu_funct[0].interrupt = interrupt; end
             /* MUL/DIV operations */
             mul_funct[0].mul    = op[`OP]    & ir[14:12] == 3'b000 & ir[31:25] == 7'b1;
             mul_funct[0].mulh   = op[`OP]    & ir[14:12] == 3'b001 & ir[31:25] == 7'b1;
@@ -381,9 +378,9 @@ module decoder #(
             for (int i = 0; i < 3; i++)
             if  (|fpu_funct[i] | |mul_funct[i] | |div_funct[i] | |alu_funct[i] &
                     ~|alu_funct[i].bmask & ~|alu_funct[i].eret & ~alu_funct[i].j &
-                    ~|alu_funct[i].pf & ~|alu_funct[i].interrupt & ~alu_funct[i].fencei &
-                    ~alu_funct[i].sfence & ~alu_funct[i].ecall & ~alu_funct[i].ebreak &
-                    ~alu_funct[i].wfi & ~alu_funct[i].inv
+                    ~|alu_funct[i].af & ~|alu_funct[i].pf & ~|alu_funct[i].interrupt &
+                    ~alu_funct[i].fencei & ~alu_funct[i].sfence & ~alu_funct[i].ecall &
+                    ~alu_funct[i].ebreak & ~alu_funct[i].wfi & ~alu_funct[i].inv
                 ) result[g][i].safe = 1;
         end
         always_comb begin

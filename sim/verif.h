@@ -11,6 +11,7 @@
 
 extern const char *gprname[64];
 extern std::map<uint16_t, const char *> csrname;
+extern std::vector<std::string> pmpname;
 
 typedef struct
 {
@@ -170,7 +171,8 @@ typedef struct
         {"mcycle", 0},
         {"pmpcfg0", 0},
         {"pmpcfg1", 0},
-        {"pmpcfg2", 0}};
+        {"pmpcfg2", 0},
+        {"tselect", -1ul}};
     std::map<uint64_t, uint8_t> rsrv;
 } state_t;
 

@@ -41,9 +41,8 @@ VERILATOR_FLAGS = -cc -assert -savable -trace -trace-structs -trace-max-array 25
 	-I../src/soc/axi_sdc -I../src/soc/axi_eth
 VCORE_H  = ../src/common/types.sv
 VCORE_SV = \
-	../src/common/mwpram.sv \
-	../src/common/firstk.sv \
 	../src/common/pma.sv \
+	../src/common/pmp.sv \
 	../src/frontend/pcgen.sv \
 	../src/frontend/frontend.sv \
 	../src/decoder/ci2i.sv \
@@ -85,15 +84,27 @@ ETH_SV = \
 # Scripts
 define RVTESTS_SCRIPT
 	echo "ISA tests errors:"
+	pids=()
+	names=()
+	err=0
 	for file in $$RISCV/target/share/riscv-tests/isa/rv64*; do
 		if [ $${file##*.} != "dump" ]; then
-			./main -s -elf $$file >/dev/null 2>&1
-			exitcode=$$?
-			if [ $$exitcode -ne 0 ]; then
-				echo "$$file exited with code $$exitcode"
-			fi
+			./main -s -elf $$file >/dev/null 2>&1 &
+			pids+=($$!)
+			names+=($$file)
 		fi
 	done
+	for i in $${!pids[@]}; do
+		wait $${pids[i]}
+		exitcode=$$?
+		if [ $$exitcode -ne 0 ]; then
+			echo "$${names[i]} exited with code $$exitcode"
+			err=1
+		fi
+	done
+	if [ $$err -eq 0 ]; then
+		echo "[Info] All tests exited with 0"
+	fi
 	pids=()
 	names=()
 	for file in $$RISCV/target/share/riscv-tests/benchmarks/*.riscv; do

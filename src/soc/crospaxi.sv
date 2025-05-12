@@ -196,16 +196,20 @@ module crospaxi #(
     logic [11:0] csr_addr;
     logic [63:0] csr_wdat, csr_rdat;
     logic [63:0] csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr;
+    logic [15:0] [7:0] pmpcfg;
+    logic [15:0][53:0] pmpaddr;
     logic exception, frd;
     logic [63:0] epc, tval, cause;
     logic [2:0] eret;
     logic [4:0] fflags;
     logic [15:0] top_opid, saf_opid;
-    logic [2*mwd-1:0][15:0] lsu_safe, lsu_unsf;
+    logic [2*mwd-1:0][15:0] lsu_safe;
+    logic [3*mwd-1:0][15:0] lsu_unsf;
     frontend #(.init(init), .rst_pc(rst_pc), .fwd(fwd), .cwd(cwd),
         .cbsz(cbsz), .fqsz(fqsz), .ftqsz(ftqsz), .fnum(fnum),
         .rassz(rassz), .phtsz(phtsz), .btbsz(btbsz))
-        fe_inst(clk, rst, com_bundle, red_bundle, dec_ready, fet_bundle, fl_inst,
+        fe_inst(clk, rst, com_bundle, red_bundle, dec_ready, fet_bundle,
+            csr_inst.level, pmpcfg, pmpaddr, fl_inst,
             it_rqst, it_vadd, it_resp, it_perm, it_padd,
             ic_rqst, ic_addr, ic_resp, ic_rdat);
     decoder #(.fwd(fwd), .dwd(dwd), .cwd(cwd),
@@ -221,7 +225,7 @@ module crospaxi #(
         exception, epc, tval, cause, eret, frd, fflags,
         csr_excp, csr_intl, csr_intg, csr_flsh,
         mip_ext, mtime, 64'(com_inst.rob_out),
-        csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp);
+        csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp, pmpcfg, pmpaddr);
     issue #(.rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .iqsz(iqsz))
         iss_inst(clk, rst, fu_ready, busy_resp,
             exe_bundle, red_bundle, iss_ready, ren_bundle, (iwd)'(-1), iss_bundle);
@@ -232,7 +236,8 @@ module crospaxi #(
             csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, frd, fflags,
             lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv);
     alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
-        alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
+        alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level,
+            csr_inst.mstatus[20] & csr_inst.level == 2'b01, csr_inst.mstatus[22] & csr_inst.level == 2'b01);
     fpu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         fpu_inst(clk, rst, red_bundle, fu_ready[2], fu_req, fu_claim[2], fu_resp[2]);
     mul #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
@@ -243,7 +248,8 @@ module crospaxi #(
         lsu_inst(clk, rst, lsu_safe, lsu_unsf, top_opid, saf_opid, red_bundle, com_bundle,
             fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
-            fl_data, fl_inst | fl_data,
+            csr_inst.mstatus[17] ? csr_inst.mstatus[12:11] : csr_inst.level,
+            pmpcfg, pmpaddr, fl_data, fl_inst | fl_data,
             dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
             dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
 

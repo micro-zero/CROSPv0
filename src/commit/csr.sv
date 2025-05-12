@@ -71,33 +71,35 @@ module csr(
     output logic  [6:0] intg,       // raise global interrupt
     output logic        flush,      // cause pipeline flush
     /* input and output not from instructions */
-    input  logic [63:0] in_ip,      // interrupt pending
-    input  logic [63:0] in_time,    // CSR `mtime` mapped in memory
-    input  logic [63:0] in_instret, // instruction retired (delta)
-    output logic [63:0] out_status, // CSR `mstatus`
-    output logic [63:0] out_tvec,   // CSR `mtvec` or `stvec` according to current privilege level
-    output logic [63:0] out_mepc,   // CSR `mepc`
-    output logic [63:0] out_sepc,   // CSR `sepc`
-    output logic [63:0] out_fcsr,   // CSR `fcsr`
-    output logic [63:0] out_isatp,  // CSR `satp` for instruction fetch
-    output logic [63:0] out_dsatp   // CSR `satp` for data access
+    input  logic       [63:0] in_ip,      // interrupt pending
+    input  logic       [63:0] in_time,    // CSR `mtime` mapped in memory
+    input  logic       [63:0] in_instret, // instruction retired (delta)
+    output logic       [63:0] out_status, // CSR `mstatus`
+    output logic       [63:0] out_tvec,   // CSR `mtvec` or `stvec` according to current privilege level
+    output logic       [63:0] out_mepc,   // CSR `mepc`
+    output logic       [63:0] out_sepc,   // CSR `sepc`
+    output logic       [63:0] out_fcsr,   // CSR `fcsr`
+    output logic       [63:0] out_isatp,  // CSR `satp` for instruction fetch
+    output logic       [63:0] out_dsatp,  // CSR `satp` for data access
+    output logic [15:0] [7:0] out_pmpcfg, // CSR `pmpcfg`
+    output logic [15:0][53:0] out_pmpaddr // CSR `pmpaddr`
 );
     logic [1:0] level; // 00 -> U  01 -> S  11 -> M
     logic [63:0] wres; // write result according to writing data and functional code
-    logic [64:0] val;  // direct value of input address
+    logic [64:0] val;  // direct value of input address, MSB is unimplemented bit
     logic trapintos;   // trap into S mode according to current level and delegation registers
-    logic we;          // write enable signal for CSRRW
+    logic we, vc;      // write enable and value change signal for CSRRW
     logic fsdirty;     // floating-point status dirty
     /* control and status registers */
     logic [63:0] misa, mvendorid, marchid, mimpid, mhartid;
     logic [63:0] mstatus, mtvec, medeleg, mideleg, mip, mip_base, mie;
+    logic [63:0] pmpcfg0, pmpcfg2, pmpaddr[15:0];
     logic [63:0] mcycle, minstret, mhpmcounter[31:0], mhpmevent[31:0];
     logic [63:0] mcounteren, mcountinhibit, mscratch, mepc, mcause, mtval;
+    logic [63:0] tselect;
     logic [63:0] stvec, scounteren, sscratch;
     logic [63:0] satp, sepc, scause, stval;
     logic [63:0] fcsr, utvec;
-    /* some auto-increment CSRs requires forwarding due to pre-execution before being top of ROB */
-    logic [63:0] mcycle_fwd, minstret_fwd;
     /* trap into S mode when current level is S/U and delegated by M mode */
     always_comb if (cause[63]) trapintos = ~level[1] & mideleg[cause[5:0]];
         else trapintos = ~level[1] & medeleg[cause[5:0]];
@@ -112,18 +114,23 @@ module csr(
         val = 65'(mhpmcounter[addr[4:0]]);
     else if (addr > 12'h322 & addr < 12'h340)
         val = 65'(mhpmevent[addr[4:0]]);
-    else case (addr)
+    else if (addr >= 12'h3b0 & addr < 12'h3c0) begin
+        val = 65'(pmpaddr[addr[3:0]]);
+        /* OFF and TOR clear bit G-1 */
+        if (addr[3:0] < 8 ? ~pmpcfg0[addr[3:0]*8+4] : ~pmpcfg2[addr[3:0]*8-60]) val[0] = 0;
+    end else case (addr)
         /* M-mode */
         12'h301: val = 65'(misa);          12'hf11: val = 65'(mvendorid);
         12'hf12: val = 65'(marchid);       12'hf13: val = 65'(mimpid);
         12'hf14: val = 65'(mhartid);       12'h300: val = 65'(mstatus);
         12'h305: val = 65'(mtvec);         12'h302: val = 65'(medeleg);
         12'h303: val = 65'(mideleg);       12'h344: val = 65'(mip);
-        12'h304: val = 65'(mie);           12'hb00: val = 65'(mcycle_fwd);
-        12'hb02: val = 65'(minstret_fwd);  12'h306: val = 65'(mcounteren);
+        12'h304: val = 65'(mie);           12'hb00: val = 65'(mcycle);
+        12'hb02: val = 65'(minstret);      12'h306: val = 65'(mcounteren);
         12'h320: val = 65'(mcountinhibit); 12'h340: val = 65'(mscratch);
         12'h341: val = 65'(mepc);          12'h342: val = 65'(mcause);
-        12'h343: val = 65'(mtval);
+        12'h343: val = 65'(mtval);         12'h3a0: val = 65'(pmpcfg0);
+        12'h3a2: val = 65'(pmpcfg2);       12'h7a0: val = 65'(tselect);
         /* S-mode */
         12'h180: val = 65'(satp);
         12'h100: val = 65'(mstatus);       12'h105: val = 65'(stvec);
@@ -135,18 +142,19 @@ module csr(
         12'h001: val = 65'(fcsr[4:0]);     12'h002: val = 65'(fcsr[7:5]);
         12'h003: val = 65'(fcsr[7:0]);     12'h005: val = 65'(utvec);
         12'hc00: val = 65'(mcycle);        12'hc01: val = 65'(in_time);
-        12'hc02: val = 65'(minstret_fwd);
+        12'hc02: val = 65'(minstret);
         /* unimplemented CSRs */
         default: val = {1'b1, 64'd0};
     endcase
     always_comb rdat = val[63:0];
     always_comb eout = rqst & val[64]                                        | // unimplemented
                        rqst & addr[9:8] > level                              | // violate privilege
-                       rqst & addr >= 12'hc00 & addr < 12'hc20 & rdat != wres; // read-only
+                       rqst & addr == 12'h180 & mstatus[20] & level == 2'b01 | // TVM
+                       rqst & addr >= 12'hc00 & addr < 12'hc20 & vc;           // read-only
     always_comb we = rqst & ~eout;
+    always_comb vc = val[63:0] != wres;
     always_comb fsdirty = frd | we & (addr == 12'h001 | addr == 12'h002 | addr == 12'h003);
-    always_comb mcycle_fwd = mcycle + 1;
-    always_comb minstret_fwd = minstret + (mcountinhibit[2] ? 0 : in_instret);
+    always_comb tselect = -64'd1; // D-mode not implemented
     always_ff @(posedge clk) begin
         /* switch privilege level */
         if (ret[2])
@@ -212,8 +220,11 @@ module csr(
             mip_base <= wres;
         if (rst) mie <= 0; else if (we & (addr == 12'h304 | addr == 12'h104)) begin // `sie` shared with `mie`
             mie <= wres; mie[63:12] <= 0; mie[10] <= 0; mie[6] <= 0; mie[2] <= 0; end
-        if (rst) mcycle   <= 0; else if (we & addr == 12'hb00) mcycle   <= wres; else mcycle   <= mcycle_fwd;
-        if (rst) minstret <= 0; else if (we & addr == 12'hb02) minstret <= wres; else minstret <= minstret_fwd;
+        if (rst) mcycle   <= 0; else if (we & addr == 12'hb00) mcycle <= wres; else mcycle <= mcycle + 1;
+        if (rst) minstret <= 0;
+        else if (we & addr == 12'hb02) // previously exclude CSRRW instruction when writing CSR
+            minstret <= wres - (mcountinhibit[2] | ~vc ? 0 : 1);
+        else minstret <= minstret + (mcountinhibit[2] ? 0 : in_instret);
         for (int i = 3; i < 32; i++) if (rst) mhpmcounter[i] <= 0;
         for (int i = 3; i < 32; i++) if (rst) mhpmevent[i] <= 0;
         if (we & addr > 12'hb02 & addr < 12'hb20) mhpmcounter[addr[4:0]] <= wres;
@@ -225,6 +236,31 @@ module csr(
         if (rst) mepc <= 0; else if (we & addr == 12'h341) mepc <= wres;
         if (rst) mcause <= 0; else if (we & addr == 12'h342) mcause <= wres;
         if (rst) mtval <= 0; else if (we & addr == 12'h343) mtval <= wres;
+        if (we & addr == 12'h3a0) pmpcfg0 <= wres;
+        if (we & addr == 12'h3a2) pmpcfg2 <= wres;
+        if (we & addr >= 12'h3b0 & addr < 12'h3c0) begin
+            pmpaddr[addr[3:0]][53:1] <= wres[53:1];
+            /* bit G-1 assignment of pmpaddr is decided by pmpcfg.A */
+            if (addr[3:0] < 8 ? pmpcfg0[addr[3:0]*8+4] : pmpcfg2[addr[3:0]*8-60]) // NAPOT
+                pmpaddr[addr[3:0]][0] <= wres[0];
+            else if (func[1:0] != 2'b01 & |wdat[53:1] & ~wdat[0])
+                pmpaddr[addr[3:0]][0] <= 0; // OFF/TOR with G-1 bit not written and other bits written
+            else case (func[1:0])           // OFF/TOR with G-1 bit written or other bits not written
+                2'b00: pmpaddr[addr[3:0]][0] <=            pmpaddr[addr[3:0]][0];
+                2'b01: pmpaddr[addr[3:0]][0] <=  wdat[0];
+                2'b10: pmpaddr[addr[3:0]][0] <=  wdat[0] | pmpaddr[addr[3:0]][0];
+                2'b11: pmpaddr[addr[3:0]][0] <= ~wdat[0] & pmpaddr[addr[3:0]][0];
+            endcase
+        end
+        for (int i = 0; i < 16; i++) if (i < 8 ? pmpcfg0[i*8+7] : pmpcfg2[i*8-57]) begin // locked
+            if (i < 8) pmpcfg0[i*8+ 7-:8] <= pmpcfg0[i*8+ 7-:8];
+            else       pmpcfg2[i*8-57-:8] <= pmpcfg2[i*8-57-:8]; // recover locked bits
+            pmpaddr[i] <= pmpaddr[i];
+            if (i > 0 & (i < 8 ? pmpcfg0[i*8+4-:2] : pmpcfg2[i*8-60-:2]) == 1) // TOR
+                pmpaddr[i - 1] <= pmpaddr[i - 1];
+        end
+        if (rst) {pmpcfg0, pmpcfg2} <= 0; // reset (unlock)
+        for (int i = 0; i < 16; i++) if (rst) pmpaddr[i] <= 0;
         /* S-level CSR */
         if (rst) stvec <= 0; else if (we & addr == 12'h105) begin
             stvec <= wres; stvec[1:0] <= 0; end
@@ -266,6 +302,8 @@ module csr(
     always_comb out_tvec   = trapintos ? stvec : mtvec;
     always_comb out_mepc   = mepc;
     always_comb out_sepc   = sepc;
-    always_comb out_isatp  = level == 2'b11 ? 64'd0 : satp;                     // M level disables address translation
+    always_comb out_isatp  = level == 2'b11 ? 64'd0 : satp;                     // M mode disables translation
     always_comb out_dsatp  = mstatus[17] & ~&mstatus[12:11] ? satp : out_isatp; // MRPV bit in mstatus
+    always_comb out_pmpcfg = {pmpcfg2, pmpcfg0};
+    always_comb for (int i = 0; i < 16; i++) out_pmpaddr[i] = pmpaddr[i][53:0];
 endmodule

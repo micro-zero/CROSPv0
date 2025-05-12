@@ -40,7 +40,7 @@ module commit #(
     output logic  [4:0] fflags,    // floating-point flags
     /* ID control */
     input  logic [2*mwd-1:0][15:0] lsu_safe, // LSU early safe operation ID
-    input  logic [2*mwd-1:0][15:0] lsu_unsf, // LSU unsafe operation ID
+    input  logic [3*mwd-1:0][15:0] lsu_unsf, // LSU unsafe operation ID
     output logic            [15:0] top_opid, // top operation ID
     output logic            [15:0] saf_opid, // first safe operation ID
     /* fences */
@@ -73,7 +73,7 @@ module commit #(
         for (int i = 0; i < 2 * cwd; i++) if (saf_fwd[saf_raddr[i]] &
             $clog2(opsz)'(i) + saf_front - rob_front <
             $clog2(opsz)'(rob_num) - $clog2(opsz)'(rob_red)) saf_next++; else break;
-        for (int i = 0; i < 2 * mwd; i++)
+        for (int i = 0; i < 3 * mwd; i++)
             if (lsu_unsf[i][15] & $clog2(opsz)'(lsu_unsf[i]) - rob_front < saf_next - rob_front)
                 saf_next = $clog2(opsz)'(lsu_unsf[i]); // return to earliest unsafe entry
         if (rob_num == rob_red) saf_next = rob_front;
@@ -195,7 +195,7 @@ module commit #(
         for (int i = 0; i < iwd; i++) if (exe_wena[i]) saf_fwd[$clog2(opsz)'(exe_waddr[i])] =
             ~exe_bundle[i].cause[7] & ~exe_bundle[i].eret[2] & ~exe_bundle[i].specul &
             ~exe_bundle[i].misp     & ~exe_bundle[i].flush   & ~exe_bundle[i].retry;
-        for (int i = 0; i < 2 * mwd; i++) if (lsu_unsf[i][15]) saf_fwd[$clog2(opsz)'(lsu_unsf[i])] = 0;
+        for (int i = 0; i < 3 * mwd; i++) if (lsu_unsf[i][15]) saf_fwd[$clog2(opsz)'(lsu_unsf[i])] = 0;
         for (int i = 0; i < 2 * mwd; i++) if (lsu_safe[i][15]) saf_fwd[$clog2(opsz)'(lsu_safe[i])] = 1;
         if (red_bundle.opid[15]) saf_fwd[$clog2(opsz)'(red_bundle.opid)] = 1;
     end

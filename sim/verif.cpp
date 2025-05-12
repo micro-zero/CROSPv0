@@ -670,6 +670,19 @@ uint32_t &memory::ui32(uint64_t addr) { return *(uint32_t *)&(*this)[addr]; }
 uint64_t &memory::ui64(uint64_t addr) { return *(uint64_t *)&(*this)[addr]; }
 
 /**
+ * @brief check PMP
+ * @param addr address to check
+ * @param csrs CSR registers
+ * @return permission bits (XWR)
+ */
+inline bits pmp(uint64_t addr, std::map<std::string, bits> csrs)
+{
+    if (addr >= 1ul << 56)
+        return 0ul;
+    return -1ul;
+}
+
+/**
  * @brief address translation
  * @param mem   pointer of memory
  * @param satp  CSR satp
@@ -1153,6 +1166,8 @@ std::string disas(uint32_t ir)
             sprintf(ret, "wfi");
         break;
     }
+    if (ir == 0x00102013)
+        sprintf(ret, "[instruction access fault]");
     if (ir == 0x00c02013)
         sprintf(ret, "[instruction page fault]");
     if (ir == 0x00002013)
@@ -1218,7 +1233,6 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
     delta_t ret;
     ret.level = s.level;
     ret.gprw = ret.memw = 0;
-    feclearexcept(FE_ALL_EXCEPT);
 
     /* interrupt */
     bool mintena = s.level < 3 || s.level == 3 && s.csr["mstatus"][3];
@@ -1250,6 +1264,11 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         s.ir = 0x00c02013; // HINT for instruction page fault(SLTI zero, zero, 12)
         return genx(s, ret, medeleg[12] ? 1 : 3, 12, s.pc);
     }
+    if (!pmp(ppc, s.csr)[2]) // no X permission
+    {
+        s.ir = 0x00102013; // HINT for instruction access fault
+        return genx(s, ret, medeleg[1] ? 1 : 3, 1, s.pc);
+    }
     bits idata = s.mem.ui32(ppc), ir;
     if (idata[0] && idata[1])
     {
@@ -1257,6 +1276,11 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         {
             s.ir = 0x00c02013;
             return genx(s, ret, medeleg[12] ? 1 : 3, 12, s.pc + 2);
+        }
+        if (!pmp(ppc, s.csr)[2])
+        {
+            s.ir = 0x00102013;
+            return genx(s, ret, medeleg[1] ? 1 : 3, 1, s.pc + 2);
         }
         if ((s.pc & 0xfff) == 0xffe) // beyond page
             idata = idata & 0xffff | (s.mem.ui32(ppc) << 16);
@@ -1596,6 +1620,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             return genx(s, ret, medeleg[4] ? 1 : 3, 4, va);   // load address misaligned
         if ((pa = paddr(s.mem, satp, va, su | 2)) == -1)      // require R permission
             return genx(s, ret, medeleg[13] ? 1 : 3, 13, va); // load PF
+        if (!pmp(pa, s.csr)[0])
+            return genx(s, ret, medeleg[5] ? 1 : 3, 5, pa); // load AF
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11);
         ret.gprv = s.mem.ui64(pa);
@@ -1624,6 +1650,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
         if ((pa = paddr(s.mem, satp, va, su | 2)) == -1)
             return genx(s, ret, medeleg[13] ? 1 : 3, 13, va); // load PF
+        if (!pmp(pa, s.csr)[0])
+            return genx(s, ret, medeleg[5] ? 1 : 3, 5, pa); // load AF
         ret.gprw = 1;
         ret.gpra = ir.range(7, 11) + 32;
         if (funct3 == 0b010) // FLW
@@ -1689,6 +1717,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             return genx(s, ret, medeleg[6] ? 1 : 3, 6, va);   // store address misaligned
         if ((pa = paddr(s.mem, satp, va, su | 4)) == -1)      // require W permission
             return genx(s, ret, medeleg[15] ? 1 : 3, 15, va); // store PF
+        if (!pmp(pa, s.csr)[1])
+            return genx(s, ret, medeleg[7] ? 1 : 3, 7, pa); // store AF
         ret.memw = 1 << ir.range(12, 13);
         ret.mema = pa;
         ret.memv = s.gpr[ir.range(20, 24) + (ir[2] ? 32 : 0)];
@@ -1703,6 +1733,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
                 return genx(s, ret, medeleg[4] ? 1 : 3, 4, va); // load address misaligned
             if ((pa = paddr(s.mem, satp, rs1, su | 2)) == -1)
                 return genx(s, ret, medeleg[13] ? 1 : 3, 13, rs1); // load PF
+            if (!pmp(pa, s.csr)[0])
+                return genx(s, ret, medeleg[5] ? 1 : 3, 5, pa); // load AF
             ret.gprw = 1;
             ret.gpra = ir.range(7, 11);
             ret.gprv = s.mem.ui64(pa);
@@ -1720,6 +1752,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
                 return genx(s, ret, medeleg[6] ? 1 : 3, 6, va); // store address misaligned
             if ((pa = paddr(s.mem, satp, rs1, su | 4)) == -1)
                 return genx(s, ret, medeleg[15] ? 1 : 3, 15, rs1); // store PF
+            if (!pmp(pa, s.csr)[1])
+                return genx(s, ret, medeleg[7] ? 1 : 3, 7, pa); // store AF
             ret.gprw = 1;
             ret.gpra = ir.range(7, 11);
             if (s.rsrv.find(pa) == s.rsrv.end())
@@ -1746,6 +1780,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
                 return genx(s, ret, medeleg[6] ? 1 : 3, 6, va); // AMO address misaligned
             if ((pa = paddr(s.mem, satp, rs1, su | 4)) == -1)
                 return genx(s, ret, medeleg[15] ? 1 : 3, 15, rs1); // AMO PF
+            if (!pmp(pa, s.csr)[1])
+                return genx(s, ret, medeleg[7] ? 1 : 3, 7, pa); // AMO AF
             ret.gprw = 1;
             ret.gpra = ir.range(7, 11);
             ret.gprv = s.mem.ui64(pa);
@@ -1903,6 +1939,7 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             fesetround(FE_TONEAREST), rndf = roundf, rnd = round;
         else
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+        feclearexcept(FE_ALL_EXCEPT);
         if (ir.range(2, 3) == 0)
             ret.gprv = ir[25] ? bits(ds1 * ds2 + ds3) : bits(ss1 * ss2 + ss3);
         else if (ir.range(2, 3) == 1)
@@ -1947,6 +1984,7 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             fesetround(FE_TONEAREST), rndf = roundf, rnd = round;
         else
             return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+        feclearexcept(FE_ALL_EXCEPT);
         switch (ir.range(27, 31))
         {
         case 0b00000: // FADD
@@ -2259,6 +2297,18 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             if (ir.range(20, 31) >= 0xc00 && ir.range(20, 31) < 0xc20) // write read-only counters
                 if (wvalue != ret.gprv)
                     return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+            if (addr == 0x180 && s.csr["mstatus"][20] && s.level == 1) // SATP and TVM
+                return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
+            if (addr >= 0x3b0 && addr < 0x3c0) // pmpaddr
+            {
+                uint8_t cfg4 = (addr & 0xf) < 8 ? s.csr.at("pmpcfg0")[((addr & 0xf) - 0) * 8 + 4]
+                                                : s.csr.at("pmpcfg2")[((addr & 0xf) - 8) * 8 + 4];
+                ret.gprv = bits(ret.gprv).write(54, 63, 0); // read value is dynamically determined by pmpcfg
+                if (!cfg4)
+                    ret.gprv &= ~1ul; // set G-1 bit of read value zero
+                if (!cfg4 && ir.range(12, 13) != 1 && bits(rs1).range(1, 53) && !bits(rs1)[0])
+                    wvalue &= ~1ul; // set G-1 bit of write value zero when only write to higher bits
+            }
             if (ir.range(20, 31) == 0x001) // fflags
                 ret.csr["fcsr"] = s.csr["fcsr"], ret.csr["fcsr"].write(0, 4, wvalue);
             else if (ir.range(20, 31) == 0x002) // frm
@@ -2269,6 +2319,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         else if ((ir & ~(1 << 20)) == 0x73) // ECALL / EBREAK
             return genx(s, ret, medeleg[ir[20] ? 3 : s.level + 8] ? 1 : 3,
                         ir[20] ? 3 : s.level + 8);
+        else if ((ir & 0xfe007fff) == 0x12000073 && s.csr["mstatus"][20] && s.level == 1) // SFENCE.VMA and TVM
+            return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
         else if (ir == 0x30200073) // MRET
         {
             ret.pc = s.csr["mepc"];
@@ -2280,6 +2332,8 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
         }
         else if (ir == 0x10200073) // SRET
         {
+            if (s.csr["mstatus"][22] && s.level == 1)
+                return genx(s, ret, medeleg[2] ? 1 : 3, 2, idata);
             ret.pc = s.csr["sepc"];
             ret.level = s.csr["mstatus"][8];
             ret.csr["mstatus"] = s.csr["mstatus"];
@@ -2705,25 +2759,25 @@ std::map<uint16_t, const char *> csrname = {
     {0x342, "mcause"},
     {0x343, "mtval"},
     {0x344, "mip"},
-    // {0x3a0, "pmpcfg0"},
-    // {0x3a1, "pmpcfg1"},
-    // {0x3a2, "pmpcfg2"},
-    // {0x3b0, "pmpaddr0"},
-    // {0x3b1, "pmpaddr1"},
-    // {0x3b2, "pmpaddr2"},
-    // {0x3b3, "pmpaddr3"},
-    // {0x3b4, "pmpaddr4"},
-    // {0x3b5, "pmpaddr5"},
-    // {0x3b6, "pmpaddr6"},
-    // {0x3b7, "pmpaddr7"},
-    // {0x3b8, "pmpaddr8"},
-    // {0x3b9, "pmpaddr9"},
-    // {0x3ba, "pmpaddr10"},
-    // {0x3bb, "pmpaddr11"},
-    // {0x3bc, "pmpaddr12"},
-    // {0x3bd, "pmpaddr13"},
-    // {0x3be, "pmpaddr14"},
-    // {0x3bf, "pmpaddr15"},
+    {0x3a0, "pmpcfg0"},
+    {0x3a1, "pmpcfg1"},
+    {0x3a2, "pmpcfg2"},
+    {0x3b0, "pmpaddr0"},
+    {0x3b1, "pmpaddr1"},
+    {0x3b2, "pmpaddr2"},
+    {0x3b3, "pmpaddr3"},
+    {0x3b4, "pmpaddr4"},
+    {0x3b5, "pmpaddr5"},
+    {0x3b6, "pmpaddr6"},
+    {0x3b7, "pmpaddr7"},
+    {0x3b8, "pmpaddr8"},
+    {0x3b9, "pmpaddr9"},
+    {0x3ba, "pmpaddr10"},
+    {0x3bb, "pmpaddr11"},
+    {0x3bc, "pmpaddr12"},
+    {0x3bd, "pmpaddr13"},
+    {0x3be, "pmpaddr14"},
+    {0x3bf, "pmpaddr15"},
     {0x7a0, "tselect"},
     {0x7a1, "tdata1"},
     {0x7a2, "tdata2"},
@@ -2767,3 +2821,8 @@ std::map<uint16_t, const char *> csrname = {
     {0xf12, "marchid"},
     {0xf13, "mimpid"},
     {0xf14, "mhartid"}};
+std::vector<std::string> pmpname = {
+    csrname.at(0x3b0), csrname.at(0x3b1), csrname.at(0x3b2), csrname.at(0x3b3),
+    csrname.at(0x3b4), csrname.at(0x3b5), csrname.at(0x3b6), csrname.at(0x3b7),
+    csrname.at(0x3b8), csrname.at(0x3b9), csrname.at(0x3ba), csrname.at(0x3bb),
+    csrname.at(0x3bc), csrname.at(0x3bd), csrname.at(0x3be), csrname.at(0x3bf)};

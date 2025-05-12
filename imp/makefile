@@ -25,6 +25,7 @@ CORE_SRC = \
 	$(shell realpath ../src/common/mwpram.sv) \
 	$(shell realpath ../src/common/firstk.sv) \
 	$(shell realpath ../src/common/pma.sv) \
+	$(shell realpath ../src/common/pmp.sv) \
 	$(shell realpath ../src/frontend/pcgen.sv) \
 	$(shell realpath ../src/frontend/frontend.sv) \
 	$(shell realpath ../src/decoder/ci2i.sv) \
@@ -1442,7 +1443,7 @@ project : .sdintf/ .cohintf/ .core/ .clint/ .plic/ .cohub/ .rom/ .sdc/ .uart/ .e
 	echo "$$TB_SV"   > .prj/tb.sv
 	vivado -mode batch -source .prj/prj.tcl >/dev/null 2>&1
 
-build :
+build : project
 	echo "$$BLD_TCL" > .prj/bld.tcl
 	vivado -mode batch -source .prj/bld.tcl >/dev/null 2>&1
 

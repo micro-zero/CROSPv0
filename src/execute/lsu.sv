@@ -18,7 +18,7 @@ module lsu #(
     input  logic clk,
     input  logic rst,
     output logic [2*mwd-1:0][15:0] lsu_safe,  // already safe operation ID
-    output logic [2*mwd-1:0][15:0] lsu_unsf,  // unsafe because fo missing
+    output logic [3*mwd-1:0][15:0] lsu_unsf,  // unsafe because fo missing
     input  logic            [15:0] top_opid,  // top operation ID
     input  logic            [15:0] saf_opid,  // next safe operation ID
     input  red_bundle_t           red_bundle, // redirect bundle
@@ -35,6 +35,10 @@ module lsu #(
     input  logic        csr_excp, // CSR exception
     input  logic [63:0] csr_rdat, // CSR reading data
     input  logic        csr_flsh, // CSR flush signal
+    /* PMP interface */
+    input  logic        [1:0] pmplvl,  // PMP privilege level
+    input  logic [15:0] [7:0] pmpcfg,  // PMP configuration CSRs
+    input  logic [15:0][53:0] pmpaddr, // PMP address CSRs
     /* MMU flush interface */
     output logic [255:0] fl_data, // data request flush bitmap
     input  logic [255:0] fl_btmp, // flush bitmap
@@ -42,7 +46,7 @@ module lsu #(
     output logic [mwd-1:0] [7:0] dt_rqst, // DTLB request ID
     output logic [mwd-1:0][63:0] dt_vadd, // DTLB response ID
     input  logic [mwd-1:0] [7:0] dt_resp, // DTLB virtual address
-    input  logic [mwd-1:0] [7:0] dt_perm, // permission for request
+    input  logic [mwd-1:0] [7:0] dt_perm, // DTLB permission for request
     input  logic [mwd-1:0][63:0] dt_padd, // DTLB physical address
     /* DCACHE interface */
     output logic [mwd-1:0] [7:0] dc_rqst, // DCACHE request ID
@@ -131,6 +135,16 @@ module lsu #(
     always_comb stpf = pf(8'b11000101);
     always_comb ldpf = pf(8'b01000011);
 
+    /* PMP check */
+    logic [mwd-1:0][7:0] pmp_resp;
+    logic [mwd-1:0]      pmp_fail;
+    logic [mwd-1:0][2:0] dc_perm;
+    pmp pmp_inst[mwd-1:0](pmplvl, pmpcfg, pmpaddr, dc_addr, dc_perm);
+    always_ff @(posedge clk) for (int i = 0; i < mwd; i++) begin
+        pmp_resp[i] <= fl_data[dc_rqst[i]] ? 0 : dc_rqst[i];
+        pmp_fail[i] <= isdcl(dc_rqst[i]) & ~dc_perm[i][0] | isdcs(dc_rqst[i]) & ~dc_perm[i][1];
+    end
+
     /* store queue */
     logic [$clog2(sqsz)-1:0] sq_front, next_front;           // store queue front index
     logic [$clog2(sqsz):0] sq_in, sq_out;                    // store queue numbers
@@ -147,7 +161,7 @@ module lsu #(
     logic [ewd-1:0][$clog2(sqsz):0] sq_pos_exect;            // positions to be executed
     logic [mwd-1:0][$clog2(sqsz):0] sq_pos_trans_off;        // positions to be translated with offset
     logic [sqsz-1:0] [7:0] sq_miss;                          // miss index
-    logic [sqsz-1:0]       sq_pgft, sq_misa;                 // page fault and misalignment bits of store queue
+    logic [sqsz-1:0]       sq_pgft, sq_acft, sq_misa;        // page/access fault and misalignment of store queue
     logic [sqsz-1:0][15:0] sq_opid;                          // operatio ID of store queue
     logic [sqsz-1:0] [1:0] sq_rsrv;                          // reservation bits of store queue
     logic [sqsz-1:0] [1:0] sq_aqrl;                          // acquire and release bits of store queue
@@ -169,6 +183,10 @@ module lsu #(
     logic                             [63:0] sq_rdat_wvalue; // read data write value
     logic sc_fail, sc_succ;                                  // SC fail and success signal
     logic [63:0] sq_rdat_ext;                                // sign-extended DCACHE read data
+    logic        [mwd-1:0]             [7:0] ck_resp;        // relevance checking ID
+    logic        [mwd-1:0]             [1:0] ck_rslt;        // relevance checking result
+    logic        [mwd-1:0]            [64:0] ck_forw;        // forwarded value (MSB is valid bit)
+    logic        [mwd-1:0]             [2:0] ck_bits;        // functional bits of relevance check
     mwpram #(.width($bits(exe_bundle_t)), .depth(sqsz), .rports(ewd), .wports(ewd))
         sq_inst(.clk(clk), .rst(rst), .wena(sq_wena),
             .raddr(sq_raddr), .rvalue(sq_rvalue), .waddr(sq_waddr), .wvalue(sq_wvalue));
@@ -201,7 +219,7 @@ module lsu #(
             sq_to_accsd[i] &= sc_succ & $clog2(sqsz)'(i) == sq_front; // front SC success
         for (int i = 0; i < mwd; i++)                                 // unsafe cycle
             if (|dc_resp[i] & |dc_miss[i] | |ck_resp[i] & ck_rslt[i] != 2'b11) sq_to_accsd = 0;
-        for (int i = 0; i < 2 * mwd; i++) if (lsu_unsf[i][15]) sq_to_accsd = 0;
+        for (int i = 0; i < 3 * mwd; i++) if (lsu_unsf[i][15]) sq_to_accsd = 0;
         /* offset is used to make older operations higher priority */
         for (int i = 0; i < sqsz; i++) sq_to_trans_off[i] = sq_to_trans[sq_index[i]];
     end
@@ -261,7 +279,7 @@ module lsu #(
     end
     always_ff @(posedge clk) if (rst)
             {sq_avalid, sq_dvalid, sq_csr, sq_fence, sq_flush, sq_trans,
-             sq_accsd, sq_rsrv, sq_aqrl, sq_pgft, sq_misa, sq_miss} <= 0;
+             sq_accsd, sq_rsrv, sq_aqrl, sq_pgft, sq_acft, sq_misa, sq_miss} <= 0;
         else begin
             /* translate store entries */
             for (int i = 0; i < mwd; i++) if (isdts(dt_resp[i])) begin
@@ -280,6 +298,12 @@ module lsu #(
                 if (isdcs(dc_resp[i]) & ~|dc_miss[i])
                     sq_accsd[$clog2(sqsz)'(dc_resp[i])] <= 1; // store entry
             end
+            /* PMP check */
+            for (int i = 0; i < mwd; i++)
+                if (isdcs(pmp_resp[i]) & pmp_fail[i]) begin
+                    sq_acft [$clog2(sqsz)'(pmp_resp[i])] <= 1;
+                    sq_accsd[$clog2(sqsz)'(pmp_resp[i])] <= 1;
+                end
             for (int i = 0; i < sqsz; i++) if (fl_btmp[sq_miss[i]]) sq_miss[i] <= 0;
             /* SC fails */
             if (sc_fail) sq_accsd[sq_front] <= 1;
@@ -298,6 +322,7 @@ module lsu #(
                 if (com_bundle[i].opid[15] & com_bundle[i].stid[7]) begin
                     sq_trans[$clog2(sqsz)'(com_bundle[i].stid)] <= 0;
                     sq_pgft [$clog2(sqsz)'(com_bundle[i].stid)] <= 0;
+                    sq_acft [$clog2(sqsz)'(com_bundle[i].stid)] <= 0;
                     sq_rsrv [$clog2(sqsz)'(com_bundle[i].stid)] <= 0;
                     sq_aqrl [$clog2(sqsz)'(com_bundle[i].stid)] <= 0;
                     sq_miss [$clog2(sqsz)'(com_bundle[i].stid)] <= 0;
@@ -310,7 +335,7 @@ module lsu #(
             /* flush requests */
             for (int i = 0; i < sqsz; i++) if (fl_data[dcs[i]])
                 {sq_avalid[i], sq_dvalid[i], sq_csr[i], sq_fence[i], sq_flush[i], sq_trans[i],
-                 sq_accsd[i], sq_rsrv[i], sq_aqrl[i], sq_pgft[i], sq_misa[i], sq_miss[i]} <= 0;
+                 sq_accsd[i], sq_rsrv[i], sq_aqrl[i], sq_pgft[i], sq_acft[i], sq_misa[i], sq_miss[i]} <= 0;
             /* virtual address calculated */
             for (int i = 0; i < ewd; i++) if (sq_wena[i]) begin
                 sq_avalid[sq_waddr[i]] <= 1;
@@ -376,7 +401,8 @@ module lsu #(
     logic [lqsz-1:0]            [63:0] lq_padd;              // physical address part of load queue
     logic [lqsz-1:0]             [1:0] lq_rsrv;              // reservation bits of load queue
     logic [lqsz-1:0]             [1:0] lq_aqrl;              // acquire and release bits of load queue
-    logic [lqsz-1:0]                   lq_pgft, lq_misa;     // page fault and misalignment bits of load queue
+    logic [lqsz-1:0]                   lq_pgft, lq_acft;     // page/access fault and of load queue
+    logic [lqsz-1:0]                   lq_misa;              // misalignment of load queue
     logic [lqsz-1:0]            [15:0] lq_opid;              // operatio ID of load queue
     logic [lqsz-1:0]             [7:0] lq_strb;              // strobe part of load queue
     logic [lqsz-1:0]             [2:0] lq_bits;              // functional bits of load queue
@@ -393,10 +419,6 @@ module lsu #(
     logic        [ewd-1:0]            [63:0] lq_rdat_rvalue; // read data read value
     logic      [2*mwd-1:0]                   lq_rdat_wena;   // read data write enable
     logic      [2*mwd-1:0]            [63:0] lq_rdat_wvalue; // read data write value
-    logic        [mwd-1:0]             [7:0] ck_resp;        // relevance checking ID
-    logic        [mwd-1:0]             [1:0] ck_rslt;        // relevance checking result
-    logic        [mwd-1:0]            [64:0] ck_forw;        // forwarded value (MSB is valid bit)
-    logic        [mwd-1:0]             [2:0] ck_bits;        // functional bits of relevance check
     mwpram #(.width($bits(exe_bundle_t)), .depth(lqsz), .rports(ewd), .wports(ewd))
         lq_inst(.clk(clk), .rst(rst), .wena(lq_wena),
             .raddr(lq_raddr), .rvalue(lq_rvalue), .waddr(lq_waddr), .wvalue(lq_wvalue));
@@ -484,7 +506,7 @@ module lsu #(
             if (isdcl(ck_resp[i])) lq_chck_fwd[$clog2(lqsz)'(ck_resp[i])] = ck_rslt[i];
     end
     always_ff @(posedge clk) if (rst)
-            {lq_valid, lq_trans, lq_rsrv, lq_aqrl, lq_pgft,
+            {lq_valid, lq_trans, lq_rsrv, lq_aqrl, lq_pgft, lq_acft,
              lq_misa, lq_accsd, lq_chck, lq_miss, lq_fail} <= 0;
         else begin
             /* translate load entries */
@@ -510,6 +532,12 @@ module lsu #(
                 if (isdcl(dc_resp[i]) & |dc_miss[i]) // cache miss
                     lq_miss[$clog2(lqsz)'(dc_resp[i])] <= fl_btmp[dc_miss[i]] ? 0 : dc_miss[i];
             end
+            /* PMP check */
+            for (int i = 0; i < mwd; i++)
+                if (isdcl(pmp_resp[i]) & pmp_fail[i]) begin // no R permission
+                    lq_acft [$clog2(lqsz)'(pmp_resp[i])] <= 1;
+                    lq_accsd[$clog2(lqsz)'(pmp_resp[i])] <= 1;
+                end
             for (int i = 0; i < lqsz; i++) if (fl_btmp[lq_miss[i]]) lq_miss[i] <= 0;
             /* output execution bundles */
             for (int i = 0; i < ewd; i++) if (eq_wvalue[i].opid[15] & eq_wvalue[i].ldid[7] & eq_wena[i])
@@ -541,6 +569,7 @@ module lsu #(
                 lq_rsrv [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
                 lq_aqrl [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
                 lq_pgft [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
+                lq_acft [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
                 lq_misa [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
                 lq_accsd[$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
                 lq_chck [$clog2(lqsz)'(com_bundle[i].ldid)] <= 0;
@@ -549,7 +578,7 @@ module lsu #(
             end
             /* flush requests */
             for (int i = 0; i < lqsz; i++) if (succeed(lq_opid[i]) | red_bundle.rollback)
-                {lq_valid[i], lq_trans[i], lq_rsrv[i], lq_aqrl[i], lq_pgft[i],
+                {lq_valid[i], lq_trans[i], lq_rsrv[i], lq_aqrl[i], lq_pgft[i], lq_acft[i],
                  lq_misa[i], lq_accsd[i], lq_chck[i], lq_miss[i], lq_fail[i]} <= 0;
             /* virtual address calculated */
             for (int i = 0; i < ewd; i++) if (lq_wena[i]) begin
@@ -762,8 +791,11 @@ module lsu #(
         if      (isdcs(dc_resp[i])) lsu_unsf[i] <= |dc_miss[i] ? sq_opid[$clog2(sqsz)'(dc_resp[i])] : 0;
         else if (isdcl(dc_resp[i])) lsu_unsf[i] <= |dc_miss[i] ? lq_opid[$clog2(lqsz)'(dc_resp[i])] : 0;
         else                        lsu_unsf[i] <= 0;
-        if (isdcl(ck_resp[i])) lsu_unsf[mwd + i] <= ck_rslt[i] != 2'b11 ? lq_opid[$clog2(lqsz)'(ck_resp[i])] : 0;
-        else                   lsu_unsf[mwd + i] <= 0;
+        if      (isdcs(pmp_resp[i])) lsu_unsf[mwd+i] <= pmp_fail ? sq_opid[$clog2(sqsz)'(pmp_resp[i])] : 0;
+        else if (isdcl(pmp_resp[i])) lsu_unsf[mwd+i] <= pmp_fail ? lq_opid[$clog2(lqsz)'(pmp_resp[i])] : 0;
+        else                         lsu_unsf[mwd+i] <= 0;
+        if (isdcl(ck_resp[i])) lsu_unsf[2*mwd+i] <= ck_rslt[i] != 2'b11 ? lq_opid[$clog2(lqsz)'(ck_resp[i])] : 0;
+        else                   lsu_unsf[2*mwd+i] <= 0;
     end
 
     /* arbitrate execution results */
@@ -790,6 +822,9 @@ module lsu #(
             /* do forwarding, and store can only use channel 0 */
             if (isdcs(dc_resp[0]) & ~|dc_miss[0] & sq_raddr[i] == $clog2(sqsz)'(dc_resp[0]))
                 eq_wvalue[eq_in].prdv = sq_rdat_ext;
+            if (isdcs(pmp_resp[0]) & pmp_fail[0] & sq_raddr[i] == $clog2(sqsz)'(pmp_resp[0]))
+                eq_wvalue[eq_in].cause = {2'b10, 6'd7};
+            if (sq_acft[sq_raddr[i]]) eq_wvalue[eq_in].cause = {2'b10, 6'd7};
             if (sq_pgft[sq_raddr[i]]) eq_wvalue[eq_in].cause = {2'b10, sq_csr[sq_raddr[i]] ? 6'd2 : 6'd15};
             if (sq_misa[sq_raddr[i]]) eq_wvalue[eq_in].cause = {2'b10, 6'd6};
             eq_in++;
@@ -807,7 +842,11 @@ module lsu #(
             for (int j = 0; j < mwd; j++)
                 if (isdcl(ck_resp[j]) & lq_raddr[i] == $clog2(lqsz)'(ck_resp[j]))
                     eq_wvalue[eq_in].specul = ck_rslt[j] == 2'b10;
-            if (lq_fail[lq_raddr[i]])              eq_wvalue[eq_in].retry  = 1;
+            for (int j = 0; j < mwd; j++)
+                if (isdcl(pmp_resp[j]) & pmp_fail[j] & lq_raddr[i] == $clog2(lqsz)'(pmp_resp[j]))
+                    eq_wvalue[eq_in].cause = {2'b10, 6'd5};
+            if (lq_fail[lq_raddr[i]]) eq_wvalue[eq_in].retry  = 1;
+            if (lq_acft[lq_raddr[i]]) eq_wvalue[eq_in].cause = {2'b10, 6'd5};
             if (lq_pgft[lq_raddr[i]]) eq_wvalue[eq_in].cause = {2'b10, lq_rsrv[lq_raddr[i]][1] ? 6'd15 : 6'd13};
             if (lq_misa[lq_raddr[i]]) eq_wvalue[eq_in].cause = {2'b10, 6'd4};
             eq_in++;

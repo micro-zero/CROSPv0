@@ -20,7 +20,9 @@ module alu #(
     input  reg_bundle_t [iwd-1:0] req,   // requests after register read
     input  logic        [ewd-1:0] claim, // claim signals (fetch execution results)
     output exe_bundle_t [ewd-1:0] resp,  // execution results
-    input  logic [1:0] level             // privilege level
+    input  logic [1:0] level,            // privilege level
+    input  logic       tvm,              // trap virtual memory
+    input  logic       tsr               // trap SRET
 );
     /* order calculation function */
     function logic succeed(input logic [15:0] opid);
@@ -49,6 +51,7 @@ module alu #(
         /* aliases and results of g-th common execution unit */
         reg_bundle_t in; // g-th input after register read
         alu_funct_t f;   // ALU functional code
+        logic inv;       // invalid instruction
         always_comb in = req_alu[g].opid[15] ? req_alu[g] : 0;
         always_comb f = $bits(alu_funct_t)'(in.funct);
 
@@ -87,6 +90,7 @@ module alu #(
         end
         always_comb jpc = (in.base[64] ? req_alu[g].prs[0] : in.base[63:0]) + in.offset;
         always_comb jump = f.j | |f.bmask & f.bneg != |(f.bmask & bflag);
+        always_comb inv = f.inv | f.sfence & tvm | f.eret == 3'b101 & tsr;
         always_comb begin
             result[g]        = 0;
             result[g].opid   = in.opid;
@@ -100,7 +104,7 @@ module alu #(
             result[g].branch = in.branch;
             result[g].jal    = in.jal;
             result[g].jalr   = in.jalr;
-            result[g].eret   = f.eret;
+            result[g].eret   = inv ? 0 : f.eret;
             result[g].flush  = f.fencei | f.sfence;
             result[g].misp   = (f.j | |f.bmask) & in.pnpc != result[g].npc;
             result[g].prda   = in.prda[1];
@@ -108,9 +112,14 @@ module alu #(
             /* some exception caused by instructions */
             if (f.ecall)        result[g].cause = {2'b10, 4'd2, level};
             if (f.ebreak)       result[g].cause = {2'b10, 6'd3};
-            if (f.inv)          result[g].cause = {2'b10, 6'd2};
             if (f.interrupt[6]) result[g].cause = {2'b11, f.interrupt[5:0]};
-            if (f.inv)    result[g].tval  = 64'(in.ir);
+            if (inv)            result[g].cause = {2'b10, 6'd2};
+            if (inv)            result[g].tval  = 64'(in.ir);
+            if (f.af[0] | f.af[1] & &in.ir[1:0]) begin
+                result[g].prda  = 0;
+                result[g].cause = {2'b10, 6'd1};
+                result[g].tval  = 64'(in.base) + (f.af[0] ? 0 : 2);
+            end
             if (f.pf[0] | f.pf[1] & &in.ir[1:0]) begin
                 result[g].prda  = 0;
                 result[g].cause = {2'b10, 6'd12};

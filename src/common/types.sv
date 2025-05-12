@@ -21,7 +21,7 @@ typedef struct packed {
     logic [63:0] pc, pnpc; // program counter and predicted next PC
     logic [31:0] ir;       // instruction before uncompression
     logic [1:0] pat;       // branch pattern
-    logic [1:0] pf;        // encountering instruction page fault
+    logic [1:0] af, pf;    // encountering instruction access/page fault
     logic call, ret;       // call/ret instruction (to update RAS)
     logic branch, jal, jalr; // jump/branch types (for debugging)
 } fet_bundle_t;
@@ -31,7 +31,7 @@ typedef struct packed {
     logic [15:0] opid;       // instruction operation ID (MSB is valid bit)
     logic  [7:0] brid;       // branch ID (MSB is valid bit)
     logic  [7:0] ldid, stid; // load ID and store ID (MSB is valid bit)
-    logic [1:0] pf;          // instruction page fault (per 16-bit)
+    logic [1:0] af, pf;      // instruction access/page fault (per 16-bit)
     logic call, ret;         // call/return instruction
     logic [63:0] pc, pnpc;   // program counter and predicted next PC
     logic [31:0] ir;         // instruction
@@ -186,9 +186,9 @@ typedef struct packed {
 typedef struct packed {
     logic iword, isign;    // 32-bit integer operation mode
     logic [2:0] bmask;     // functional code and branch mask
-    logic [2:0] eret;      // exception return bits (MSB is valid bit, the next is interrupt bit)
+    logic [2:0] eret;      // exception return bits (MSB is valid bit, the next is return level)
     logic bneg, j;         // branch negation and jump bit
-    logic [1:0] pf;        // page fault HINT instruction
+    logic [1:0] af, pf;    // access/page fault HINT instruction
     logic [6:0] interrupt; // pending interrupt
     logic max, min, fencei, sfence, ecall, ebreak, wfi, inv;
     logic iand, ior, sra, srl, ixor, sltu, slt, sll, sub, add;
