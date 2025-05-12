@@ -470,10 +470,29 @@ module crosplite #(
         core_commit_valids_i = 0;
         core_commit_uops_i = 0;
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
-            core_commit_valids_i[i] = 1;
+            core_commit_valids_i[i] = com_bundle[i].lsu_funct.store | com_bundle[i].lsu_funct.load;
             core_commit_uops_i[i] = $bits(lsu_funct_t)'(com_bundle[i].lsu_funct);
         end
     end
+    lsu_funct_t dcuop;
+    always_ff @(posedge clk) if (dmem_req_o.dreq_valid) dcuop <= dmem_req_o.uop;
+    always_comb dc_rqst = dmem_req_o.dreq_valid;
+    always_comb dc_addr = dmem_req_o.addr;
+    always_comb if (dmem_req_o.uop.store) case (dmem_req_o.uop.bits[1:0])
+        2'b00: dc_strb = 'h1;
+        2'b01: dc_strb = 'h3;
+        2'b10: dc_strb = 'hf;
+        2'b11: dc_strb = 'hff;
+    endcase else dc_strb = 0;
+    always_comb dc_wdat = dmem_req_o.data;
+    always_comb begin
+        dmem_resp_i = 0;
+        dmem_resp_i.dresp_valid = dc_resp;
+        dmem_resp_i.uop = dcuop;
+        dmem_resp_i.data = dc_rdat;
+    end
+    // always_comb dmem_nack_i = |dc_miss;
+    always_comb dmem_nack_i = 0;
     LSU lsu_inst(
         .clk(clk),
         .rst(~rst),
