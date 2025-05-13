@@ -95,7 +95,6 @@ module sdc #(
     always_comb m_coh_addr = 64'(base) + 64'($clog2(maxb)'(index)) * blk;
     always_comb m_coh_trsc = 1; // own GetV
     always_ff @(posedge clk) if (rst) {req, own, snt} <= 0; else begin
-        /* todo: can read and write channel work simutaneously? */
         if (m_axi_rvalid & m_axi_rready & m_axi_rlast) req <= 0;
         if (m_axi_bvalid & m_axi_bready)               req <= 0;
         if (arvalid & ~|req) begin

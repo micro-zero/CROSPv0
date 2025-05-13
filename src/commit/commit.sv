@@ -44,8 +44,10 @@ module commit #(
     output logic            [15:0] top_opid, // top operation ID
     output logic            [15:0] saf_opid, // first safe operation ID
     /* fences */
-    output logic fencei,           // fence.i committed
-    output logic sfence            // sfence.vma committed
+    output logic        fencei, // fence.i committed
+    output logic  [2:0] sfence, // sfence.vma committed, [2]: rs2=x0, [1]: rs1=x0, [0]: sfence
+    output logic [15:0] sfasid, // address space identifier of sfence.vma
+    output logic [63:0] sfvadd  // virtual address of sfence.vma
 );
     /* pipeline redirect and rollback */
     function logic succeed(input logic [15:0] opid);
@@ -147,6 +149,8 @@ module commit #(
         exe_wvalue[i].cause  = exe_bundle[i].cause;
         exe_wvalue[i].eret   = exe_bundle[i].eret;
         exe_wvalue[i].fflags = exe_bundle[i].fflags;
+        exe_wvalue[i].fencei = exe_bundle[i].fencei;
+        exe_wvalue[i].sfence = exe_bundle[i].sfence;
         exe_wvalue[i].flush  = exe_bundle[i].flush;
         exe_wvalue[i].retry  = exe_bundle[i].retry;
         exe_wvalue[i].mem    = exe_bundle[i].mem;
@@ -177,17 +181,30 @@ module commit #(
     /* write-back signal of each stage */
     logic [15:0] eid_last, eid_new;   // operation ID of the nearest exception
     logic [63:0] tval_last, tval_new; // trap value of the nearest exception
+    logic [15:0] sid_last, sid_new;   // operation ID of the nearest sfence.vma
+    logic [15:0] asid_last, asid_new; // ASID of the nearest sfence.vma
+    logic [63:0] vadd_last, vadd_new; // virtual address of the nearest sfence.vma
     always_comb begin
-        /* store earliest trap value in a single register to save space of ROB */
+        /* store earliest trap/sfence value in a single register to save space of ROB */
+        /* todo: if using data in ROB, this will be unnecessary */
         eid_new = eid_last;
+        sid_new = sid_last;
         tval_new = tval_last;
-        for (int i = 0; i < iwd; i++)
-            if (exe_wena[i] & exe_bundle[i].cause[7] & ~rollback) // exception happens
+        asid_new = asid_last;
+        vadd_new = vadd_last;
+        for (int i = 0; i < iwd; i++) begin
+            if (exe_wena[i] & exe_bundle[i].sfence[0] & ~exe_last.sfence[0]) // sfence.vma executed
+                if (~sid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(sid_new) - rob_front) begin
+                    sid_new = exe_bundle[i].opid;
+                    asid_new = exe_bundle[i].tval[15:0];
+                    vadd_new = exe_bundle[i].prdv;
+                end
+            if (exe_wena[i] & exe_bundle[i].cause[7] & ~exe_last.cause[7]) // exception happens
                 if (~eid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(eid_new) - rob_front) begin
                     eid_new = exe_bundle[i].opid;
                     tval_new = exe_bundle[i].tval;
                 end
-        for (int i = 0; i < cwd; i++) if (exe_last.cause[7] & ~rollback) eid_new = 0;
+        end
     end
     always_comb begin
         saf_fwd = saf;
@@ -214,7 +231,10 @@ module commit #(
         end
     end
     always_ff @(posedge clk) if (rst | exception | succeed(eid_new))  eid_last <= 0; else  eid_last <=  eid_new;
-    always_ff @(posedge clk) if (rst | exception | succeed(eid_new)) tval_last <= 0; else tval_last <= tval_new;
+    always_ff @(posedge clk) if (rst |             succeed(eid_new)) tval_last <= 0; else tval_last <= tval_new;
+    always_ff @(posedge clk) if (rst | sfence[0] | succeed(sid_new))  sid_last <= 0; else  sid_last <=  sid_new;
+    always_ff @(posedge clk) if (rst |             succeed(sid_new)) asid_last <= 0; else asid_last <= asid_new;
+    always_ff @(posedge clk) if (rst |             succeed(sid_new)) vadd_last <= 0; else vadd_last <= vadd_new;
 
     /* ROB commit */
     /* front `cwd` entries consist of `dec_rvalue`, `ren_rvalue`, `exe_rvalue` */
@@ -331,14 +351,10 @@ module commit #(
         for (int i = 0; i < cwd; i++)
             if (com_bundle[i].opid[15]) fflags |= exe_rvalue[i].fflags;
     end
-    always_comb begin
-        /* todo: better to be passed from decoder and do precise sfence.vma in L1 memory from LSU */
-        fencei = 0; sfence = 0;
-        for (int i = 0; i < cwd; i++) begin
-            if (com_bundle[i].opid[15] & dec_rvalue[i].ir == 32'h0000100f) fencei = 1;
-            if (com_bundle[i].opid[15] & (dec_rvalue[i].ir & 32'hfe007fff) == 32'h12000073) sfence = 1;
-        end
-    end
+    always_comb fencei = exe_last.flush & exe_last.fencei;
+    always_comb sfence = exe_last.flush & exe_last.sfence[0] ? exe_last.sfence : 0;
+    always_comb sfasid = asid_last;
+    always_comb sfvadd = vadd_last;
     always_comb begin
         rob_out = 0; // release ROB entry after commiting
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) rob_out++;

@@ -219,12 +219,12 @@ module vcore #(
     /* address and write data stored with request */
     always_comb begin
         st_offset = 0;
-        for (int i = 63; i >= 0; i--) if (inst.dc_strb[i]) st_offset = 6'(i);
+        for (int i = 63; i >= 0; i--) if (inst.mmu_inst.s_dc_strb[i]) st_offset = 6'(i);
     end
     always_ff @(posedge clk) if (inst.dc_rqst[7:4] == 4'b1111) begin
         st_addr[4'(inst.dc_rqst)] <= inst.dc_addr;
         st_data[4'(inst.dc_rqst)] <= inst.dc_wdat >> 8 * st_offset;
-        st_size[4'(inst.dc_rqst)] <= $countones(inst.dc_strb);
+        st_size[4'(inst.dc_rqst)] <= $countones(inst.mmu_inst.s_dc_strb);
     end
     /* extract CSR info after decode stage */
     always_ff @(posedge clk) for (int i = 0; i < dwd; i++) if (inst.dec_inst.decode[i]) begin

@@ -88,7 +88,6 @@ module plic #(
             else if (waddr >= 28'hc200000)
                 if      (waddr[3:0] == 4'h0) threshold[$clog2(ctxt)'(waddr >> 12)] <= wdata;
                 else if (waddr[3:0] == 4'h4) // completion
-                    /* todo: should PLIC do something here like atomic maintenance? */
                     ;
         end
         if (s_axi_rvalid  & s_axi_rready)  {s_axi_rvalid, s_axi_arready}               <= 1; // R  handshake

@@ -92,7 +92,10 @@ module crospaxi #(
 );
     /* MMU */
     logic [255:0] fl_data, fl_inst;
-    logic fnci, fncv;
+    logic        fnci;
+    logic  [2:0] fncv;
+    logic [15:0] fncv_asid;
+    logic [63:0] fncv_vadd;
     logic  [7:0] it_rqst; logic  [7:0] dt_rqst;
     logic [63:0] it_vadd; logic [63:0] dt_vadd;
     logic [63:0] it_satp; logic [63:0] dt_satp;
@@ -101,13 +104,14 @@ module crospaxi #(
     logic [63:0] it_padd; logic [63:0] dt_padd;
     logic  [7:0] dc_rqst; logic  [7:0] ic_rqst;
     logic [63:0] dc_addr; logic [63:0] ic_addr;
-    logic  [7:0] dc_strb;
+    logic  [2:0] dc_bits;
     logic [63:0] dc_wdat;
     logic  [7:0] dc_resp; logic  [7:0] ic_resp;
     logic [63:0] dc_rdat; logic [63:0] ic_rdat;
     logic  [7:0] dc_miss;
     mmu #(.init(init)) mmu_inst(
-        .clk(clk), .rst(rst), .fnci(fnci), .fncv(fncv), .flush(fl_inst | fl_data),
+        .clk(clk), .rst(rst), .fnci(fnci), .flush(fl_inst | fl_data),
+        .fncv(fncv), .fncv_asid(fncv_asid), .fncv_vadd(fncv_vadd),
         .s_dt_rqst(dt_rqst), .s_it_rqst(it_rqst),
         .s_dt_vadd(dt_vadd), .s_it_vadd(it_vadd),
         .s_dt_satp(dt_satp), .s_it_satp(it_satp),
@@ -116,7 +120,7 @@ module crospaxi #(
         .s_dt_padd(dt_padd), .s_it_padd(it_padd),
         .s_dc_rqst(dc_rqst), .s_ic_rqst(ic_rqst),
         .s_dc_addr(dc_addr), .s_ic_addr(ic_addr),
-        .s_dc_strb(dc_strb),
+        .s_dc_bits(dc_bits),
         .s_dc_wdat(dc_wdat),
         .s_dc_resp(dc_resp), .s_ic_resp(ic_resp),
         .s_dc_rdat(dc_rdat), .s_ic_rdat(ic_rdat),
@@ -234,7 +238,7 @@ module crospaxi #(
     commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
             csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, frd, fflags,
-            lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv);
+            lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv, fncv_asid, fncv_vadd);
     alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level,
             csr_inst.mstatus[20] & csr_inst.level == 2'b01, csr_inst.mstatus[22] & csr_inst.level == 2'b01);
@@ -251,7 +255,7 @@ module crospaxi #(
             csr_inst.mstatus[17] ? csr_inst.mstatus[12:11] : csr_inst.level,
             pmpcfg, pmpaddr, fl_data, fl_inst | fl_data,
             dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
-            dc_rqst, dc_addr, dc_strb, dc_wdat, dc_resp, dc_miss, dc_rdat);
+            dc_rqst, dc_addr, dc_bits, dc_wdat, dc_resp, dc_miss, dc_rdat);
 
     /* debug ports */
     always_comb dbg_cycle = csr_inst.mcycle;

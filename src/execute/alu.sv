@@ -58,8 +58,8 @@ module alu #(
         /* assign oprands */
         logic [63:0] a, b;
         always_comb begin
-            a = in.a[64] ? req_alu[g].prs[0] : in.a[63:0]; // choose from registers or immediates
-            b = in.b[64] ? req_alu[g].prs[1] : in.b[63:0];
+            a = in.a[64] ? in.prs[0] : in.a[63:0]; // choose from registers or immediates
+            b = in.b[64] ? in.prs[1] : in.b[63:0];
             if (f.iword) a = {{32{a[31] & f.isign}}, a[31:0]}; // instructions with W suffix
             if (f.iword) b = {{32{b[31] & f.isign}}, b[31:0]};
             if (f.iword & (f.sll | f.srl | f.sra)) b[5] = 0;
@@ -88,7 +88,7 @@ module alu #(
                   {64{f.max}}  & ((f.isign ? lt : ltu) ? b : a);
             if (f.iword) res[63:0] = {{32{res[31]}}, res[31:0]};
         end
-        always_comb jpc = (in.base[64] ? req_alu[g].prs[0] : in.base[63:0]) + in.offset;
+        always_comb jpc = (in.base[64] ? in.prs[0] : in.base[63:0]) + in.offset;
         always_comb jump = f.j | |f.bmask & f.bneg != |(f.bmask & bflag);
         always_comb inv = f.inv | f.sfence & tvm | f.eret == 3'b101 & tsr;
         always_comb begin
@@ -105,10 +105,16 @@ module alu #(
             result[g].jal    = in.jal;
             result[g].jalr   = in.jalr;
             result[g].eret   = inv ? 0 : f.eret;
+            result[g].fencei = f.fencei;
+            result[g].sfence = f.sfence ? {in.b[4:0] == 0, in.a[4:0] == 0, 1'b1} : 0;
             result[g].flush  = f.fencei | f.sfence;
             result[g].misp   = (f.j | |f.bmask) & in.pnpc != result[g].npc;
             result[g].prda   = in.prda[1];
             result[g].prdv   = res;
+            /* for oprands of SFENCE.VMA, prdv field is vaddr, tval field is asid,
+               and the MSB indicates whether source registers are zero i.e. x0 */
+            if (f.sfence) result[g].prdv = in.prs[0];
+            if (f.sfence) result[g].tval = in.prs[1];
             /* some exception caused by instructions */
             if (f.ecall)        result[g].cause = {2'b10, 4'd2, level};
             if (f.ebreak)       result[g].cause = {2'b10, 6'd3};

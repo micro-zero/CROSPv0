@@ -51,7 +51,7 @@ module lsu #(
     /* DCACHE interface */
     output logic [mwd-1:0] [7:0] dc_rqst, // DCACHE request ID
     output logic [mwd-1:0][63:0] dc_addr, // DCACHE request address
-    output logic [mwd-1:0] [7:0] dc_strb, // DCACHE write strobe
+    output logic [mwd-1:0] [2:0] dc_bits, // DCACHE functional bits ([2]: wena, [1:0]: width)
     output logic [mwd-1:0][63:0] dc_wdat, // DCACHE write data
     input  logic [mwd-1:0] [7:0] dc_resp, // DCACHE response
     input  logic [mwd-1:0] [7:0] dc_miss, // DCACHE miss signal
@@ -369,10 +369,8 @@ module lsu #(
         sq_bits[sq_waddr[i]] <= func_store[i].bits;
         sq_wdat[sq_waddr[i]] <= req_store[i].prs[1] << (8'(sq_vadd_wvalue[i][2:0]) << 3);
         /* CSR instructions make use of existing SQ entries */
-        if (func_store[i].csr) begin
-            sq_strb[sq_waddr[i]] <= 8'(func_store[i].bits);
+        if (func_store[i].csr)
             sq_wdat[sq_waddr[i]] <= req_store[i].a[64] ? req_store[i].prs[0] : req_store[i].a[63:0];
-        end
     end
     always_ff @(posedge clk) begin
         sq_padd <= sq_padd_fwd; // not forward CSR address
@@ -717,7 +715,7 @@ module lsu #(
         csr_rqst = 0; csr_func = 0; csr_addr = 0; csr_wdat = 0;
         if (sq_csr[sq_front] & sq_avalid[sq_front] & sq_opid[sq_front] == top_opid) begin
             csr_rqst = ~sq_accsd[sq_front];
-            csr_func = sq_strb[sq_front][2:0];
+            csr_func = sq_bits[sq_front];
             csr_addr = sq_padd[sq_front][11:0];
             csr_wdat = sq_wdat[sq_front];
         end
@@ -739,11 +737,11 @@ module lsu #(
         end
     end
     always_comb begin
-        dc_rqst = 0; dc_addr = 0; dc_strb = 0; dc_wdat = 0; dc_num = 0;
+        dc_rqst = 0; dc_addr = 0; dc_bits = 0; dc_wdat = 0; dc_num = 0;
         if (sq_pos_accsd[$clog2(sqsz)]) begin // SQ entry to access
             dc_rqst[0] = dcs[$clog2(sqsz)'(sq_pos_accsd)];
             dc_addr[0] = sq_padd[$clog2(sqsz)'(sq_pos_accsd)];
-            dc_strb[0] = sq_strb[$clog2(sqsz)'(sq_pos_accsd)];
+            dc_bits[0] = {1'b1, sq_bits[$clog2(sqsz)'(sq_pos_accsd)][1:0]};
             dc_wdat[0] = sq_wdat[$clog2(sqsz)'(sq_pos_accsd)];
             for (int i = 0; i < mwd; i++) // do DTLB forwarding
                 if (isdts(dt_resp[i]) & $clog2(sqsz)'(dt_resp[i]) == $clog2(sqsz)'(sq_pos_accsd))
@@ -754,7 +752,7 @@ module lsu #(
             if (dc_num >= mwd) break;
             dc_rqst[dc_num] = dcl[$clog2(lqsz)'(lq_pos_accsd[i])];
             dc_addr[dc_num] = lq_padd[$clog2(lqsz)'(lq_pos_accsd[i])];
-            dc_strb[dc_num] = 0;
+            dc_bits[dc_num] = {1'b0, lq_bits[$clog2(lqsz)'(lq_pos_accsd[i])][1:0]};
             dc_wdat[dc_num] = 0;
             for (int i = 0; i < mwd; i++) // do DTLB forwarding
                 if (isdtl(dt_resp[i]) & $clog2(lqsz)'(dt_resp[i]) == $clog2(lqsz)'(lq_pos_accsd[i]))

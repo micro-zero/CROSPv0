@@ -694,7 +694,7 @@ inline bits pmp(uint64_t addr, std::map<std::string, bits> csrs)
 inline uint64_t paddr(memory &mem, bits satp, bits vaddr, bits perm, bool adpf)
 {
     uint64_t ppn, vpn[5], offset;
-    int start = -1;
+    int start = -1, finish = 0;
     ppn = satp.range(0, 43);
     offset = vaddr & 0xfffllu;
     if (satp >> 60 == 0) // bare
@@ -711,7 +711,7 @@ inline uint64_t paddr(memory &mem, bits satp, bits vaddr, bits perm, bool adpf)
         start = 3;
     else if (satp >> 60 == 10) // sv57
         start = 4;
-    for (int i = start; i >= 0; i--)
+    for (int i = start; i >= 0 && !finish; i--)
     {
         bits &pte = *(bits *)&mem.ui64((ppn << 12) + (vpn[i] << 3));
         ppn = pte.range(10, 53);
@@ -735,8 +735,13 @@ inline uint64_t paddr(memory &mem, bits satp, bits vaddr, bits perm, bool adpf)
                 return -1;
             for (int j = 0; j < i; j++)
                 ppn |= vpn[j] << (j * 9); // super page
-            break;
+            finish = 1;
         }
+        if (pte[63])                         // NAPOT bit
+            if (pte.range(10, 13) == 0b1000) // 64-KiB
+                ppn = bits(ppn).write(0, 3, vpn[0] & 0b1111);
+            else
+                return -1;
     }
     return (ppn << 12) | offset;
 }

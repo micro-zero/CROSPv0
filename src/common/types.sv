@@ -132,6 +132,8 @@ typedef struct packed {
     logic specul;           // speculative mark
     logic misp;             // misprediction of BRANCH and JALR instructions
     logic mem, csr;         // memory/CSR change
+    logic fencei;           // fence.i instruction
+    logic [2:0] sfence;     // sfence.vma instruction
     logic flush, retry;     // force pipeline flush and retry
     logic branch, jal, jalr;
 } exe_bundle_t;
@@ -180,6 +182,8 @@ typedef struct packed {
     logic [2:0] eret;   // exception return (MSB is return bit, `eret[1:0]` is privilege level)
     logic [4:0] fflags; // floating point flags
     logic mem, csr;     // memory/CSR change
+    logic fencei;       // fence.i instruction
+    logic [2:0] sfence; // sfence.vma instruction
     logic flush, retry; // force pipeline flush
 } rob_exe_t;
 

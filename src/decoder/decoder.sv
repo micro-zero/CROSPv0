@@ -252,28 +252,30 @@ module decoder #(
 
         /* set oprands */
         always_comb
-            if (fpu_funct[0].fcvtfi | fpu_funct[0].fmvfx)                                   // INT rs1
-                a[0] = {1'd1, 59'd0, ir[19:15]};
+            if (fpu_funct[0].fcvtfi | fpu_funct[0].fmvfx | alu_funct[0].sfence)             // INT rs1
+                a[0] = {1'b1, 59'd0, ir[19:15]};
             else a[0] = {~(op[`SYSTEM] & ir[14]), 59'd0, ir[19:15]} & {65{                  // INT rs1
                         op[`LOAD] | op[`LOAD_FP] | op[`OP_IMM] | op[`OP_IMM_32] | op[`STORE]    | op[`STORE_FP] |
                         op[`OP]   | op[`OP_32]   | op[`BRANCH] | op[`AMO]       | op[`SYSTEM]}} |
-                    {1'd1, 59'd1, ir[19:15]} & {{65{                                        // FP rs1
+                    {1'b1, 59'd1, ir[19:15]} & {{65{                                        // FP rs1
                         op[`MADD] | op[`MSUB] | op[`NMSUB] | op[`NMADD] | op[`OP_FP]}}} |
-                    {1'd0, fet_bundle[g].pc} & {65{op[`JALR] | op[`JAL] | op[`AUIPC]}};     // PC
-        always_comb a[1] = {1'd1, 59'd2, 5'd0} & {65{~(op[`AMO] & ir[31:27] == 5'b00001)}}; // TEMP reg
-        always_comb a[2] = {1'd1, 59'd0, ir[19:15]} & {65{op[`AMO]}};                       // INT rs1
+                    {1'b0, fet_bundle[g].pc} & {65{op[`JALR] | op[`JAL] | op[`AUIPC]}};     // PC
+        always_comb a[1] = {1'b1, 59'd2, 5'd0} & {65{~(op[`AMO] & ir[31:27] == 5'b00001)}}; // TEMP reg
+        always_comb a[2] = {1'b1, 59'd0, ir[19:15]} & {65{op[`AMO]}};                       // INT rs1
         always_comb
             if (fpu_funct[0].fcvtif | fpu_funct[0].fcvtfi)
                 b[0] = {60'd0, ir[24:20]}; // INT/FP conversion functional code
+            else if (alu_funct[0].sfence)
+                b[0] = {1'b1, 59'd0, ir[24:20]}; // INT rs2
             else b[0] =
-                {1'd1, 59'd0, ir[24:20]} & {65{op[`OP]   | op[`OP_32] | op[`OP_FP] | op[`BRANCH]}} | // INT rs2
-                {1'd1, 59'd1, ir[24:20]} & {65{op[`MADD] | op[`MSUB]  | op[`NMSUB] | op[`NMADD] | op[`OP_FP]}} | // FP rs2
-                {1'd0, imm} & {65{op[`SYSTEM]    | op[`MISC_MEM] | op[`LOAD] | op[`LOAD_FP] | op[`OP_IMM] |
+                {1'b1, 59'd0, ir[24:20]} & {65{op[`OP]   | op[`OP_32] | op[`OP_FP] | op[`BRANCH]}} | // INT rs2
+                {1'b1, 59'd1, ir[24:20]} & {65{op[`MADD] | op[`MSUB]  | op[`NMSUB] | op[`NMADD] | op[`OP_FP]}} | // FP rs2
+                {1'b0, imm} & {65{op[`SYSTEM]    | op[`MISC_MEM] | op[`LOAD] | op[`LOAD_FP] | op[`OP_IMM] |
                                   op[`OP_IMM_32] | op[`AUIPC]    | op[`LUI]  | op[`STORE]   | op[`STORE_FP]}} |
                 {62'd0, delta} & {65{op[`JAL] | op[`JALR]}};
-        always_comb b[1] = {1'd1, 59'd0, ir[24:20]} & {65{op[`AMO]}} | // INT rs2
-                           {1'd1, 59'd1, ir[31:27]} & {65{op[`MADD] | op[`MSUB] | op[`NMSUB] | op[`NMADD]}}; // FP rs3
-        always_comb b[2] = {1'd0, imm} & {65{op[`AMO]}};
+        always_comb b[1] = {1'b1, 59'd0, ir[24:20]} & {65{op[`AMO]}} | // INT rs2
+                           {1'b1, 59'd1, ir[31:27]} & {65{op[`MADD] | op[`MSUB] | op[`NMSUB] | op[`NMADD]}}; // FP rs3
+        always_comb b[2] = {1'b0, imm} & {65{op[`AMO]}};
 
         /* generate results */
         always_comb begin

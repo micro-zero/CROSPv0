@@ -12,6 +12,10 @@ module tlb #(
     input  logic         clk,   // clock signal
     input  logic         rst,   // reset signal
     input  logic [255:0] flush, // flush bitmap
+    /* fence interface */
+    input  logic  [2:0] fence, // fence bits [2]: all asid, [1]: all address, [0]: sfence.vma
+    input  logic [15:0] fasid, // fence ASID
+    input  logic [63:0] fvadd, // fence virtual address
     /* slave interface with lower-level TLB or pipeline */
     input  logic [chn-1:0] [7:0] s_rqst, // request ID
     input  logic [chn-1:0][63:0] s_vadd, // virtual address
@@ -44,19 +48,23 @@ module tlb #(
     logic       [way* 8-1:0] tlb_prm[set-1:0]; // access permission of each entry
     logic [set-1:0][way-1:0] tlb_vld;          // TLB flags of each entry
     logic  [$clog2(way)-1:0] tlb_ptr[set-1:0]; // pointers in FIFO replacement policy
+    /* R/W indices */
+    logic [chn-1:0][$clog2(set)-1:0] rindex;
+    logic          [$clog2(set)-1:0] windex;
+    logic                      [2:0] rfence; // fence address has been read
     /* requested set */
     logic [chn-1:0]  [way-1:0][51:0] set_dat;
     logic [chn-1:0]  [way-1:0][67:0] set_tag;
     logic [chn-1:0]  [way-1:0] [7:0] set_prm;
     logic [chn-1:0]  [way-1:0]       set_vld;
-    logic [chn-1:0]  [way-1:0]       set_hit;
+    logic [chn-1:0]  [way-1:0]       set_hit, set_eql;
     logic [chn-1:0][$clog2(way)  :0] set_hitpos;
     logic [chn-1:0][$clog2(way)-1:0] set_ptr;
     /* MSHR (single) */
     logic                   miss, fill;
     logic             [7:0] mis_req;
     logic            [63:0] mis_add, mis_csr;
-    logic   [way-1:0]       mis_vld, fil_vld;
+    logic   [way-1:0]       mis_vld, fil_vld, fnc_vld;
     logic   [way-1:0][51:0] mis_dat, fil_dat;
     logic   [way-1:0][67:0] mis_tag, fil_tag;
     logic   [way-1:0] [7:0] mis_prm, fil_prm;
@@ -73,25 +81,37 @@ module tlb #(
         fil_dat[mis_ptr] = m_padd[63:12];
         fil_prm[mis_ptr] = m_perm;
     end
+    always_comb for (int i = 0; i < chn; i++) for (int j = 0; j < way; j++) set_eql[i][j] =
+        (set_tag[i][j][67:52] == (rfence[0] ? fasid        : b_satp[i][59:44]) | rfence[0] & rfence[2]) &
+         set_tag[i][j][51:0]  == (rfence[0] ? fvadd[63:12] : b_vadd[i][63:12]);
+    always_comb begin
+        fnc_vld = set_vld[0];
+        for (int i = 0; i < way; i++) if (set_eql[0][i]) fnc_vld[i] = 0; // clear equal entries
+    end
     always_comb for (int i = 0; i < chn; i++) begin
-        for (int j = 0; j < way; j++)
-            set_hit[i][j] = set_vld[i][j] & set_tag[i][j] == {b_satp[i][59:44], b_vadd[i][63:12]};
+        for (int j = 0; j < way; j++) set_hit[i][j] = set_vld[i][j] & set_eql[i][j];
         set_hit[i][0] |= ~|b_satp[i][63:60]; // hit when bare
     end
-    always_ff @(posedge clk) if (rst) tlb_vld <= 0;
+    always_comb for (int i = 0; i < chn; i++)
+        rindex[i]      = $clog2(set)'( fence[0] ? fvadd[63:12] : s_vadd[i][63:12]);
+    always_comb windex = $clog2(set)'(rfence[0] ? fvadd[63:12] : m_vadd   [63:12]);
+    always_ff @(posedge clk) if (rst) rfence <= 0; else rfence <= fence;
+    always_ff @(posedge clk) if (rst | rfence[0] & rfence[1]) tlb_vld <= 0;
+        else if (rfence[0]) // clear entry of flushed address
+            tlb_vld[windex] <= fnc_vld;
         else if (|m_resp & |m_perm) begin // TLB fill
-            tlb_vld[$clog2(set)'(m_vadd[63:12])] <= fil_vld;
-            tlb_dat[$clog2(set)'(m_vadd[63:12])] <= fil_dat;
-            tlb_tag[$clog2(set)'(m_vadd[63:12])] <= fil_tag;
-            tlb_prm[$clog2(set)'(m_vadd[63:12])] <= fil_prm;
-            tlb_ptr[$clog2(set)'(m_vadd[63:12])] <= fil_ptr + 1;
+            tlb_vld[windex] <= fil_vld;
+            tlb_dat[windex] <= fil_dat;
+            tlb_tag[windex] <= fil_tag;
+            tlb_prm[windex] <= fil_prm;
+            tlb_ptr[windex] <= fil_ptr + 1;
         end
     always_ff @(posedge clk) for (int i = 0; i < chn; i++) begin
-        set_dat[i] <= tlb_dat[$clog2(set)'(s_vadd[i][63:12])];
-        set_tag[i] <= tlb_tag[$clog2(set)'(s_vadd[i][63:12])];
-        set_prm[i] <= tlb_prm[$clog2(set)'(s_vadd[i][63:12])];
-        set_ptr[i] <= tlb_ptr[$clog2(set)'(s_vadd[i][63:12])];
-        set_vld[i] <= tlb_vld[$clog2(set)'(s_vadd[i][63:12])];
+        set_dat[i] <= tlb_dat[rindex[i]];
+        set_tag[i] <= tlb_tag[rindex[i]];
+        set_prm[i] <= tlb_prm[rindex[i]];
+        set_ptr[i] <= tlb_ptr[rindex[i]];
+        set_vld[i] <= tlb_vld[rindex[i]];
     end
     always_ff @(posedge clk) if (rst) fill <= 0; // also includes page fault
         else if (|m_resp) fill <= 1; else fill <= 0;

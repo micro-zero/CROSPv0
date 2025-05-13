@@ -83,7 +83,6 @@ ETH_SV = \
 
 # Scripts
 define RVTESTS_SCRIPT
-	echo "ISA tests errors:"
 	pids=()
 	names=()
 	err=0
@@ -103,7 +102,7 @@ define RVTESTS_SCRIPT
 		fi
 	done
 	if [ $$err -eq 0 ]; then
-		echo "[Info] All tests exited with 0"
+		echo "[Info] All ISA tests exited with 0"
 	fi
 	pids=()
 	names=()
@@ -133,7 +132,7 @@ define HEXTESTS_SCRIPT
 		fi
 	done
 	if [ $$err -eq 0 ]; then
-		echo "[Info] All tests exited with 0"
+		echo "[Info] All HEX tests exited with 0"
 	fi
 endef
 export RVTESTS_SCRIPT

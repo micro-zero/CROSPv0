@@ -9,9 +9,11 @@ module mmu #(
 )(
     input  logic         clk,
     input  logic         rst,
-    input  logic         fnci,  // fence.i committed
-    input  logic         fncv,  // sfence.vma committed
-    input  logic [255:0] flush, // flush bitmap
+    input  logic         fnci,      // fence.i committed
+    input  logic   [2:0] fncv,      // sfence.vma committed
+    input  logic  [15:0] fncv_asid, // sfence.vma ASID
+    input  logic  [63:0] fncv_vadd, // sfence.vma virtual address
+    input  logic [255:0] flush,     // flush bitmap
     /* ITLB interface */
     input  logic  [7:0] s_it_rqst, // instruction TLB request ID
     input  logic [63:0] s_it_vadd, // instruction TLB virtual address
@@ -34,7 +36,7 @@ module mmu #(
     /* DCACHE interface */
     input  logic  [7:0] s_dc_rqst, // data cache request ID
     input  logic [63:0] s_dc_addr, // data cache physical address
-    input  logic  [7:0] s_dc_strb, // data cache write strobe
+    input  logic  [2:0] s_dc_bits, // data cache functional bits ([2]: R/W [1:0]: width)
     input  logic [63:0] s_dc_wdat, // data cache write data
     output logic  [7:0] s_dc_resp, // data cache response ID
     output logic  [7:0] s_dc_miss, // data cache miss signal
@@ -116,7 +118,8 @@ module mmu #(
     logic  [7:0] it_perm_m;
     logic [63:0] it_padd_m;
     tlb #(.init(init), .chn(1), .set(2), .way(8)) itlb (
-        .clk(clk), .rst(rst | fncv), .flush(flush),
+        .clk(clk), .rst(rst), .flush(flush),
+        .fence(fncv), .fasid(fncv_asid), .fvadd(fncv_vadd),
         .s_rqst(s_it_rqst), .m_rqst(it_rqst_m),
         .s_vadd(s_it_vadd), .m_vadd(it_vadd_m),
         .s_satp(s_it_satp), .m_satp(it_satp_m),
@@ -133,7 +136,8 @@ module mmu #(
     logic  [7:0] dt_perm_m;
     logic [63:0] dt_padd_m;
     tlb #(.init(init), .chn(1), .set(2), .way(8)) dtlb (
-        .clk(clk), .rst(rst | fncv), .flush(flush),
+        .clk(clk), .rst(rst), .flush(flush),
+        .fence(fncv), .fasid(fncv_asid), .fvadd(fncv_vadd),
         .s_rqst(s_dt_rqst), .m_rqst(dt_rqst_m),
         .s_vadd(s_dt_vadd), .m_vadd(dt_vadd_m),
         .s_satp(s_dt_satp), .m_satp(dt_satp_m),
@@ -153,7 +157,8 @@ module mmu #(
     logic       [7:0] st_rqst_b, st_rqst_f;
     logic      [63:0] st_vadd_b, st_vadd_f;
     tlb #(.init(init), .chn(2), .set(64), .way(4)) stlb (
-        .clk(clk), .rst(rst | fncv), .flush(flush),
+        .clk(clk), .rst(rst), .flush(flush),
+        .fence(fncv), .fasid(fncv_asid), .fvadd(fncv_vadd),
         .s_rqst({dt_rqst_m, it_rqst_m}), .m_rqst(st_rqst_m),
         .s_vadd({dt_vadd_m, it_vadd_m}), .m_vadd(st_vadd_m),
         .s_satp({dt_satp_m, it_satp_m}), .m_satp(st_satp_m),
@@ -180,6 +185,7 @@ module mmu #(
     logic             dc_ready;             logic             ic_ready;
     logic       [7:0] dc_rqst_b, dc_rqst_f; logic       [7:0] ic_rqst_b, ic_rqst_f;
     logic      [63:0] dc_addr_b, dc_addr_f; logic      [63:0] ic_addr_b, ic_addr_f;
+    logic       [2:0] dc_bits_b, dc_bits_f;
     logic      [63:0] dc_strb_b, dc_strb_f;
     logic [63:0][7:0] dc_wdat_b, dc_wdat_f; logic       [5:0] ic_offset;
     /* buffered coherence data:
@@ -239,6 +245,7 @@ module mmu #(
     always_ff @(posedge clk) ic_offset <= s_ic_addr[5:0];
 
     /* data cache */
+    logic [63:0] s_dc_strb;
     cache #(.init(init), .chn(1), .set(128), .way(4), .blk(64), .mshrsz(2)) dcache (
         .clk(clk), .rst(rst), .rid(8'b0000_0010), .flush(flush),
         .s_trsc(dc_trsc_s), .m_trsc(dc_trsc_m),
@@ -251,12 +258,15 @@ module mmu #(
         .s_ofst(dc_ofst_s), .m_ofst(dc_ofst_m),
         .s_rdat(dc_rdat_s), .m_rdat(dc_rdat_m)
     );
+    always_comb s_dc_strb = s_dc_bits[2] ? ~(-64'd1 << (6'd1 << 2'(s_dc_bits[1:0]))) << s_dc_addr[2:0] : 0;
     always_comb dc_ready = ~|dc_rqst_b | dc_rqst_b == s_dc_resp;
     always_comb dc_rqst_f = dc_ready ? s_dc_rqst : dc_rqst_b;
     always_comb dc_addr_f = dc_ready ? s_dc_addr : dc_addr_b;
-    always_comb dc_strb_f = dc_ready ?  64'(s_dc_strb) << (6'(s_dc_addr[5:3]) << 3) : dc_strb_b;
+    always_comb dc_bits_f = dc_ready ? s_dc_bits : dc_bits_b;
+    always_comb dc_strb_f = dc_ready ?      s_dc_strb  << (6'(s_dc_addr[5:3]) << 3) : dc_strb_b;
     always_comb dc_wdat_f = dc_ready ? 512'(s_dc_wdat) << (9'(s_dc_addr[5:3]) << 6) : dc_wdat_b;
     always_ff @(posedge clk) dc_rqst_b <= rst | flush[dc_rqst_f] ? 0 : dc_rqst_f;
+    always_ff @(posedge clk) dc_bits_b <= dc_bits_f;
     always_ff @(posedge clk) dc_strb_b <= dc_strb_f;
     always_ff @(posedge clk) dc_addr_b <= dc_addr_f;
     always_ff @(posedge clk) dc_wdat_b <= dc_wdat_f;
@@ -288,6 +298,7 @@ module mmu #(
                 end
             1: begin // STLB request detected, setting address
                 ptw_add <= {8'd0, ptw_ppn, ptw_vpn[ptw_num], 3'd0};
+                /* todo: PTW also needs PMA/PMP check */
                 ptw_stt <= 2;
             end
             2: // address set, waiting for response
@@ -305,6 +316,10 @@ module mmu #(
                         if (~|ptw_pte[i*9+18-:9]) ptw_ppn[i*9+8-:9] <= ptw_vpn[i]; // super page
                         else {ptw_prm, ptw_stt} <= 4;                              // misaligned super page
                 end
+                if (ptw_pte[63]) // NAPOT bit
+                    if (ptw_pte[13:10] == 4'b1000)
+                        ptw_ppn[3:0] <= ptw_vpn[0][3:0]; // 64-KiB contiguous region
+                    else {ptw_prm, ptw_stt} <= 4;
                 if (~ptw_pte[0]) {ptw_prm, ptw_stt} <= 4; // invalid bit
                 ptw_num <= ptw_num - 1;
             end
@@ -345,7 +360,7 @@ module mmu #(
                     m_axi_arsize <= 3;
                 end else if (|coh_resp_mb & ~coh_flsh_mb & ~flush[coh_resp_mb]) begin
                     if (coh_mesi_mb == 1) {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
-                    /* todo: different transactions from cache can be distinguished */
+                    /* todo: some IO write should skip read transaction */
                     else {m_axi_arvalid, axi_stt} <= {1'd0, 8'd6};
                     axi_cnt       <= 0;
                     axi_req       <= coh_resp_mb;
@@ -366,13 +381,7 @@ module mmu #(
                     m_axi_arvalid <= 1;
                     m_axi_araddr  <= dc_addr_f;
                     m_axi_arlen   <= 0;
-                    /* todo: this is to avoid misalign transfer but it is more
-                       reasonable to decide narrow burst size according to
-                       load/store width which currently not passed from LSU */
-                    if      (dc_addr_f[0]) m_axi_arsize <= 0;
-                    else if (dc_addr_f[1]) m_axi_arsize <= 1;
-                    else if (dc_addr_f[2]) m_axi_arsize <= 2;
-                    else                   m_axi_arsize <= 3;
+                    m_axi_arsize  <= dc_bits_f & 3;
                 end
             1: // AXI port request detected, waiting for read address handshake
                 if (m_axi_arready) begin
