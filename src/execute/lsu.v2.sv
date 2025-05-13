@@ -882,13 +882,15 @@ module LSU
         commit_idx_wire[w] = commit_store_wire[w] ? stq_commit_head_reg : ldq_head_reg;
         temp_stq_commit_head_wire[w] =  stq_commit_head_reg;
         temp_ldq_head_wire[w]        =  ldq_head_reg;
-        if(commit_store_wire[w]) for(int i = 0; i<w ;i++)begin
+        //if(commit_store_wire[w]) 
+        for(int i = 0; i<w ;i++)begin
           if(commit_store_wire[i]) begin
             commit_idx_wire[w] = commit_idx_wire[w] +1;
             temp_stq_commit_head_wire[w] = temp_stq_commit_head_wire[w] +1;
           end
         end
-        if(commit_load_wire[w]) for(int i = 0; i<w ;i++)begin
+        //if(commit_load_wire[w]) 
+        for(int i = 0; i<w ;i++)begin
           if(commit_load_wire[i]) begin
             commit_idx_wire[w] = commit_idx_wire[w] +1;
             temp_ldq_head_wire[w] = temp_ldq_head_wire[w] +1;
