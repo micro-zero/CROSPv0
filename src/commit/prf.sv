@@ -23,7 +23,8 @@ module prf #(
     input  logic        [rwd-1:0]            rename,
     input  logic        [iwd-1:0]            execute,
     output logic        [rwd-1:0][1:0]       busy_resp,
-    output logic        [iwd-1:0][1:0][63:0] reg_resp
+    output logic        [iwd-1:0][1:0][63:0] reg_resp,
+    input exe_unit_resp_t core_exe_iresp
 );
     /* pipeline redirect */
     function logic succeed(input logic [15:0] opid);
@@ -47,6 +48,8 @@ module prf #(
             if (ren_bundle[i].prsa[0] == exe_bundle[j].prda) busy_resp[i][0] = 0;
             if (ren_bundle[i].prsa[1] == exe_bundle[j].prda) busy_resp[i][1] = 0;
         end
+        if (core_exe_iresp.valid & ren_bundle[i].prsa[0] == 16'(core_exe_iresp.uop.pdst)) busy_resp[i][0] = 0;
+        if (core_exe_iresp.valid & ren_bundle[i].prsa[1] == 16'(core_exe_iresp.uop.pdst)) busy_resp[i][1] = 0;
     end
     always_ff @(posedge clk) if (rst) busy <= 0;
         else begin
@@ -61,30 +64,34 @@ module prf #(
             /* there is no need for busy table to act with redirection because in-flight busy
                physical registers will be free and unmapped after redirection and unmapped busy
                bits are meaningless, so that even there is no need to clear busy table on reset */
+            if (core_exe_iresp.valid) busy[32'(core_exe_iresp.uop.pdst)] <= 0;
         end
 
     /* register file */
     logic [iwd-1:0][1:0][$clog2(prnum)-1:0] raddr;
-    logic [iwd-1:0]     [$clog2(prnum)-1:0] waddr;
+    logic [iwd  :0]     [$clog2(prnum)-1:0] waddr;
     logic [iwd-1:0][1:0]             [63:0] rvalue;
-    logic [iwd-1:0]                  [63:0] wvalue;
-    logic [iwd-1:0]                         wena;
+    logic [iwd  :0]                  [63:0] wvalue;
+    logic [iwd  :0]                         wena;
     always_comb for (int i = 0; i < iwd; i++) for (int j = 0; j < 2; j++)
         raddr[i][j] = $clog2(prnum)'(iss_bundle[i].prsa[j]);
-    always_comb for (int i = 0; i < iwd; i++) begin
+    always_comb for (int i = 0; i <= iwd; i++) begin
         waddr [i] = $clog2(prnum)'(exe_bundle[i].prda);
         wvalue[i] = exe_bundle[i].prdv;
         wena  [i] = exe_bundle[i].opid[15] & |waddr[i];
         if (succeed(exe_bundle[i].opid) | red_bundle.rollback) wena[i] = 0;
+        if (i == iwd) waddr[i] = $clog2(prnum)'(core_exe_iresp.uop.pdst);
+        if (i == iwd) wvalue[i] = core_exe_iresp.data;
+        if (i == iwd) wena[i] = core_exe_iresp.valid;
     end
     always_comb for (int i = 0; i < iwd; i++) for (int j = 0; j < 2; j++)
         if (raddr[i][j] == 0) reg_resp[i][j] = 0;
         else begin
             reg_resp[i][j] = rvalue[i][j];
-            for (int k = 0; k < iwd; k++)
+            for (int k = 0; k <= iwd; k++)
                 if (wena[k] & raddr[i][j] == waddr[k]) reg_resp[i][j] = wvalue[k];
         end
-    mwpram #(.width(64), .depth(prnum), .rports(2 * iwd), .wports(iwd))
+    mwpram #(.width(64), .depth(prnum), .rports(2 * iwd), .wports(iwd + 1))
         regfile_inst(.clk(clk), .rst(rst),
             .raddr(raddr), .rvalue(rvalue),
             .waddr(waddr), .wvalue(wvalue), .wena(wena));

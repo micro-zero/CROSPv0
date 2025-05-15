@@ -384,14 +384,14 @@ module crosplite #(
         ren_inst(clk, rst, com_bundle, red_bundle, ren_ready, dec_bundle, iss_ready, ren_bundle);
     prf #(.prnum(prnum), .rwd(rwd), .iwd(iwd), .cwd(cwd), .opsz(opsz))
         prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, red_bundle,
-            iss_ready, (iwd)'(-1), busy_resp, reg_resp);
+            iss_ready, (iwd)'(-1), busy_resp, reg_resp, core_exe_iresp);
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret,
         csr_excp, csr_intr, csr_flsh,
         mip_ext, mtime, 64'(com_inst.rob_out), csr_status, csr_tvec, csr_mepc, csr_sepc, it_satp, dt_satp);
     issue #(.rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .iqsz(iqsz))
         iss_inst(clk, rst, fu_ready, busy_resp,
-            exe_bundle, red_bundle, iss_ready, ren_bundle, (iwd)'(-1), iss_bundle);
+            exe_bundle, red_bundle, iss_ready, ren_bundle, (iwd)'(-1), iss_bundle, core_exe_iresp);
     execute #(.iwd(iwd), .ewd(ewd), .prnum(prnum))
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (iwd)'(-1), exe_bundle, fu_resp, fu_claim);
     commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz))
@@ -463,6 +463,8 @@ module crosplite #(
             exe_req_i.uop.is_std = exe_req_i.uop.store & ~fu_req[i].prsb[1];
             exe_req_i.uop.ldq_idx = 7'(fu_req[i].ldid);
             exe_req_i.uop.stq_idx = 7'(fu_req[i].stid);
+            exe_req_i.uop.rob_idx = 7'(fu_req[i].opid);
+            exe_req_i.uop.pdst = fu_req[i].prda[1];
             exe_req_i.valid = fu_req[i].opid[15];
         end
     end
@@ -490,6 +492,7 @@ module crosplite #(
         dmem_resp_i.dresp_valid = dc_resp;
         dmem_resp_i.uop = dcuop;
         dmem_resp_i.data = dc_rdat;
+        if (s1_kill_o) dmem_resp_i = 0;
     end
     // always_comb dmem_nack_i = |dc_miss;
     always_comb dmem_nack_i = 0;

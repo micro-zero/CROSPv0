@@ -24,7 +24,8 @@ module issue #(
     output logic        [rwd-1:0] ready,      // ready signal
     input  ren_bundle_t [rwd-1:0] ren_bundle, // rename bundle
     input  logic        [iwd-1:0] issue,      // issue signal, should be constantly set
-    output iss_bundle_t [iwd-1:0] iss_bundle  // issue bundle
+    output iss_bundle_t [iwd-1:0] iss_bundle, // issue bundle
+    input exe_unit_resp_t core_exe_iresp
 );
     /* pipeline redirect */
     function logic succeed(input logic [15:0] opid);
@@ -106,11 +107,14 @@ module issue #(
     end
     always_comb begin
         iq_prsb_fwd = iq_prsb; // forwarding of wakeup
-        for (int i = 0; i < iqsz; i++)
+        for (int i = 0; i < iqsz; i++) begin
             for (int j = 0; j < iwd; j++) if (exe_bundle[j].opid[15]) begin
                 if (iq_prsa[i][0] == exe_bundle[j].prda) iq_prsb_fwd[i][0] = 0;
                 if (iq_prsa[i][1] == exe_bundle[j].prda) iq_prsb_fwd[i][1] = 0;
             end
+            if (core_exe_iresp.valid & iq_prsa[i][0] == 16'(core_exe_iresp.uop.pdst)) iq_prsb_fwd[i][0] = 0;
+            if (core_exe_iresp.valid & iq_prsa[i][1] == 16'(core_exe_iresp.uop.pdst)) iq_prsb_fwd[i][1] = 0;
+        end
     end
     always_comb for (int i = 0; i < iqsz; i++) iq_flush[i] = iq_occ[i] & succeed(iq_opid[i]);
     always_ff @(posedge clk) if (rst) iq_occ <= 0; else begin

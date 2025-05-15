@@ -164,10 +164,10 @@ module vcore #(
     localparam prnum = 96;
     logic [prnum-1:0][63:0] pregs;
     /* verilator tracing_off */
-    logic [63:0] dupregs[iwd-1:0][prnum-1:0]; // forwarded register values
-    logic [$clog2(iwd)-1:0] sel[prnum-1:0];   // forwarded bank selections
+    logic [63:0] dupregs[iwd:0][prnum-1:0]; // forwarded register values
+    logic [$clog2(iwd+1)-1:0] sel[prnum-1:0];   // forwarded bank selections
     /* verilator tracing_on */
-    for (genvar i = 0; i < iwd; i++) for (genvar j = 0; j < prnum; j++)
+    for (genvar i = 0; i <= iwd; i++) for (genvar j = 0; j < prnum; j++)
         always_comb begin
             dupregs[i][j] = inst.prf_inst.regfile_inst.dupregs[i].regs[j];
             if (inst.prf_inst.regfile_inst.wena[i])
@@ -175,8 +175,8 @@ module vcore #(
         end
     always_comb begin
         sel = inst.prf_inst.regfile_inst.sel;
-        for (int i = 0; i < iwd; i++) if (inst.prf_inst.regfile_inst.wena[i])
-            sel[inst.prf_inst.regfile_inst.waddr[i]] = $clog2(iwd)'(i);
+        for (int i = 0; i <= iwd; i++) if (inst.prf_inst.regfile_inst.wena[i])
+            sel[inst.prf_inst.regfile_inst.waddr[i]] = $clog2(iwd+1)'(i);
     end
     always_comb for (int i = 0; i < prnum; i++) pregs[i] = dupregs[sel[i]][i];
 

@@ -142,7 +142,7 @@ module commit #(
         rob_exe_inst(.clk(clk), .rst(rst),
             .raddr(rob_raddr), .rvalue(exe_rvalue),
             .waddr(exe_waddr), .wvalue(exe_wvalue), .wena(exe_wena));
-    always_comb for (int i = 0; i < iwd; i++) begin
+    always_comb for (int i = 0; i <= iwd; i++) begin
         exe_waddr [i]       = $clog2(opsz)'(exe_bundle[i].opid);
         exe_wena  [i]       = exe_bundle[i].opid[15];
         exe_wvalue[i].cause = exe_bundle[i].cause;
@@ -159,7 +159,7 @@ module commit #(
     end
     always_comb begin
         mis_first = 0; // search for earliest misprediction
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i <= iwd; i++)
             if (exe_bundle[i].opid[15] & exe_bundle[i].misp)
                 if (~mis_first.opid[15]) // first mispredicted bundle
                     mis_first = exe_bundle[i];
