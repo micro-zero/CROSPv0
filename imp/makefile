@@ -26,8 +26,8 @@ CORE_SRC = \
 	$(shell realpath ../src/common/firstk.sv) \
 	$(shell realpath ../src/common/pma.sv) \
 	$(shell realpath ../src/common/pmp.sv) \
-	$(shell realpath ../src/frontend/pcgen.sv) \
-	$(shell realpath ../src/frontend/frontend.sv) \
+	$(shell realpath ../src/fetch/tage.sv) \
+	$(shell realpath ../src/fetch/fetch.sv) \
 	$(shell realpath ../src/decoder/ci2i.sv) \
 	$(shell realpath ../src/decoder/decoder.sv) \
 	$(shell realpath ../src/rename/rename.sv) \

@@ -237,7 +237,6 @@ module lsu #(
         sq_wvalue[i].ldid  = req_store[i].ldid;
         sq_wvalue[i].stid  = req_store[i].stid;
         sq_wvalue[i].delta = req_store[i].delta;
-        sq_wvalue[i].pat   = req_store[i].pat;
         sq_wvalue[i].pc    = req_store[i].pc;
         sq_wvalue[i].npc   = req_store[i].base[63:0] + 64'(req_store[i].delta);
         sq_wvalue[i].prda  = req_store[i].prda[1];
@@ -466,7 +465,6 @@ module lsu #(
         lq_wvalue[i].ldid  = req_load[i].ldid;
         lq_wvalue[i].stid  = req_load[i].stid;
         lq_wvalue[i].delta = req_load[i].delta;
-        lq_wvalue[i].pat   = req_load[i].pat;
         lq_wvalue[i].pc    = req_load[i].pc;
         lq_wvalue[i].npc   = req_load[i].base[63:0] + 64'(req_load[i].delta);
         lq_wvalue[i].prda  = req_load[i].prda[1];

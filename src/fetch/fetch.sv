@@ -1,13 +1,13 @@
 /**
- * frontend.sv:
- *   This file includes top module of frontend, which generate
+ * fetch.sv:
+ *   This file includes top module of fetch unit, which generate
  *   PC, connects ICACHE and devide data into instructions.
  */
 
 `include "types.sv"
 import types::*;
 
-module frontend #(
+module fetch #(
     parameter init,   // initialize RAM
     parameter rst_pc, // PC on reset
     parameter fwd,    // fetch width
@@ -17,15 +17,18 @@ module frontend #(
     parameter ftqsz,  // fetch target queue size
     parameter fnum,   // fetch number in half-words
     parameter rassz,  // return address stack size
-    parameter phtsz,  // PHT size
-    parameter btbsz   // BTB size
+    parameter btbsz,  // BTB size
+    parameter index,  // TAGE index length
+    parameter tag,    // TAGE tag length
+    parameter hist,   // TAGE history length
+    parameter cnt     // TAGE counter length
 )(
     input  logic clk,
     input  logic rst,
-    input  com_bundle_t [cwd-1:0] com_bundle, // frontend update information
+    input  com_bundle_t [cwd-1:0] com_bundle, // commit bundle
     input  red_bundle_t           red_bundle, // redirect bundle
     input  logic        [fwd-1:0] fetch,      // fetch/ready signal
-    output fet_bundle_t [fwd-1:0] fet_bundle, // frontend output bundle
+    output fet_bundle_t [fwd-1:0] fet_bundle, // output bundle
     /* PMP interface */
     input  logic        [1:0] pmplvl,  // PMP privilege level
     input  logic [15:0] [7:0] pmpcfg,  // PMP configuration CSRs
@@ -45,33 +48,40 @@ module frontend #(
     input  logic [16*fnum-1:0] ic_rdat  // instruction cache read data
 );
     /* pipeline redirect and reinforcement */
+    localparam mintk = 4'd1 << cnt - 1;                // minimal taken pattern
     logic reinf, fredir, bredir, iredir, dredir;       // reinforcement and redirection
     logic [63:0] upc, dpc, ipc, fpc, unpc, dnpc, fnpc; // updating PC/NPC
-    logic [1:0] upat, dpat, fpat;                      // updating branch pattern
+    logic [4:0] ubk, dbk, fbk, ibk;                    // updating bank
+    logic [3:0] upat, dpat, fpat;                      // updating branch pattern
+    logic [127:0] ugh, dgh, fgh, igh;                  // updating global history
     always_comb begin
-        upc = 0; unpc = 0; upat = 0;
+        upc = 0; unpc = 0; upat = 0; ubk = 0; ugh = 0;
         bredir = 0; reinf = 0;
         if (~red_bundle.opid[15] & red_bundle.brid[7]) begin
             reinf = 1;
             upc = red_bundle.pc + (red_bundle.delta == 2 ? 0 : 2);
             unpc = red_bundle.npc;
+            ubk = red_bundle.bank;
             upat = red_bundle.pat;
+            ugh = red_bundle.gh;
         end
         /* frontend redirection, buffered for timing issue */
-        if (fredir) {reinf, upc, unpc, upat} = {1'b0, fpc, fnpc, fpat};
+        if (fredir) {reinf, upc, unpc, ubk, upat, ugh} = {1'b0, fpc, fnpc, fbk, fpat, fgh};
         /* backend redirection, commit bundles include a redirection bundle */
         if (red_bundle.opid[15]) begin
             bredir = 1;
             reinf = 0;
             upc = red_bundle.pc + (red_bundle.delta == 2 ? 0 : 2);
             unpc = red_bundle.npc;
+            ubk = red_bundle.bank;
             upat = red_bundle.pat;
+            ugh = red_bundle.gh;
         end
     end
     always_ff @(posedge clk) if (rst | bredir) {fredir, fpc, fnpc, fpat} <= 0;
-        else if (dredir) {fredir, fpc, fnpc, fpat} <= {1'b1, dpc, dnpc, dpat}; // pre-decoder checking failure
-        else if (iredir) {fredir, fpc, fnpc, fpat} <= {1'b1, ipc, ipc, 2'b10}; // incomplete fetch
-        else              fredir <= 0;                                         // hold for one cycle
+        else if (dredir) {fredir, fpc, fnpc, fbk, fpat, fgh} <= {1'b1, dpc, dnpc, dbk, dpat, dgh};
+        else if (iredir) {fredir, fpc, fnpc, fbk, fpat, fgh} <= {1'b1, ipc, ipc, ibk, mintk, igh};
+        else              fredir <= 0;
 
     /* instruction fetch queue */
     logic [$clog2(fqsz)-1:0] fq_front;              // fetch queue front index
@@ -102,28 +112,31 @@ module frontend #(
     /* PC generation */
     logic        pcg_ready;  // ready to get PC and send to ICACHE
     pcg_bundle_t pcg_bundle; // PC information from PC generation module
-    pcgen #(.init(init), .rst_pc(rst_pc), .fnum(fnum), .cbsz(cbsz), .phtsz(phtsz), .btbsz(btbsz))
+    tage #(.init(init), .rst_pc(rst_pc), .fnum(fnum), .cbsz(cbsz), .btbsz(btbsz),
+        .index(index), .tag(tag), .hist(hist), .cnt(cnt))
         pcg_inst(.clk(clk), .rst(rst), .redir(fredir | bredir), .reinf(reinf),
-            .upc(upc), .unpc(unpc), .upat(upat), .ready(pcg_ready), .out(pcg_bundle));
+            .upc(upc), .unpc(unpc), .ubk(ubk), .upat(upat), .ugh(ugh), .ready(pcg_ready), .out(pcg_bundle));
 
     /* fetch target queue */
-    localparam itrqst = {3'b100, 5'd0};        // constant ITLB   request
-    localparam icrqst = {3'b101, 5'd0};        // constant ICACHE request
-    logic      itresp, icresp, pmpresp;        // flattened ITLB, ICACHE and PMP response
-    logic [$clog2(ftqsz)-1:0] ftq_front;       // fetch target queue front index
-    logic [$clog2(ftqsz):0] ftq_num;           // fetch target queue size (0 ~ ftqsz)
-    logic [$clog2(ftqsz):0] ftq_trn, ftq_acc;  // translated and accessed numbers (0 ~ ftqsz)
-    logic          [63:0] ftq_vpc [ftqsz-1:0]; // virtual address of each fetch
-    logic          [63:0] ftq_ppc [ftqsz-1:0]; // physical address of each fetch
-    logic          [64:0] ftq_br  [ftqsz-1:0]; // branch signal and target
-    logic [fnum-1:0][1:0] ftq_pat [ftqsz-1:0]; // branch pattern
-    logic           [7:0] ftq_size[ftqsz-1:0]; // size of fetched data in half-words (0 ~ 8)
-    logic   [16*fnum-1:0] ftq_data[ftqsz-1:0]; // the data fetched
-    logic                 ftq_acft[ftqsz-1:0]; // whether encountering access fault
-    logic                 ftq_pgft[ftqsz-1:0]; // whether encountering page fault
-    logic ftq_push, ftq_pop;                   // push or pop signals of FTQ
-    logic [7:0] ftq_cur, ftq_next;             // current and next fetch position inside front line
-    logic                  f0done, f1done;     // forwarded done signals
+    localparam itrqst = {3'b100, 5'd0};          // constant ITLB   request
+    localparam icrqst = {3'b101, 5'd0};          // constant ICACHE request
+    logic      itresp, icresp, pmpresp;          // flattened ITLB, ICACHE and PMP response
+    logic [$clog2(ftqsz)-1:0] ftq_front;         // fetch target queue front index
+    logic [$clog2(ftqsz):0] ftq_num;             // fetch target queue size (0 ~ ftqsz)
+    logic [$clog2(ftqsz):0] ftq_trn, ftq_acc;    // translated and accessed numbers (0 ~ ftqsz)
+    logic            [63:0] ftq_vpc [ftqsz-1:0]; // virtual address of each fetch
+    logic            [63:0] ftq_ppc [ftqsz-1:0]; // physical address of each fetch
+    logic            [64:0] ftq_br  [ftqsz-1:0]; // branch signal and target
+    logic [fnum-1:0]  [4:0] ftq_bk  [ftqsz-1:0]; // chosen bank
+    logic [fnum-1:0]  [3:0] ftq_pat [ftqsz-1:0]; // branch pattern
+    logic [fnum-1:0][127:0] ftq_gh  [ftqsz-1:0]; // global history
+    logic             [7:0] ftq_size[ftqsz-1:0]; // size of fetched data in half-words (0 ~ 8)
+    logic     [16*fnum-1:0] ftq_data[ftqsz-1:0]; // the data fetched
+    logic                   ftq_acft[ftqsz-1:0]; // whether encountering access fault
+    logic                   ftq_pgft[ftqsz-1:0]; // whether encountering page fault
+    logic ftq_push, ftq_pop;                     // push or pop signals of FTQ
+    logic [7:0] ftq_cur, ftq_next;               // current and next fetch position inside front line
+    logic                  f0done, f1done;       // forwarded done signals
     always_comb pcg_ready = ~pcg_bundle.id[7] | ftq_num < ftqsz;
     always_comb ftq_push = ftq_num < ftqsz & pcg_bundle.id[7] &
         $clog2(ftqsz)'(pcg_bundle.id) - ftq_front == $clog2(ftqsz)'(ftq_num);
@@ -170,7 +183,9 @@ module frontend #(
         if (ftq_num < ftqsz & pcg_bundle.id[7]) begin // PC generated and to start translation
             ftq_vpc [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pc;
             ftq_br  [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.br;
+            ftq_bk  [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.bank[fnum-1:0];
             ftq_pat [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.pat[fnum-1:0];
+            ftq_gh  [$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.gh[fnum-1:0];
             ftq_size[$clog2(ftqsz)'(pcg_bundle.id)] <= pcg_bundle.num;
         end
         if (itresp) begin // ITLB request done
@@ -203,6 +218,9 @@ module frontend #(
     logic [$clog2(fwd+1)-1:0] fet_num; // number of successfully fetched instruction in current cycle
     logic [fwd:0][63:0] pc;            // extracted program counter
     logic [fwd-1:0][31:0] ir;          // the instructions ready to output
+    logic [fwd-1:0][4:0] bank;         // chosen bank
+    logic [fwd-1:0][3:0] pat;          // chosen pattern
+    logic [fwd-1:0][127:0] gh;         // global history
     logic [fwd-1:0] valid;             // valid bits of extracted instructions
     logic [fwd-1:0] incomp;            // incomplete instruction fetch occurs
     logic [fwd-1:0] call, ret;         // call and return signal
@@ -223,6 +241,16 @@ module frontend #(
         pc[i] = fet_pos[i] < f0size ?
             ftq_vpc[pos_0] + 64'({fet_pos[i], 1'b0}) + 64'({ftq_cur, 1'b0}) :
             ftq_vpc[pos_1] + 64'({fet_pos[i], 1'b0}) - 64'({f0size, 1'b0});
+    always_comb for (int i = 0; i < fwd; i++)
+        if (fet_pos[i + 1] <= f0size) begin
+            bank[i] = ftq_bk [pos_0][fet_pos[i + 1] + ftq_cur - 1];
+            pat [i] = ftq_pat[pos_0][fet_pos[i + 1] + ftq_cur - 1];
+            gh  [i] = ftq_gh [pos_0][fet_pos[i + 1] + ftq_cur - 1];
+        end else begin
+            bank [i] = ftq_bk [pos_1][fet_pos[i + 1] - f0size - 1];
+            pat  [i] = ftq_pat[pos_1][fet_pos[i + 1] - f0size - 1];
+            gh   [i] = ftq_gh [pos_1][fet_pos[i + 1] - f0size - 1];
+        end
     always_comb for (int i = 0; i < fwd; i++) ir[i]    = fdata[fet_pos[i]+1-:2];
     always_comb for (int i = 0; i < fwd; i++) valid[i] = fet_pos[i + 1] <= fsize;
     always_comb for (int i = 0; i < fwd; i++)
@@ -242,15 +270,17 @@ module frontend #(
                     result[i].af[j] = f1done ? ftq_acft[pos_1] : 0;
                     result[i].pf[j] = f1done ? ftq_pgft[pos_1] : 0;
                 end
-            result[i].pc    = pc[i];
-            result[i].pat   = fet_pos[i + 1] <= f0size ?
-                ftq_pat[pos_0][fet_pos[i + 1] + ftq_cur - 1] :
-                ftq_pat[pos_1][fet_pos[i + 1] - f0size - 1];
+            result[i].pc   = pc[i];
+            result[i].bank = bank[i];
+            result[i].pat  = pat[i];
+            result[i].gh   = gh[i];
             if (br[i][64]) result[i].pnpc = br[i][63:0]; // predict as a branch
             else           result[i].pnpc = pc[i + 1];   // predict as continuous fetch
         end
         if (dredir) result[32'(fq_in) - 1].pnpc = dnpc;
         ipc = ftq_vpc[pos_0] + 64'({ftq_size[pos_0] - 8'd1, 1'b0});
+        ibk = ftq_bk [pos_0][f0size + ftq_cur - 1];
+        igh = ftq_gh [pos_0][f0size + ftq_cur - 1];
     end
     always_comb begin
         incomp = 0;
@@ -334,7 +364,7 @@ module frontend #(
     always_comb begin
         fq_in = 0;
         iredir = 0;
-        dredir = 0; dpat = 0; dpc = 0; dnpc = 0;
+        dredir = 0; dbk = 0; dpat = 0; dgh = 0; dpc = 0; dnpc = 0;
         call_in = 0; ret_in = 0;
         for (int i = 0; i < fwd; i++) if (fq_in < fqsz - fq_num & valid[i]) begin
             /* ready to fetch into instruction queue */
@@ -347,25 +377,31 @@ module frontend #(
             /* branch at non-branch instructions */
             if (~(branch[i] | jal[i] | jalr[i]) & br[i][64]) begin
                 dredir = 1;
-                dpat = 2'b10;
-                dpc = pc[i] + (&ir[i][1:0] ? 2 : 0);
-                dnpc = target[i];
+                dbk    = bank[i];
+                dpat   = mintk;
+                dgh    = gh[i];
+                dpc    = pc[i] + (&ir[i][1:0] ? 2 : 0);
+                dnpc   = target[i];
                 break;
             end
             /* wrong jump at jal/branch instructions */
             if (jal[i] & ~br[i][64] | (jal[i] | branch[i] & br[i][64]) & target[i][8:1] != br[i][8:1]) begin
                 dredir = 1;
-                dpat = 2'b01;
-                dpc = pc[i] + (&ir[i][1:0] ? 2 : 0);
-                dnpc = target[i];
+                dbk    = bank[i];
+                dpat   = mintk - 1;
+                dgh    = gh[i];
+                dpc    = pc[i] + (&ir[i][1:0] ? 2 : 0);
+                dnpc   = target[i];
                 break;
             end
             /* linked JALR instructions */
             if (ret[i] & |ras_num & ~|call_num & ~|ret_num & target[i][8:1] != br[i][8:1]) begin
                 dredir = 1;
-                dpat = 2'b01;
-                dpc = pc[i] + (&ir[i][1:0] ? 2 : 0);
-                dnpc = target[i];
+                dbk    = bank[i];
+                dpat   = mintk - 1;
+                dgh    = gh[i];
+                dpc    = pc[i] + (&ir[i][1:0] ? 2 : 0);
+                dnpc   = target[i];
                 break;
             end
         end

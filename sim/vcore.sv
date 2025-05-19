@@ -266,7 +266,7 @@ module vcore #(
             if (inst.com_inst.mis_bundle.branch) brmisp <= brmisp + 1;
             if (inst.com_inst.mis_bundle.jal)    jmisp  <= jmisp + 1;
             if (inst.com_inst.mis_bundle.jalr)   jrmisp <= jrmisp + 1;
-        end else if (inst.fe_inst.fredir)      fmisp  <= fmisp + 1;
+        end else if (inst.fet_inst.fredir)       fmisp  <= fmisp + 1;
     always_ff @(posedge clk) if (rst) loads  <= 0; else if (inst.dc_resp[7:4] == 4'b1110)  loads  <= loads  + 1;
     always_ff @(posedge clk) if (rst) stores <= 0; else if (inst.dc_resp[7:4] == 4'b1111)  stores <= stores + 1;
     always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.icache.mshr_out) icmiss <= icmiss + 1;

@@ -497,6 +497,7 @@ module mmu #(
             coh_lock_sb <= m_coh_resp;
         /* todo: use AXI handshake to confirm may be better than `dc_resp_s`,
            for not all requests must have a data cache response */
+        /* todo: there is deadlock possibility */
         else if (coh_lock_sb == dc_resp_s) coh_lock_sb <= 0;
 
     /* assemble data cache request and response */

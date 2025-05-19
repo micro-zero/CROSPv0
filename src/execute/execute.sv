@@ -34,7 +34,9 @@ module execute #(
         reg_bundle[i].pc     = iss_bundle[i].pc;
         reg_bundle[i].pnpc   = iss_bundle[i].pnpc;
         reg_bundle[i].delta  = iss_bundle[i].delta;
+        reg_bundle[i].bank   = iss_bundle[i].bank;
         reg_bundle[i].pat    = iss_bundle[i].pat;
+        reg_bundle[i].gh     = iss_bundle[i].gh;
         reg_bundle[i].fu     = iss_bundle[i].fu;
         reg_bundle[i].funct  = iss_bundle[i].funct;
         reg_bundle[i].base   = iss_bundle[i].base;

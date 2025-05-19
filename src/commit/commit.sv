@@ -16,6 +16,7 @@ module commit #(
     parameter cwd,   // commit width
     parameter mwd,   // memory access width
     parameter opsz,  // operation ID size
+    parameter cnt,   // branch predictor counter size
     parameter rst_pc // PC on reset
 )(
     input  logic clk,
@@ -101,7 +102,6 @@ module commit #(
         dec_wvalue[i].stid  = dec_bundle[i].stid;
         dec_wvalue[i].pc    = dec_bundle[i].pc;
         dec_wvalue[i].delta = dec_bundle[i].delta;
-        dec_wvalue[i].pat   = dec_bundle[i].pat;
         dec_wvalue[i].ir    = dec_bundle[i].ir;
         dec_wvalue[i].call  = dec_bundle[i].call;
         dec_wvalue[i].ret   = dec_bundle[i].ret;
@@ -174,7 +174,7 @@ module commit #(
         for (int i = iwd - 1; i >= 0; i--)
             if (exe_bundle[i].opid[15] & ~succeed(exe_bundle[i].opid) &
                 exe_bundle[i].brid[7] & ~exe_bundle[i].misp &
-                (exe_bundle[i].pat[0] ^ exe_bundle[i].pat[1])) // weak pattern
+                (|exe_bundle[i].pat[cnt-1:0] & ~&exe_bundle[i].pat[cnt-1:0])) // weak pattern
                 rei_bundle <= exe_bundle[i];
     end
 
@@ -328,7 +328,9 @@ module commit #(
             red_bundle.stid = mis_bundle.stid;
             red_bundle.topid = top_opid;
             red_bundle.pc = mis_bundle.pc;
+            red_bundle.bank = mis_bundle.bank;
             red_bundle.pat = mis_bundle.pat;
+            red_bundle.gh = mis_bundle.gh;
             red_bundle.delta = mis_bundle.delta;
             red_bundle.npc = mis_bundle.npc & ~64'd1; // avoid misaligned fetch
             red_bundle.branch = mis_bundle.branch;
@@ -338,7 +340,9 @@ module commit #(
             red_bundle.opid = 0;
             red_bundle.brid = rei_bundle.brid; // `opid` = 0 and `brid` != 0 means reinforcement
             red_bundle.pc = rei_bundle.pc;
+            red_bundle.bank = rei_bundle.bank;
             red_bundle.pat = rei_bundle.pat;
+            red_bundle.gh = rei_bundle.gh;
             red_bundle.delta = rei_bundle.delta;
             red_bundle.npc = rei_bundle.npc & ~64'd1;
         end

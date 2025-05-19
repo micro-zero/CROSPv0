@@ -84,7 +84,6 @@ module div #(
             bundle.npc    <= rr_rvalue.base[63:0] + 63'(rr_rvalue.delta);
             bundle.delta  <= rr_rvalue.delta;
             bundle.prda   <= rr_rvalue.prda[1];
-            bundle.pat    <= rr_rvalue.pat;
             bundle.pc     <= rr_rvalue.pc;
             /* prepare for calculation */
             if (f.divw | f.remw | f.divuw | f.remuw) begin

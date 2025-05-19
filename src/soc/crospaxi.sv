@@ -23,8 +23,11 @@ module crospaxi #(
     parameter fqsz   = 16,           // instruction fetch queue size
     parameter ftqsz  = 8,            // fetch target queue size
     parameter rassz  = 8,            // return address stack size
-    parameter phtsz  = 4096,         // PHT size
     parameter btbsz  = 512,          // BTB size
+    parameter index  = 10,           // TAGE index length
+    parameter tag    = 8,            // TAGE tag length
+    parameter hist   = 10,           // TAGE history length
+    parameter cnt    = 2,            // TAGE counter length
     parameter iqsz   = 16,           // OoO issue queue size
     parameter fnum   = 4,            // fetch number in half-words
     parameter prnum  = 96,           // number of physical registers
@@ -209,10 +212,10 @@ module crospaxi #(
     logic [15:0] top_opid, saf_opid;
     logic [2*mwd-1:0][15:0] lsu_safe;
     logic [3*mwd-1:0][15:0] lsu_unsf;
-    frontend #(.init(init), .rst_pc(rst_pc), .fwd(fwd), .cwd(cwd),
+    fetch #(.init(init), .rst_pc(rst_pc), .fwd(fwd), .cwd(cwd),
         .cbsz(cbsz), .fqsz(fqsz), .ftqsz(ftqsz), .fnum(fnum),
-        .rassz(rassz), .phtsz(phtsz), .btbsz(btbsz))
-        fe_inst(clk, rst, com_bundle, red_bundle, dec_ready, fet_bundle,
+        .rassz(rassz), .btbsz(btbsz), .index(index), .tag(tag), .hist(hist), .cnt(cnt))
+        fet_inst(clk, rst, com_bundle, red_bundle, dec_ready, fet_bundle,
             csr_inst.level, pmpcfg, pmpaddr, fl_inst,
             it_rqst, it_vadd, it_resp, it_perm, it_padd,
             ic_rqst, ic_addr, ic_resp, ic_rdat);
@@ -235,7 +238,7 @@ module crospaxi #(
             exe_bundle, red_bundle, iss_ready, ren_bundle, (iwd)'(-1), iss_bundle);
     execute #(.iwd(iwd), .ewd(ewd), .prnum(prnum))
         exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (iwd)'(-1), exe_bundle, fu_resp, fu_claim);
-    commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz))
+    commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .cnt(cnt))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
             csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, frd, fflags,
             lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv, fncv_asid, fncv_vadd);

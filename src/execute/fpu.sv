@@ -460,7 +460,6 @@ module fpu #(
         r_pip.ldid      <= r_split[4].ldid;
         r_pip.stid      <= r_split[4].stid;
         r_pip.delta     <= r_split[4].delta;
-        r_pip.pat       <= r_split[4].pat;
         r_pip.pc        <= r_split[4].pc;
         r_pip.npc       <= r_split[4].base[63:0] + 63'(r_split[4].delta);
         r_pip.prda      <= r_split[4].prda[1];
@@ -514,7 +513,6 @@ module fpu #(
         r_mul[1].ldid      <= r_split[1].ldid;
         r_mul[1].stid      <= r_split[1].stid;
         r_mul[1].delta     <= r_split[1].delta;
-        r_mul[1].pat       <= r_split[1].pat;
         r_mul[1].pc        <= r_split[1].pc;
         r_mul[1].npc       <= r_split[1].base[63:0] + 63'(r_split[1].delta);
         r_mul[1].prda      <= r_split[1].prda[1];
@@ -561,7 +559,6 @@ module fpu #(
             r_div.ldid      <= r_split[1].ldid;
             r_div.stid      <= r_split[1].stid;
             r_div.delta     <= r_split[1].delta;
-            r_div.pat       <= r_split[1].pat;
             r_div.pc        <= r_split[1].pc;
             r_div.npc       <= r_split[1].base[63:0] + 63'(r_split[1].delta);
             r_div.prda      <= r_split[1].prda[1];
@@ -607,7 +604,6 @@ module fpu #(
             r_sqr.ldid      <= r_split[1].ldid;
             r_sqr.stid      <= r_split[1].stid;
             r_sqr.delta     <= r_split[1].delta;
-            r_sqr.pat       <= r_split[1].pat;
             r_sqr.pc        <= r_split[1].pc;
             r_sqr.npc       <= r_split[1].base[63:0] + 63'(r_split[1].delta);
             r_sqr.prda      <= r_split[1].prda[1];

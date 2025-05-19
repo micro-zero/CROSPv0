@@ -84,7 +84,6 @@ module mul #(
         result.ldid = rr_rvalue.ldid;
         result.stid = rr_rvalue.stid;
         result.delta = rr_rvalue.delta;
-        result.pat = rr_rvalue.pat;
         result.pc = rr_rvalue.pc;
         result.npc = rr_rvalue.base[63:0] + 63'(rr_rvalue.delta);
         result.prda = rr_rvalue.prda[1];

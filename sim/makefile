@@ -43,8 +43,8 @@ VCORE_H  = ../src/common/types.sv
 VCORE_SV = \
 	../src/common/pma.sv \
 	../src/common/pmp.sv \
-	../src/frontend/pcgen.sv \
-	../src/frontend/frontend.sv \
+	../src/fetch/tage.sv \
+	../src/fetch/fetch.sv \
 	../src/decoder/ci2i.sv \
 	../src/decoder/decoder.sv \
 	../src/rename/rename.sv \

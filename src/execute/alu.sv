@@ -99,7 +99,9 @@ module alu #(
             result[g].stid   = in.stid;
             result[g].npc    = jump ? jpc : in.base[63:0] + 63'(in.delta); // `base` is PC in common instructions
             result[g].delta  = in.delta;
+            result[g].bank   = in.bank;
             result[g].pat    = in.pat;
+            result[g].gh     = in.gh;
             result[g].pc     = in.pc;
             result[g].branch = in.branch;
             result[g].jal    = in.jal;

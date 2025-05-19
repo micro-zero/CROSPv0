@@ -285,7 +285,9 @@ module decoder #(
             result[g][0].opid[15] = fet_bundle[g].valid;
             result[g][0].pc    = fet_bundle[g].pc;
             result[g][0].pnpc  = fet_bundle[g].pnpc;
+            result[g][0].bank  = fet_bundle[g].bank;
             result[g][0].pat   = fet_bundle[g].pat;
+            result[g][0].gh    = fet_bundle[g].gh;
             result[g][0].call  = fet_bundle[g].call;
             result[g][0].ret   = fet_bundle[g].ret;
             result[g][0].ir    = oir;
@@ -331,7 +333,9 @@ module decoder #(
                 |{alu_funct[1], lsu_funct[1], fpu_funct[1], mul_funct[1], div_funct[1]};
             result[g][1].pc    = fet_bundle[g].pc;
             result[g][1].pnpc  = fet_bundle[g].pnpc;
+            result[g][1].bank  = fet_bundle[g].bank;
             result[g][1].pat   = fet_bundle[g].pat;
+            result[g][1].gh    = fet_bundle[g].gh;
             result[g][1].ir    = oir;
             result[g][1].delta = delta;
             result[g][1].fu[0] = |alu_funct[1];
@@ -355,7 +359,9 @@ module decoder #(
                 |{alu_funct[2], lsu_funct[2], fpu_funct[2], mul_funct[2], div_funct[2]};
             result[g][2].pc    = fet_bundle[g].pc;
             result[g][2].pnpc  = fet_bundle[g].pnpc;
+            result[g][2].bank  = fet_bundle[g].bank;
             result[g][2].pat   = fet_bundle[g].pat;
+            result[g][2].gh    = fet_bundle[g].gh;
             result[g][2].ir    = oir;
             result[g][2].delta = delta;
             result[g][2].fu[0] = |alu_funct[2];
