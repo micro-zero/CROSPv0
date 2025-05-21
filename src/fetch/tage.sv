@@ -26,26 +26,41 @@ module tage #(
     input logic [63:0] upc,  // updating PC
     input logic [63:0] unpc, // updating next PC
     input logic [4:0] ubk,   // updating bank
-    input logic [3:0] upat,  // updateing old pattern
+    input logic [7:0] upat,  // updateing pattern
+    input logic [7:0] upatb, // updateing bimodal pattern
     input logic [127:0] ugh, // updating global history
     input logic ready,       // ready signal
     output pcg_bundle_t out  // output bundle
 );
     /* global registers */
-    logic      [4:1][31:0] ipos, tpos;                     // index and tag insertion position
-    logic           [63:0] pc;                             // program counter
-    logic            [6:0] id;                             // identifier in FTQ
-    logic     [8*hist-1:0] gh,  ngh,  ungh,  sgh [fnum:0]; // global history (reg, next, updated next, stepped)
-    logic [4:1][index-1:0] ghi, nghi, unghi, sghi[fnum:0]; // folded global history for index
-    logic [4:1]  [tag-1:0] ght, nght, unght, sght[fnum:0]; // folded global history for tag
-    logic        [cnt-1:0]            unpat;               // pattern
+    logic      [4:1][31:0] ipos, tpos; // index and tag insertion position
+    logic           [63:0] pc;         // program counter
+    logic            [6:0] id;         // identifier in FTQ
+    logic        [cnt-1:0] unpat;      // pattern
+    logic            [4:0] lbk, hbk;   // low/high bank in updating bank
+    /* prefix/suffix meaning:
+        u-    updating value
+        n-    next cycle value
+        s-    stepped value
+       -i/-t  for index/tag */
+    logic     [8*hist-1:0] gh,        ngh,  ungh,  sgh [fnum:0]; // global history
+    logic [4:1][index-1:0] ghi, ughi, nghi, unghi, sghi[fnum:0]; // folded global history for index
+    logic [4:1]  [tag-1:0] ght, ught, nght, unght, sght[fnum:0]; // folded global history for tag
     always_comb for (int i = 1; i <= 4; i++) ipos[i] = (1 << i - 1) * hist % index;
     always_comb for (int i = 1; i <= 4; i++) tpos[i] = (1 << i - 1) * hist % tag;
     always_comb
-        /* saturated reinforcement should be filtered at commit module */
-        if      (redir & ~upat[cnt-1] | reinf & upat[cnt-1]) unpat = (cnt)'(upat) + 1;
+        if      (reinf & (~|upat[cnt-1:0] | &upat[cnt-1:0])) unpat = (cnt)'(upat); // saturated
+        else if (redir & ~upat[cnt-1] | reinf & upat[cnt-1]) unpat = (cnt)'(upat) + 1;
         else if (reinf & ~upat[cnt-1] | redir & upat[cnt-1]) unpat = (cnt)'(upat) - 1;
         else                                                 unpat = (cnt)'(upat);
+    always_comb begin
+        lbk = 0; hbk = 0;
+        for (int i = 4; i >= 0; i--) if (ubk[i]) lbk = 1 << i; // for updating counter
+        for (int i = 0; i <= 4; i++) if (ubk[i]) begin         // for allocating entry
+            hbk = 1 << i;
+            if (lbk == hbk) hbk = 0; else break;
+        end
+    end
     always_comb for (int i = 0; i <= fnum; i++) sgh[i] = gh << i; // before current address
     always_comb for (int i = 0; i <= fnum; i++)
         if (i == 0) {sghi[i], sght[i]} = {ghi, ght};
@@ -57,17 +72,16 @@ module tage #(
         end
     always_comb begin
         ngh  = sgh [32'(out.num)] ^ (out.br[64] ? 1 : 0);
-        ungh = (8*hist)'(ugh) & ~(8*hist)'(1) ^ (upat[cnt-1] ? 0 : 1);
+        ungh = (8*hist)'(ugh) << 1 ^ (upat[cnt-1] ? 0 : 1);
         for (int i = 1; i <= 4; i++) nghi[i] = sghi[32'(out.num)][i] ^ (out.br[64] ? 1 : 0);
         for (int i = 1; i <= 4; i++) nght[i] = sght[32'(out.num)][i] ^ (out.br[64] ? 1 : 0);
         /* updating folded histories are calculated */
-        unghi = 0;
-        unght = 0;
-        for (int i = 1; i <= 4; i++)
-            for (int j = 0; j < hist << i - 1; j++) begin
-                unghi[i][j%index] ^= ungh[j];
-                unght[i][j%tag]   ^= ungh[j];
-            end
+        ughi = 0; unghi = 0;
+        ught = 0; unght = 0;
+        for (int i = 1; i <= 4; i++) for (int j = 0; j < hist << i - 1; j++) begin
+            ughi[i][j%index] ^= ugh[j]; unghi[i][j%index] ^= ungh[j];
+            ught[i][j%tag]   ^= ugh[j]; unght[i][j%tag]   ^= ungh[j];
+        end
     end
     always_ff @(posedge clk)
         if      (rst)   pc <= 64'(rst_pc); // on reset
@@ -83,43 +97,102 @@ module tage #(
 
     /* bank 0-4 and BTB */
     localparam b0sz = 4 << index, bxsz = 1 << index;
-    logic          [b0sz-1:0] m;                  // meta bit of bank 0
-    logic          [bxsz-1:0] u[4:1];             // useful bit of bank x
-    logic           [cnt-1:0] b0     [b0sz-1:0];  // bank 0 ([cnt-1:0] counter)
-    logic       [tag+cnt-1:0] bx[3:1][bxsz-1:0];  // bank x ([tag+cnt-1:cnt] tag, [cnt-1:0] counter)
-    logic              [63:0] btb    [btbsz-1:0]; // branch target buffer
-    logic         [index+1:0] b0_raddr[fnum-1:0]; // bank 0 reading address
-    logic         [index+1:0] b0_waddr;           // bank 0 writing address
-    logic                     b0_wena;            // bank 0 write enable
-    logic           [cnt-1:0] b0_wvalue;          // bank 0 write value
-    logic [$clog2(btbsz)-1:0] btb_waddr;          // BTB write address
-    logic                     btb_wena;           // BTB write enable
-    logic              [63:0] btb_wvalue;         // BTB write value
-    always_comb for (int i = 0; i < fnum; i++) b0_raddr[i] = pc[index+2:1] + (index+2)'(i);
-    always_ff @(posedge clk) b0_wena    <= ~rst & (redir | reinf) & ubk[0];
-    always_ff @(posedge clk) b0_waddr   <= upc[index+2:1];
-    always_ff @(posedge clk) b0_wvalue  <= unpat;
-    always_ff @(posedge clk) btb_wena   <= ~rst & redir & ~upat[cnt-1] & ~ubk[4];
+    localparam mintk = (cnt)'(1) << cnt - 1;
+    /* entity */
+    logic           m0[b0sz-1:0];                                           // bank 0   meta bit
+    logic [cnt-1:0] c0 [b0sz-1:0];                                          // bank 0   counter
+    logic           u1[bxsz-1:0], u2[bxsz-1:0], u3[bxsz-1:0], u4[bxsz-1:0]; // bank 1-4 useful bit
+    logic [cnt-1:0] c1[bxsz-1:0], c2[bxsz-1:0], c3[bxsz-1:0], c4[bxsz-1:0]; // bank 1-4 counter
+    logic [tag-1:0] t1[bxsz-1:0], t2[bxsz-1:0], t3[bxsz-1:0], t4[bxsz-1:0]; // bank 1-4 tag
+    logic    [63:0] btb[btbsz-1:0];                                         // branch target buffer
+    /* auxiliary values */
+    logic         [index+1:0] b0_raddr[fnum-1:0];  // bank 0 reading address
+    logic    [4:1][index-1:0] bx_raddr[fnum-1:0];  // bank x reading address
+    logic    [4:1]  [cnt-1:0] cx_rvalue[fnum-1:0]; // bank x counter reading value
+    logic    [4:1]  [tag-1:0] tx_rvalue[fnum-1:0]; // bank x tag reading value
+    logic    [4:1]            ux_rvalue[fnum-1:0]; // bank x useful bit reading value
+    logic         [index+1:0] b0_waddr;            // bank 0 counter writing address
+    logic    [4:1][index-1:0] bx_waddr;            // bank x counter/tag writing address
+    logic                     m0_wena;             // bank 0 meta bit write enable
+    logic                     c0_wena;             // bank 0 counter write enable
+    logic           [cnt-1:0] c0_wvalue;           // bank 0 counter write value
+    logic    [4:1]            cx_wena, tx_wena;    // bank x counter/tag write enable
+    logic    [4:1]            ux_wvalue;           // bank x useful bit write value
+    logic    [4:1]  [cnt-1:0] cx_wvalue;           // bank x counter write value
+    logic    [4:1]  [tag-1:0] tx_wvalue;           // bank x tag write value
+    logic [$clog2(btbsz)-1:0] btb_waddr;           // BTB write address
+    logic                     btb_wena;            // BTB write enable
+    logic              [63:0] btb_wvalue;          // BTB write value
+    /* read from tables */
+    always_comb for (int i = 0; i < fnum; i++) begin
+        b0_raddr [i] = pc[index+2:1] + (index+2)'(i);
+        bx_raddr [i] = sghi[i] ^ {4{b0_raddr[i][index-1:0]}};
+        cx_rvalue[i] = {c4[bx_raddr[i][4]], c3[bx_raddr[i][3]], c2[bx_raddr[i][2]], c1[bx_raddr[i][1]]};
+        tx_rvalue[i] = {t4[bx_raddr[i][4]], t3[bx_raddr[i][3]], t2[bx_raddr[i][2]], t1[bx_raddr[i][1]]};
+        ux_rvalue[i] = {u4[bx_raddr[i][4]], u3[bx_raddr[i][3]], u2[bx_raddr[i][2]], u1[bx_raddr[i][1]]};
+    end
+    /* assign write addresses and values */
+    always_ff @(posedge clk) b0_waddr  <= upc[index+2:1];
+    always_ff @(posedge clk) bx_waddr  <= {4{upc[index:1]}} ^ ughi;
+    always_ff @(posedge clk) m0_wena   <= ~rst & (redir | reinf) & upat[cnt-1] != upatb[cnt-1];
+    always_ff @(posedge clk) c0_wena   <= ~rst & (redir | reinf) & ubk[0];
+    always_ff @(posedge clk) c0_wvalue <= unpat;
+    always_ff @(posedge clk) for (int i = 1; i <= 4; i++) ux_wvalue[i] <= lbk[i] ? reinf : 0;
+    always_ff @(posedge clk)
+        if      (rst)   cx_wena <= 0;
+        else if (redir) cx_wena <= lbk[4:1] | hbk[4:1];
+        else if (reinf) cx_wena <= lbk[4:1];
+        else            cx_wena <= 0;
+    always_ff @(posedge clk) for (int i = 1; i <= 4; i++)
+        if (hbk[i])                                                           // allocate at i-th bank
+            if (upatb[cnt]) cx_wvalue[i] <= ~upat[cnt-1] ? mintk : mintk - 1; // meta bit is set
+            else            cx_wvalue[i] <= upatb[cnt-1] ? mintk : mintk - 1; // meta bit is reset
+        else                cx_wvalue[i] <= unpat;                            // update related bank
+    always_ff @(posedge clk) tx_wena    <= ~rst & redir ? hbk[4:1] : 0;
+    always_ff @(posedge clk) tx_wvalue  <= {4{upc[tag:1]}} ^ ught;
+    always_ff @(posedge clk) btb_wena   <= ~rst & redir & ~upat[cnt-1];
     always_ff @(posedge clk) btb_waddr  <= upc[$clog2(btbsz):1];
     always_ff @(posedge clk) btb_wvalue <= unpc;
-    always_ff @(posedge clk) if (b0_wena)  b0 [b0_waddr]  <= b0_wvalue;
+    /* entity assignment */
+    always_ff @(posedge clk) if (c0_wena)    c0[b0_waddr]    <= c0_wvalue;
+    always_ff @(posedge clk) if (cx_wena[1]) c1[bx_waddr[1]] <= cx_wvalue[1];
+    always_ff @(posedge clk) if (cx_wena[2]) c2[bx_waddr[2]] <= cx_wvalue[2];
+    always_ff @(posedge clk) if (cx_wena[3]) c3[bx_waddr[3]] <= cx_wvalue[3];
+    always_ff @(posedge clk) if (cx_wena[4]) c4[bx_waddr[4]] <= cx_wvalue[4];
+    always_ff @(posedge clk) if (tx_wena[1]) t1[bx_waddr[1]] <= tx_wvalue[1];
+    always_ff @(posedge clk) if (tx_wena[2]) t2[bx_waddr[2]] <= tx_wvalue[2];
+    always_ff @(posedge clk) if (tx_wena[3]) t3[bx_waddr[3]] <= tx_wvalue[3];
+    always_ff @(posedge clk) if (tx_wena[4]) t4[bx_waddr[4]] <= tx_wvalue[4];
     always_ff @(posedge clk) if (btb_wena) btb[btb_waddr] <= btb_wvalue;
+    always_ff @(posedge clk) if (m0_wena) m0[b0_waddr] <= reinf;
+    always_ff @(posedge clk) if (m0_wena | lbk[1] | tx_wena[1]) u1[bx_waddr[1]] <= ux_wvalue[1];
+    always_ff @(posedge clk) if (m0_wena | lbk[2] | tx_wena[2]) u2[bx_waddr[2]] <= ux_wvalue[2];
+    always_ff @(posedge clk) if (m0_wena | lbk[3] | tx_wena[3]) u3[bx_waddr[3]] <= ux_wvalue[3];
+    always_ff @(posedge clk) if (m0_wena | lbk[4] | tx_wena[4]) u4[bx_waddr[4]] <= ux_wvalue[4];
 
     /* prediction */
     logic [63:0] bpc; // PC register and branch PC
     always_comb begin
         out.id  = {1'b1, id};
         out.pc  = pc; bpc = 0;
-        out.br  = 0; out.bank = 0;
-        out.pat = 0; out.gh   = 0;
+        out.br  = 0;
         out.num = fnum; // `fnum` should be less than the size of `pat`
-        for (int i = 0; i < fnum; i++) out.bank[i] = 1;
-        for (int i = 0; i < fnum; i++) out.pat [i] = 4'(b0[b0_raddr[i]]);
-        for (int i = 0; i < fnum; i++) out.gh  [i] = 128'(sgh[i]) << 1; // after current shifting
-        for (int i = 0; i < fnum; i++) if (b0[b0_raddr[i]][1]) begin    // encounter branch
+        for (int i = 0; i < fnum; i++) begin
+            out.bank[i] = 1; // first use bimodal result
+            out.pat [i] = 8'(c0[b0_raddr[i]]);
+            out.patb[i] = 8'({m0[b0_raddr[i]], c0[b0_raddr[i]]});
+            out.gh  [i] = 128'(sgh[i]);
+            for (int j = 1; j <= 4; j++)
+                if (tx_rvalue[i][j] == (sght[i][j] ^ b0_raddr[i][tag-1:0])) begin
+                    out.bank[i] = 1 << j; // highest matched bank
+                    out.pat [i] = 8'(cx_rvalue[i][j]);
+                end else if (~ux_rvalue[i][j]) out.bank[i][j] = 1; // vacant bank
+            if ($countones(out.bank[i]) == 1)                      // no vacant bank
+                for (int j = 1; j < 4; j++) if (out.bank[i][j]) out.bank[i][j+1] = 1;
+        end
+        for (int i = 0; i < fnum; i++) if (out.pat[i][cnt-1]) begin // encounter branch
             bpc = btb[$clog2(btbsz)'(b0_raddr[i])];
             out.br = {1'b1, bpc};
-            out.gh[i][0] = 1;
             out.num = 8'(i) + 1;
             break;
         end
@@ -129,5 +202,5 @@ module tage #(
         end
     end
 
-    if (init) initial for (int i = 0; i < b0sz; i++) b0[i] = 0;
+    if (init) initial for (int i = 0; i < b0sz; i++) c0[i] = 0;
 endmodule

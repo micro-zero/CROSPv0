@@ -287,6 +287,7 @@ module decoder #(
             result[g][0].pnpc  = fet_bundle[g].pnpc;
             result[g][0].bank  = fet_bundle[g].bank;
             result[g][0].pat   = fet_bundle[g].pat;
+            result[g][0].patb  = fet_bundle[g].patb;
             result[g][0].gh    = fet_bundle[g].gh;
             result[g][0].call  = fet_bundle[g].call;
             result[g][0].ret   = fet_bundle[g].ret;
@@ -335,6 +336,7 @@ module decoder #(
             result[g][1].pnpc  = fet_bundle[g].pnpc;
             result[g][1].bank  = fet_bundle[g].bank;
             result[g][1].pat   = fet_bundle[g].pat;
+            result[g][1].patb  = fet_bundle[g].patb;
             result[g][1].gh    = fet_bundle[g].gh;
             result[g][1].ir    = oir;
             result[g][1].delta = delta;
@@ -361,6 +363,7 @@ module decoder #(
             result[g][2].pnpc  = fet_bundle[g].pnpc;
             result[g][2].bank  = fet_bundle[g].bank;
             result[g][2].pat   = fet_bundle[g].pat;
+            result[g][2].patb  = fet_bundle[g].patb;
             result[g][2].gh    = fet_bundle[g].gh;
             result[g][2].ir    = oir;
             result[g][2].delta = delta;

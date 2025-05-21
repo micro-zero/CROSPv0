@@ -157,6 +157,7 @@ module rename #(
         rq_wvalue[i].pnpc    = dec_bundle[i].pnpc;
         rq_wvalue[i].bank    = dec_bundle[i].bank;
         rq_wvalue[i].pat     = dec_bundle[i].pat;
+        rq_wvalue[i].patb    = dec_bundle[i].patb;
         rq_wvalue[i].gh      = dec_bundle[i].gh;
         rq_wvalue[i].delta   = dec_bundle[i].delta;
         rq_wvalue[i].fu      = dec_bundle[i].fu;

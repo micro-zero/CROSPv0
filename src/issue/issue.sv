@@ -53,6 +53,7 @@ module issue #(
             iq_in_data[i].delta  = ren_bundle[i].delta;
             iq_in_data[i].bank   = ren_bundle[i].bank;
             iq_in_data[i].pat    = ren_bundle[i].pat;
+            iq_in_data[i].patb   = ren_bundle[i].patb;
             iq_in_data[i].gh     = ren_bundle[i].gh;
             iq_in_data[i].fu     = ren_bundle[i].fu;
             iq_in_data[i].funct  = ren_bundle[i].funct;

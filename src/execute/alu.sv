@@ -101,6 +101,7 @@ module alu #(
             result[g].delta  = in.delta;
             result[g].bank   = in.bank;
             result[g].pat    = in.pat;
+            result[g].patb   = in.patb;
             result[g].gh     = in.gh;
             result[g].pc     = in.pc;
             result[g].branch = in.branch;

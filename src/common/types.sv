@@ -9,12 +9,12 @@
 package types;
 
 typedef struct packed {
-    logic [7:0] id;        // FTQ id, MSB is valid bit
-    logic [64:0] br;       // instruction flow break signal, MSB is valid bit, the rest is target
-    logic [63:0] pc;       // program counter
-    logic [7:0] num;       // fetch number in half-word
-    logic [3:0][4:0] bank; // chosen bank
-    logic [3:0][3:0] pat;  // chosen pattern (size is at least `fnum`)
+    logic [7:0] id;             // FTQ id, MSB is valid bit
+    logic [64:0] br;            // instruction flow break signal, MSB is valid bit, the rest is target
+    logic [63:0] pc;            // program counter
+    logic [7:0] num;            // fetch number in half-word
+    logic [3:0][4:0] bank;      // chosen bank
+    logic [3:0][7:0] pat, patb; // chosen pattern and bimodal result with meta bit (size is at least `fnum`)
     logic [3:0][127:0] gh; // global history
 } pcg_bundle_t;
 
@@ -23,7 +23,7 @@ typedef struct packed {
     logic [63:0] pc, pnpc; // program counter and predicted next PC
     logic [31:0] ir;       // instruction before uncompression
     logic [4:0] bank;      // chosen bank
-    logic [3:0] pat;       // branch pattern
+    logic [7:0] pat, patb; // branch pattern
     logic [127:0] gh;      // global history
     logic [1:0] af, pf;    // encountering instruction access/page fault
     logic call, ret;       // call/ret instruction (to update RAS)
@@ -40,7 +40,7 @@ typedef struct packed {
     logic [63:0] pc, pnpc;   // program counter and predicted next PC
     logic [31:0] ir;         // instruction
     logic [4:0] bank;        // chosen bank
-    logic [3:0] pat;         // branch pattern
+    logic [7:0] pat, patb;   // branch pattern
     logic [127:0] gh;        // global history
     logic [2:0] delta;       // PC delta
     /* micro-operation */
@@ -68,7 +68,7 @@ typedef struct packed {
     logic [7:0] brid;
     logic [7:0] ldid, stid;
     logic [4:0] bank;
-    logic [3:0] pat;
+    logic [7:0] pat, patb;
     logic [127:0] gh;
     logic [63:0] pc, pnpc;
     logic [31:0] ir;
@@ -90,7 +90,7 @@ typedef struct packed {
     logic [7:0] brid;
     logic [7:0] ldid, stid;
     logic [4:0] bank;
-    logic [3:0] pat;
+    logic [7:0] pat, patb;
     logic [127:0] gh;
     logic [63:0] pc, pnpc;
     logic [31:0] ir;
@@ -113,7 +113,7 @@ typedef struct packed {
     logic [7:0] ldid, stid;
     logic [2:0] delta;
     logic [4:0] bank;
-    logic [3:0] pat;
+    logic [7:0] pat, patb;
     logic [127:0] gh;
     logic [63:0] pc, pnpc;
     logic [31:0] ir;
@@ -141,7 +141,7 @@ typedef struct packed {
     logic [63:0] tval;      // exception trap value
     logic  [4:0] fflags;    // floating point flags
     logic  [4:0] bank;      // chosen bank
-    logic  [3:0] pat;       // branch pattern for updating fetch unit
+    logic  [7:0] pat, patb; // branch pattern
     logic [127:0] gh;       // global history
     logic specul;           // speculative mark
     logic misp;             // misprediction of BRANCH and JALR instructions
@@ -170,7 +170,7 @@ typedef struct packed {
     logic [7:0] brid, ldid, stid; // branch/load/store ID
     logic [2:0] delta;            // PC delta if not branch
     logic [4:0] bank;             // chosen bank
-    logic [3:0] pat;              // pattern of branch predictor
+    logic [7:0] pat, patb;        // pattern of branch predictor
     logic [127:0] gh;             // global history
     logic [63:0] pc, npc;         // PC and next PC
     logic rollback;               // rollback signal

@@ -174,7 +174,8 @@ module commit #(
         for (int i = iwd - 1; i >= 0; i--)
             if (exe_bundle[i].opid[15] & ~succeed(exe_bundle[i].opid) &
                 exe_bundle[i].brid[7] & ~exe_bundle[i].misp &
-                (|exe_bundle[i].pat[cnt-1:0] & ~&exe_bundle[i].pat[cnt-1:0])) // weak pattern
+                (|exe_bundle[i].pat[cnt-1:0] & ~&exe_bundle[i].pat[cnt-1:0] | // weak pattern
+                 exe_bundle[i].pat[cnt-1] != exe_bundle[i].patb[cnt-1]))      // different from bimodal
                 rei_bundle <= exe_bundle[i];
     end
 
@@ -330,6 +331,7 @@ module commit #(
             red_bundle.pc = mis_bundle.pc;
             red_bundle.bank = mis_bundle.bank;
             red_bundle.pat = mis_bundle.pat;
+            red_bundle.patb = mis_bundle.patb;
             red_bundle.gh = mis_bundle.gh;
             red_bundle.delta = mis_bundle.delta;
             red_bundle.npc = mis_bundle.npc & ~64'd1; // avoid misaligned fetch
@@ -342,6 +344,7 @@ module commit #(
             red_bundle.pc = rei_bundle.pc;
             red_bundle.bank = rei_bundle.bank;
             red_bundle.pat = rei_bundle.pat;
+            red_bundle.patb = rei_bundle.patb;
             red_bundle.gh = rei_bundle.gh;
             red_bundle.delta = rei_bundle.delta;
             red_bundle.npc = rei_bundle.npc & ~64'd1;
