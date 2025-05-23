@@ -27,7 +27,7 @@ typedef struct packed {
     logic [127:0] gh;      // global history
     logic [1:0] af, pf;    // encountering instruction access/page fault
     logic call, ret;       // call/ret instruction (to update RAS)
-    logic branch, jal, jalr; // jump/branch types (for debugging)
+    logic branch, jal, jalr;
 } fet_bundle_t;
 
 typedef struct packed {
@@ -174,7 +174,7 @@ typedef struct packed {
     logic [127:0] gh;             // global history
     logic [63:0] pc, npc;         // PC and next PC
     logic rollback;               // rollback signal
-    logic branch, jal, jalr;      // jump type (for debugging)
+    logic branch, jal, jalr;      // jump type
 } red_bundle_t;
 
 typedef struct packed {

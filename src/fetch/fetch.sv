@@ -11,7 +11,6 @@ module fetch #(
     parameter init,   // initialize RAM
     parameter rst_pc, // PC on reset
     parameter fwd,    // fetch width
-    parameter cwd,    // commit width
     parameter cbsz,   // cache block size to avoid fetch beyond cache line
     parameter fqsz,   // instruction fetch queue size
     parameter ftqsz,  // fetch target queue size
@@ -25,7 +24,6 @@ module fetch #(
 )(
     input  logic clk,
     input  logic rst,
-    input  com_bundle_t [cwd-1:0] com_bundle, // commit bundle
     input  red_bundle_t           red_bundle, // redirect bundle
     input  logic        [fwd-1:0] fetch,      // fetch/ready signal
     output fet_bundle_t [fwd-1:0] fet_bundle, // output bundle
@@ -306,35 +304,22 @@ module fetch #(
     logic   [rassz-1:0][63:0] ras;     // return address stack
     logic [$clog2(rassz)-1:0] ras_top; // RAS top cursor
     logic   [$clog2(rassz):0] ras_num; // entry numbers in RAS
-    logic [15:0] call_num, ret_num;    // in-flight numbers of call/ret instructions
-    logic [15:0] call_in, call_out;
-    logic [15:0]  ret_in,  ret_out;
     logic [63:0] ras_target; // the chosen RAS entry
-    always_comb begin
-        call_out = 0; ret_out = 0;
-        for (int i = 0; i < cwd; i++) begin
-            if (com_bundle[i].opid[15] & com_bundle[i].call) call_out++;
-            if (com_bundle[i].opid[15] & com_bundle[i].ret)   ret_out++;
-        end
-    end
-    /* todo: there may be a method to maintain speculative valid bits and matching
-       status of RAS entries, so that entries can be used when there are in-flight
-       call/ret instructions, even when call and ret have different numbers */
     always_comb ras_target = ras[32'(ras_top) - 1];
-    always_ff @(posedge clk) if (rst) {ras_top, ras_num} <= 0; else
-        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) begin
-            if (com_bundle[i].ret) begin
+    always_ff @(posedge clk)
+        if      (rst)                      {ras_top, ras_num} <= 0;
+        else if (bredir & red_bundle.jalr) {ras_top, ras_num} <= 0; // already insufficient
+        else for (int i = 0; i < fwd; i++) if (i < 32'(fq_in)) begin
+            if (ret[i]) begin
                 ras_top <= ras_top - 1;
                 ras_num <= ras_num - 1; // non-zero size is checked in `ret`
             end
-            if (com_bundle[i].call) begin
-                ras_top <= com_bundle[i].ret ? ras_top : ras_top + 1;
-                ras_num <= com_bundle[i].ret ? ras_num : (ras_num == rassz ? rassz : ras_num + 1);
-                ras[ras_top] <= com_bundle[i].pc + (com_bundle[i].delta == 2 ? 2 : 4);
+            if (call[i]) begin
+                ras_top <= ret[i] ? ras_top : ras_top + 1;
+                ras_num <= ret[i] ? ras_num : (ras_num == rassz ? rassz : ras_num + 1);
+                ras[ras_top] <= pc[i] + (&ir[i][1:0] ? 4 : 2);
             end
         end
-    always_ff @(posedge clk) if (rst | bredir) call_num <= 0; else call_num <= call_num + call_in - call_out;
-    always_ff @(posedge clk) if (rst | bredir)  ret_num <= 0; else  ret_num <=  ret_num +  ret_in -  ret_out;
 
     /* pre-decode */
     logic [fwd-1:0]       branch, jalr, jal; // types of instructions
@@ -378,15 +363,12 @@ module fetch #(
         iredir = 0;
         dredir = 0; dbk = 0; dgh = 0; dpc = 0; dnpc = 0;
         dpat = 0; dpatb = 0; dnpat = 0; dnpatb = 0;
-        call_in = 0; ret_in = 0;
         for (int i = 0; i < fwd; i++) if (fq_in < fqsz - fq_num & valid[i]) begin
             /* ready to fetch into instruction queue */
             /* incomplete fetch detected */
             if (incomp[i]) begin iredir = 1; break; end
             /* fetch confirmed */
             fq_in++;
-            if (call[i]) call_in++; // count call/ret instructions into FQ
-            if ( ret[i])  ret_in++;
             /* branch at non-branch instructions */
             if (~(branch[i] | jal[i] | jalr[i]) & br[i][64]) begin
                 dredir = 1;
@@ -414,7 +396,7 @@ module fetch #(
                 break;
             end
             /* linked JALR instructions */
-            if (ret[i] & |ras_num & ~|call_num & ~|ret_num & target[i][8:1] != br[i][8:1]) begin
+            if (ret[i] & |ras_num & target[i][8:1] != br[i][8:1]) begin
                 dredir = 1;
                 dbk    = bank[i];
                 dpat   = mintk - 1;

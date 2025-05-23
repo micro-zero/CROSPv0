@@ -180,17 +180,19 @@ module commit #(
     end
 
     /* write-back signal of each stage */
-    logic [15:0] eid_last, eid_new;   // operation ID of the nearest exception
-    logic [63:0] tval_last, tval_new; // trap value of the nearest exception
-    logic [15:0] sid_last, sid_new;   // operation ID of the nearest sfence.vma
-    logic [15:0] asid_last, asid_new; // ASID of the nearest sfence.vma
-    logic [63:0] vadd_last, vadd_new; // virtual address of the nearest sfence.vma
+    logic  [15:0] eid_last, eid_new;   // operation ID of the nearest exception
+    logic  [63:0] tval_last, tval_new; // trap value of the nearest exception
+    logic [127:0] gh_last, gh_new;     // global history of the nearest exception
+    logic  [15:0] sid_last, sid_new;   // operation ID of the nearest sfence.vma
+    logic  [15:0] asid_last, asid_new; // ASID of the nearest sfence.vma
+    logic  [63:0] vadd_last, vadd_new; // virtual address of the nearest sfence.vma
     always_comb begin
         /* store earliest trap/sfence value in a single register to save space of ROB */
         /* todo: if using data in ROB, this will be unnecessary */
         eid_new = eid_last;
         sid_new = sid_last;
         tval_new = tval_last;
+        gh_new = gh_last;
         asid_new = asid_last;
         vadd_new = vadd_last;
         for (int i = 0; i < iwd; i++) begin
@@ -204,6 +206,7 @@ module commit #(
                 if (~eid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(eid_new) - rob_front) begin
                     eid_new = exe_bundle[i].opid;
                     tval_new = exe_bundle[i].tval;
+                    gh_new = exe_bundle[i].gh;
                 end
         end
     end
@@ -233,6 +236,7 @@ module commit #(
     end
     always_ff @(posedge clk) if (rst | exception | succeed(eid_new))  eid_last <= 0; else  eid_last <=  eid_new;
     always_ff @(posedge clk) if (rst |             succeed(eid_new)) tval_last <= 0; else tval_last <= tval_new;
+    always_ff @(posedge clk) if (rst |             succeed(eid_new))   gh_last <= 0; else   gh_last <=   gh_new;
     always_ff @(posedge clk) if (rst | sfence[0] | succeed(sid_new))  sid_last <= 0; else  sid_last <=  sid_new;
     always_ff @(posedge clk) if (rst |             succeed(sid_new)) asid_last <= 0; else asid_last <= asid_new;
     always_ff @(posedge clk) if (rst |             succeed(sid_new)) vadd_last <= 0; else vadd_last <= vadd_new;
@@ -318,6 +322,7 @@ module commit #(
             red_bundle.ldid = dec_last.ldid;
             red_bundle.stid = dec_last.stid;
             red_bundle.topid = top_opid;
+            red_bundle.gh = gh_last;
             if (exe_last.flush)    red_bundle.npc = dec_last.pc + 64'(dec_last.delta);
             if (exe_last.retry)    red_bundle.npc = dec_last.pc;
             if (exe_last.cause[7]) red_bundle.npc = tvec;

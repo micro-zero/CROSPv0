@@ -73,7 +73,7 @@ module csr(
     /* input and output not from instructions */
     input  logic       [63:0] in_ip,      // interrupt pending
     input  logic       [63:0] in_time,    // CSR `mtime` mapped in memory
-    input  logic       [63:0] in_instret, // instruction retired (delta)
+    input  logic  [9:0] [3:0] in_pmd,     // performance monitor delta
     output logic       [63:0] out_status, // CSR `mstatus`
     output logic       [63:0] out_tvec,   // CSR `mtvec` or `stvec` according to current privilege level
     output logic       [63:0] out_mepc,   // CSR `mepc`
@@ -110,7 +110,7 @@ module csr(
         2'b10: wres = wdat | rdat;
         2'b11: wres = ~wdat & rdat;
     endcase
-    always_comb if (addr > 12'hb02 & addr < 12'hb20)
+    always_comb if (addr > 12'hb02 & addr < 12'hb20 | addr > 12'hc02 & addr < 12'hc20)
         val = 65'(mhpmcounter[addr[4:0]]);
     else if (addr > 12'h322 & addr < 12'h340)
         val = 65'(mhpmevent[addr[4:0]]);
@@ -203,39 +203,43 @@ module csr(
          *                                 ZY XWVU TSRQ PONM LKJI HGFE DCBA */
         if (rst) mvendorid <= 0; if (rst) marchid <= 0;
         if (rst) mimpid    <= 0; if (rst) mhartid <= 0;
+        /* `sstatus` shared with `mstatus` */
         if (rst) mstatus <= {32'ha, 19'h1, 13'h0};
-        else if (we & (addr == 12'h300 | addr == 12'h100)) begin // `sstatus` shared with `mstatus`
+        else if (we & (addr == 12'h300 | addr == 12'h100)) begin
             mstatus <= wres;
             mstatus[35:32] <= 4'b1010;                                  // SXL/UXL
             mstatus[63] <= wres[16:15] == 2'b11 | wres[14:13] == 2'b11; // SD bit
             {mstatus[62:36], mstatus[31:23]} <= 0;
             {mstatus[10:9], mstatus[6], mstatus[2]} <= 0;
         end
-        if (rst) mtvec <= 0; else if (we & addr == 12'h305) begin
-            mtvec <= wres; mtvec[1:0] <= 0; end // not support vectored `mtvec`
-        if (rst) medeleg <= 0; else if (we & addr == 12'h302) begin
-            medeleg <= wres; medeleg[11] <= 0; end
+        /* not support vectored `mtvec` */
+        if (rst) mtvec   <= 0; else if (we & addr == 12'h305) mtvec   <= wres & ~64'd3;
+        if (rst) medeleg <= 0; else if (we & addr == 12'h302) medeleg <= wres & ~(64'd1 << 11);
         if (rst) mideleg <= 0; else if (we & addr == 12'h303) mideleg <= wres;
-        if (rst) mip_base <= 0; else if (we & (addr == 12'h344 | addr == 12'h144)) // `sip` shared with `mip`
-            mip_base <= wres;
-        if (rst) mie <= 0; else if (we & (addr == 12'h304 | addr == 12'h104)) begin // `sie` shared with `mie`
-            mie <= wres; mie[63:12] <= 0; mie[10] <= 0; mie[6] <= 0; mie[2] <= 0; end
-        if (rst) mcycle   <= 0; else if (we & addr == 12'hb00) mcycle <= wres; else mcycle <= mcycle + 1;
-        if (rst) minstret <= 0;
-        else if (we & addr == 12'hb02) // previously exclude CSRRW instruction when writing CSR
-            minstret <= wres - (mcountinhibit[2] | ~vc ? 0 : 1);
-        else minstret <= minstret + (mcountinhibit[2] ? 0 : in_instret);
-        for (int i = 3; i < 32; i++) if (rst) mhpmcounter[i] <= 0;
-        for (int i = 3; i < 32; i++) if (rst) mhpmevent[i] <= 0;
-        if (we & addr > 12'hb02 & addr < 12'hb20) mhpmcounter[addr[4:0]] <= wres;
-        if (we & addr > 12'h322 & addr < 12'h340) mhpmevent[addr[4:0]] <= wres;
-        if (rst) mcounteren <= 0; else if (we & addr == 12'h306) mcounteren <= wres;
-        if (rst) mcountinhibit <= 0;
-        else if (we & addr == 12'h320) mcountinhibit <= wres;
+        /* `sip`/`sie` shared with `mip`/`mie` */
+        if (rst) mip_base      <= 0; else if (we & (addr == 12'h344 | addr == 12'h144)) mip_base      <= wres;
+        if (rst) mie           <= 0; else if (we & (addr == 12'h304 | addr == 12'h104)) mie           <= wres;
+        if (rst) mcounteren    <= 0; // else if (we & addr == 12'h306)                  mcounteren    <= wres;
+        if (rst) mcountinhibit <= 0; // else if (we & addr == 12'h320)                  mcountinhibit <= wres;
+        /* auto-increment of HPM counters */
+        if      (rst)                  mcycle <= 0;
+        else if (we & addr == 12'hb00) mcycle <= wres;
+        else                           mcycle <= mcycle + (mcountinhibit[0] ? 0 : 64'(in_pmd[0]));
+        if      (rst)                  minstret <= 0;
+        else if (we & addr == 12'hb02) minstret <= wres - (mcountinhibit[2] | ~vc ? 0 : 1); // exclude CSRRW
+        else                           minstret <= minstret + (mcountinhibit[2] ? 0 : 64'(in_pmd[1]));
+        for (int i = 3; i < 32; i++)
+            if      (rst)                           mhpmevent[i] <= 64'(i) - 1;
+            else if (we & addr == 12'h320 + 12'(i)) mhpmevent[i] <= wres;
+        for (int i = 3; i < 32; i++)
+            if      (rst)                           mhpmcounter[i] <= 0;
+            else if (we & addr == 12'hb00 + 12'(i)) mhpmcounter[i] <= wres;
+            else mhpmcounter[i] <= mhpmcounter[i] + (mcountinhibit[i] ? 0 : 64'(in_pmd[32'(mhpmevent[i])]));
         if (rst) mscratch <= 0; else if (we & addr == 12'h340) mscratch <= wres;
-        if (rst) mepc <= 0; else if (we & addr == 12'h341) mepc <= wres;
-        if (rst) mcause <= 0; else if (we & addr == 12'h342) mcause <= wres;
-        if (rst) mtval <= 0; else if (we & addr == 12'h343) mtval <= wres;
+        if (rst) mepc     <= 0; else if (we & addr == 12'h341) mepc     <= wres;
+        if (rst) mcause   <= 0; else if (we & addr == 12'h342) mcause   <= wres;
+        if (rst) mtval    <= 0; else if (we & addr == 12'h343) mtval    <= wres;
+        /* some special constraint of PMP configurations and addresses */
         if (we & addr == 12'h3a0) pmpcfg0 <= wres;
         if (we & addr == 12'h3a2) pmpcfg2 <= wres;
         if (we & addr >= 12'h3b0 & addr < 12'h3c0) begin
@@ -261,15 +265,16 @@ module csr(
         end
         if (rst) {pmpcfg0, pmpcfg2} <= 0; // reset (unlock)
         for (int i = 0; i < 16; i++) if (rst) pmpaddr[i] <= 0;
+
         /* S-level CSR */
-        if (rst) stvec <= 0; else if (we & addr == 12'h105) begin
-            stvec <= wres; stvec[1:0] <= 0; end
+        if (rst) stvec      <= 0; else if (we & addr == 12'h105) stvec      <= wres & ~64'd3;
         if (rst) scounteren <= 0; else if (we & addr == 12'h106) scounteren <= wres;
-        if (rst) sscratch <= 0; else if (we & addr == 12'h140) sscratch <= wres;
-        if (rst) sepc <= 0; else if (we & addr == 12'h141) sepc <= wres;
-        if (rst) scause <= 0; else if (we & addr == 12'h142) scause <= wres;
-        if (rst) stval <= 0; else if (we & addr == 12'h143) stval <= wres;
-        if (rst) satp <= 0; else if (we & addr == 12'h180) satp <= wres;
+        if (rst) sscratch   <= 0; else if (we & addr == 12'h140) sscratch   <= wres;
+        if (rst) sepc       <= 0; else if (we & addr == 12'h141) sepc       <= wres;
+        if (rst) scause     <= 0; else if (we & addr == 12'h142) scause     <= wres;
+        if (rst) stval      <= 0; else if (we & addr == 12'h143) stval      <= wres;
+        if (rst) satp       <= 0; else if (we & addr == 12'h180) satp       <= wres;
+
         /* U-level CSR */
         fcsr[4:0] <= fcsr[4:0] | fflags;
         if (rst) fcsr <= 0;

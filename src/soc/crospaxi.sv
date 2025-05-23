@@ -202,6 +202,7 @@ module crospaxi #(
     logic  [2:0] csr_func;
     logic [11:0] csr_addr;
     logic [63:0] csr_wdat, csr_rdat;
+    logic [9:0][3:0] csr_pmd;
     logic [63:0] csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr;
     logic [15:0] [7:0] pmpcfg;
     logic [15:0][53:0] pmpaddr;
@@ -212,10 +213,10 @@ module crospaxi #(
     logic [15:0] top_opid, saf_opid;
     logic [2*mwd-1:0][15:0] lsu_safe;
     logic [3*mwd-1:0][15:0] lsu_unsf;
-    fetch #(.init(init), .rst_pc(rst_pc), .fwd(fwd), .cwd(cwd),
+    fetch #(.init(init), .rst_pc(rst_pc), .fwd(fwd),
         .cbsz(cbsz), .fqsz(fqsz), .ftqsz(ftqsz), .fnum(fnum),
         .rassz(rassz), .btbsz(btbsz), .index(index), .tag(tag), .hist(hist), .cnt(cnt))
-        fet_inst(clk, rst, com_bundle, red_bundle, dec_ready, fet_bundle,
+        fet_inst(clk, rst, red_bundle, dec_ready, fet_bundle,
             csr_inst.level, pmpcfg, pmpaddr, fl_inst,
             it_rqst, it_vadd, it_resp, it_perm, it_padd,
             ic_rqst, ic_addr, ic_resp, ic_rdat);
@@ -230,8 +231,7 @@ module crospaxi #(
             iss_ready, (iwd)'(-1), busy_resp, reg_resp);
     csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret, frd, fflags,
-        csr_excp, csr_intl, csr_intg, csr_flsh,
-        mip_ext, mtime, 64'(com_inst.rob_out),
+        csr_excp, csr_intl, csr_intg, csr_flsh, mip_ext, mtime, csr_pmd,
         csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp, pmpcfg, pmpaddr);
     issue #(.rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .iqsz(iqsz))
         iss_inst(clk, rst, fu_ready, busy_resp,
@@ -260,8 +260,23 @@ module crospaxi #(
             dt_rqst, dt_vadd, dt_resp, dt_perm, dt_padd,
             dc_rqst, dc_addr, dc_bits, dc_wdat, dc_resp, dc_miss, dc_rdat);
 
+    /* performance monitor */
+    always_comb begin
+        /* `csr_pmd` record the delta of counters within current cycle */
+        csr_pmd[0] = 1;                            // cycle
+        csr_pmd[1] = 4'(com_inst.rob_out);         // instructions retired
+        csr_pmd[2] = 4'(fet_inst.fredir);          // frontend redirect
+        csr_pmd[3] = 4'(fet_inst.bredir);          // backend redirect
+        csr_pmd[4] = 4'(dc_resp[7:4] == 4'b1110);  // load access
+        csr_pmd[5] = 4'(dc_resp[7:4] == 4'b1111);  // store access
+        csr_pmd[6] = 4'(mmu_inst.itlb.fill);       // ITLB miss
+        csr_pmd[7] = 4'(mmu_inst.dtlb.fill);       // DTLB miss
+        csr_pmd[8] = 4'(mmu_inst.icache.mshr_out); // ICACHE miss
+        csr_pmd[9] = 4'(mmu_inst.dcache.mshr_out); // DCACHE miss
+    end
+
     /* debug ports */
-    always_comb dbg_cycle = csr_inst.mcycle;
+    always_ff @(posedge clk) if (rst) dbg_cycle <= 0; else dbg_cycle <= dbg_cycle + 1;
     always_ff @(posedge clk) if (rst) {dbg_pcir0, dbg_pcir1} <= 0; else begin
         if (com_bundle[0].opid[15]) dbg_pcir0 <= {com_bundle[0].pc[31:0], com_bundle[0].ir};
         if (com_bundle[1].opid[15]) dbg_pcir1 <= {com_bundle[1].pc[31:0], com_bundle[1].ir};
