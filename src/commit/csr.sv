@@ -73,7 +73,7 @@ module csr(
     /* input and output not from instructions */
     input  logic       [63:0] in_ip,      // interrupt pending
     input  logic       [63:0] in_time,    // CSR `mtime` mapped in memory
-    input  logic  [9:0] [3:0] in_pmd,     // performance monitor delta
+    input  logic  [11:0][3:0] in_pmd,     // performance monitor delta
     output logic       [63:0] out_status, // CSR `mstatus`
     output logic       [63:0] out_tvec,   // CSR `mtvec` or `stvec` according to current privilege level
     output logic       [63:0] out_mepc,   // CSR `mepc`
@@ -224,13 +224,13 @@ module csr(
         /* auto-increment of HPM counters */
         if      (rst)                  mcycle <= 0;
         else if (we & addr == 12'hb00) mcycle <= wres;
-        else                           mcycle <= mcycle + (mcountinhibit[0] ? 0 : 64'(in_pmd[0]));
+        else                           mcycle <= mcycle + (mcountinhibit[0] ? 0 : 64'(in_pmd[1]));
         if      (rst)                  minstret <= 0;
         else if (we & addr == 12'hb02) minstret <= wres - (mcountinhibit[2] | ~vc ? 0 : 1); // exclude CSRRW
-        else                           minstret <= minstret + (mcountinhibit[2] ? 0 : 64'(in_pmd[1]));
+        else                           minstret <= minstret + (mcountinhibit[2] ? 0 : 64'(in_pmd[2]));
         for (int i = 3; i < 32; i++)
-            if      (rst)                           mhpmevent[i] <= 64'(i) - 1;
-            else if (we & addr == 12'h320 + 12'(i)) mhpmevent[i] <= wres;
+            if      (rst)                           mhpmevent[i] <= 64'(i);
+            // else if (we & addr == 12'h320 + 12'(i)) mhpmevent[i] <= wres;
         for (int i = 3; i < 32; i++)
             if      (rst)                           mhpmcounter[i] <= 0;
             else if (we & addr == 12'hb00 + 12'(i)) mhpmcounter[i] <= wres;

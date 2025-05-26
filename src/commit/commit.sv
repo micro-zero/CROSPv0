@@ -173,16 +173,17 @@ module commit #(
         rei_bundle <= 0;
         for (int i = iwd - 1; i >= 0; i--)
             if (exe_bundle[i].opid[15] & ~succeed(exe_bundle[i].opid) &
-                exe_bundle[i].brid[7] & ~exe_bundle[i].misp &
-                (|exe_bundle[i].pat[cnt-1:0] & ~&exe_bundle[i].pat[cnt-1:0] | // weak pattern
-                 exe_bundle[i].pat[cnt-1] != exe_bundle[i].patb[cnt-1]))      // different from bimodal
+                exe_bundle[i].brid[7] & ~exe_bundle[i].misp)
                 rei_bundle <= exe_bundle[i];
     end
 
     /* write-back signal of each stage */
     logic  [15:0] eid_last, eid_new;   // operation ID of the nearest exception
     logic  [63:0] tval_last, tval_new; // trap value of the nearest exception
-    logic [127:0] gh_last, gh_new;     // global history of the nearest exception
+    logic  [15:0] gid_last, gid_new;   // operation ID of the nearest global history update
+    logic  [15:0] gh_last, gh_new;     // global history position of the nearest exception
+    logic  [63:0] ghi_last, ghi_new;   // folded global history of the nearest exception
+    logic  [63:0] ght_last, ght_new;   // folded global history for tag
     logic  [15:0] sid_last, sid_new;   // operation ID of the nearest sfence.vma
     logic  [15:0] asid_last, asid_new; // ASID of the nearest sfence.vma
     logic  [63:0] vadd_last, vadd_new; // virtual address of the nearest sfence.vma
@@ -190,25 +191,41 @@ module commit #(
         /* store earliest trap/sfence value in a single register to save space of ROB */
         /* todo: if using data in ROB, this will be unnecessary */
         eid_new = eid_last;
-        sid_new = sid_last;
         tval_new = tval_last;
-        gh_new = gh_last;
+        for (int i = 0; i < iwd; i++)
+            if (exe_wena[i] & exe_bundle[i].cause[7] & ~exe_last.cause[7]) // exception happens
+                if (~eid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(eid_new) - rob_front) begin
+                    eid_new = exe_bundle[i].opid;
+                    tval_new = exe_bundle[i].tval;
+                end
+    end
+    always_comb begin
+        sid_new = sid_last;
         asid_new = asid_last;
         vadd_new = vadd_last;
-        for (int i = 0; i < iwd; i++) begin
+        for (int i = 0; i < iwd; i++)
             if (exe_wena[i] & exe_bundle[i].sfence[0] & ~exe_last.sfence[0]) // sfence.vma executed
                 if (~sid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(sid_new) - rob_front) begin
                     sid_new = exe_bundle[i].opid;
                     asid_new = exe_bundle[i].tval[15:0];
                     vadd_new = exe_bundle[i].prdv;
                 end
-            if (exe_wena[i] & exe_bundle[i].cause[7] & ~exe_last.cause[7]) // exception happens
-                if (~eid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(eid_new) - rob_front) begin
-                    eid_new = exe_bundle[i].opid;
-                    tval_new = exe_bundle[i].tval;
+    end
+    always_comb begin
+        gid_new = gid_last;
+        gh_new = gh_last;
+        ghi_new = ghi_last;
+        ght_new = ght_last;
+        for (int i = 0; i < iwd; i++)
+            if (exe_wena[i] & // global history updated
+                (exe_bundle[i].cause[7] | exe_bundle[i].eret[2] | exe_bundle[i].flush | exe_bundle[i].retry) &
+                ~(    exe_last.cause[7] |      exe_last.eret[2] |      exe_last.flush |      exe_last.retry))
+                if (~gid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(gid_new) - rob_front) begin
+                    gid_new = exe_bundle[i].opid;
                     gh_new = exe_bundle[i].gh;
+                    ghi_new = exe_bundle[i].ghi;
+                    ght_new = exe_bundle[i].ght;
                 end
-        end
     end
     always_comb begin
         saf_fwd = saf;
@@ -236,7 +253,10 @@ module commit #(
     end
     always_ff @(posedge clk) if (rst | exception | succeed(eid_new))  eid_last <= 0; else  eid_last <=  eid_new;
     always_ff @(posedge clk) if (rst |             succeed(eid_new)) tval_last <= 0; else tval_last <= tval_new;
-    always_ff @(posedge clk) if (rst |             succeed(eid_new))   gh_last <= 0; else   gh_last <=   gh_new;
+    always_ff @(posedge clk) if (rst | rollback  | succeed(gid_new))  gid_last <= 0; else  gid_last <=  gid_new;
+    always_ff @(posedge clk) if (rst |             succeed(gid_new))   gh_last <= 0; else   gh_last <=   gh_new;
+    always_ff @(posedge clk) if (rst |             succeed(gid_new))  ghi_last <= 0; else  ghi_last <=  ghi_new;
+    always_ff @(posedge clk) if (rst |             succeed(gid_new))  ght_last <= 0; else  ght_last <=  ght_new;
     always_ff @(posedge clk) if (rst | sfence[0] | succeed(sid_new))  sid_last <= 0; else  sid_last <=  sid_new;
     always_ff @(posedge clk) if (rst |             succeed(sid_new)) asid_last <= 0; else asid_last <= asid_new;
     always_ff @(posedge clk) if (rst |             succeed(sid_new)) vadd_last <= 0; else vadd_last <= vadd_new;
@@ -323,6 +343,8 @@ module commit #(
             red_bundle.stid = dec_last.stid;
             red_bundle.topid = top_opid;
             red_bundle.gh = gh_last;
+            red_bundle.ghi = ghi_last;
+            red_bundle.ght = ght_last;
             if (exe_last.flush)    red_bundle.npc = dec_last.pc + 64'(dec_last.delta);
             if (exe_last.retry)    red_bundle.npc = dec_last.pc;
             if (exe_last.cause[7]) red_bundle.npc = tvec;
@@ -338,6 +360,8 @@ module commit #(
             red_bundle.pat = mis_bundle.pat;
             red_bundle.patb = mis_bundle.patb;
             red_bundle.gh = mis_bundle.gh;
+            red_bundle.ghi = mis_bundle.ghi;
+            red_bundle.ght = mis_bundle.ght;
             red_bundle.delta = mis_bundle.delta;
             red_bundle.npc = mis_bundle.npc & ~64'd1; // avoid misaligned fetch
             red_bundle.branch = mis_bundle.branch;
@@ -351,6 +375,8 @@ module commit #(
             red_bundle.pat = rei_bundle.pat;
             red_bundle.patb = rei_bundle.patb;
             red_bundle.gh = rei_bundle.gh;
+            red_bundle.ghi = rei_bundle.ghi;
+            red_bundle.ght = rei_bundle.ght;
             red_bundle.delta = rei_bundle.delta;
             red_bundle.npc = rei_bundle.npc & ~64'd1;
         end

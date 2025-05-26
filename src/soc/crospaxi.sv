@@ -24,9 +24,9 @@ module crospaxi #(
     parameter ftqsz  = 8,            // fetch target queue size
     parameter rassz  = 8,            // return address stack size
     parameter btbsz  = 512,          // BTB size
-    parameter index  = 10,           // TAGE index length
-    parameter tag    = 8,            // TAGE tag length
-    parameter hist   = 10,           // TAGE history length
+    parameter index  = 11,           // TAGE index length
+    parameter tag    = 9,            // TAGE tag length
+    parameter hist   = 100,          // TAGE history length
     parameter cnt    = 2,            // TAGE counter length
     parameter iqsz   = 16,           // OoO issue queue size
     parameter fnum   = 4,            // fetch number in half-words
@@ -180,6 +180,7 @@ module crospaxi #(
     );
 
     /* instantiate and connect */
+    localparam ghsz = 1 << $clog2(8 * hist + 2 * (opsz + fqsz) + ftqsz * fnum);
     fet_bundle_t [fwd-1:0] fet_bundle;
     dec_bundle_t [dwd-1:0] dec_bundle;
     ren_bundle_t [rwd-1:0] ren_bundle;
@@ -202,7 +203,7 @@ module crospaxi #(
     logic  [2:0] csr_func;
     logic [11:0] csr_addr;
     logic [63:0] csr_wdat, csr_rdat;
-    logic [9:0][3:0] csr_pmd;
+    logic [11:0][3:0] csr_pmd;
     logic [63:0] csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr;
     logic [15:0] [7:0] pmpcfg;
     logic [15:0][53:0] pmpaddr;
@@ -214,7 +215,7 @@ module crospaxi #(
     logic [2*mwd-1:0][15:0] lsu_safe;
     logic [3*mwd-1:0][15:0] lsu_unsf;
     fetch #(.init(init), .rst_pc(rst_pc), .fwd(fwd),
-        .cbsz(cbsz), .fqsz(fqsz), .ftqsz(ftqsz), .fnum(fnum),
+        .cbsz(cbsz), .ghsz(ghsz), .fqsz(fqsz), .ftqsz(ftqsz), .fnum(fnum),
         .rassz(rassz), .btbsz(btbsz), .index(index), .tag(tag), .hist(hist), .cnt(cnt))
         fet_inst(clk, rst, red_bundle, dec_ready, fet_bundle,
             csr_inst.level, pmpcfg, pmpaddr, fl_inst,
@@ -263,16 +264,18 @@ module crospaxi #(
     /* performance monitor */
     always_comb begin
         /* `csr_pmd` record the delta of counters within current cycle */
-        csr_pmd[0] = 1;                            // cycle
-        csr_pmd[1] = 4'(com_inst.rob_out);         // instructions retired
-        csr_pmd[2] = 4'(fet_inst.fredir);          // frontend redirect
-        csr_pmd[3] = 4'(fet_inst.bredir);          // backend redirect
-        csr_pmd[4] = 4'(dc_resp[7:4] == 4'b1110);  // load access
-        csr_pmd[5] = 4'(dc_resp[7:4] == 4'b1111);  // store access
-        csr_pmd[6] = 4'(mmu_inst.itlb.fill);       // ITLB miss
-        csr_pmd[7] = 4'(mmu_inst.dtlb.fill);       // DTLB miss
-        csr_pmd[8] = 4'(mmu_inst.icache.mshr_out); // ICACHE miss
-        csr_pmd[9] = 4'(mmu_inst.dcache.mshr_out); // DCACHE miss
+        csr_pmd[0] = 0;                            // no event
+        csr_pmd[1] = 1;                            // cycle
+        csr_pmd[2] = 4'(com_inst.rob_out);         // instructions retired
+        csr_pmd[3] = 4'(fet_inst.fredir);          // frontend redirect
+        csr_pmd[4] = 4'(fet_inst.bredir);          // backend redirect
+        csr_pmd[5] = 4'(dc_resp[7:4] == 4'b1110);  // load access
+        csr_pmd[6] = 4'(dc_resp[7:4] == 4'b1111);  // store access
+        csr_pmd[7] = 4'(mmu_inst.itlb.fill);       // ITLB miss
+        csr_pmd[8] = 4'(mmu_inst.dtlb.fill);       // DTLB miss
+        csr_pmd[9] = 4'(mmu_inst.icache.mshr_out); // ICACHE miss
+        csr_pmd[10] = 4'(mmu_inst.dcache.mshr_out); // DCACHE miss
+        csr_pmd[11] = 0;
     end
 
     /* debug ports */

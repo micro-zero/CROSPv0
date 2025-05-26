@@ -289,6 +289,8 @@ module decoder #(
             result[g][0].pat   = fet_bundle[g].pat;
             result[g][0].patb  = fet_bundle[g].patb;
             result[g][0].gh    = fet_bundle[g].gh;
+            result[g][0].ghi   = fet_bundle[g].ghi;
+            result[g][0].ght   = fet_bundle[g].ght;
             result[g][0].call  = fet_bundle[g].call;
             result[g][0].ret   = fet_bundle[g].ret;
             result[g][0].ir    = oir;
@@ -338,6 +340,8 @@ module decoder #(
             result[g][1].pat   = fet_bundle[g].pat;
             result[g][1].patb  = fet_bundle[g].patb;
             result[g][1].gh    = fet_bundle[g].gh;
+            result[g][1].ghi   = fet_bundle[g].ghi;
+            result[g][1].ght   = fet_bundle[g].ght;
             result[g][1].ir    = oir;
             result[g][1].delta = delta;
             result[g][1].fu[0] = |alu_funct[1];
@@ -365,6 +369,8 @@ module decoder #(
             result[g][2].pat   = fet_bundle[g].pat;
             result[g][2].patb  = fet_bundle[g].patb;
             result[g][2].gh    = fet_bundle[g].gh;
+            result[g][2].ghi   = fet_bundle[g].ghi;
+            result[g][2].ght   = fet_bundle[g].ght;
             result[g][2].ir    = oir;
             result[g][2].delta = delta;
             result[g][2].fu[0] = |alu_funct[2];

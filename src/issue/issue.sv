@@ -55,6 +55,8 @@ module issue #(
             iq_in_data[i].pat    = ren_bundle[i].pat;
             iq_in_data[i].patb   = ren_bundle[i].patb;
             iq_in_data[i].gh     = ren_bundle[i].gh;
+            iq_in_data[i].ghi    = ren_bundle[i].ghi;
+            iq_in_data[i].ght    = ren_bundle[i].ght;
             iq_in_data[i].fu     = ren_bundle[i].fu;
             iq_in_data[i].funct  = ren_bundle[i].funct;
             iq_in_data[i].base   = ren_bundle[i].base;

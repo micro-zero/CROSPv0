@@ -52,6 +52,8 @@ module tlb #(
     logic [chn-1:0][$clog2(set)-1:0] rindex;
     logic          [$clog2(set)-1:0] windex;
     logic                      [2:0] rfence; // fence address has been read
+    logic                     [15:0] rasid;  // ASID of last cycle
+    logic                     [63:0] rvadd;  // virtual address of last cycle
     /* requested set */
     logic [chn-1:0]  [way-1:0][51:0] set_dat;
     logic [chn-1:0]  [way-1:0][67:0] set_tag;
@@ -82,8 +84,8 @@ module tlb #(
         fil_prm[mis_ptr] = m_perm;
     end
     always_comb for (int i = 0; i < chn; i++) for (int j = 0; j < way; j++) set_eql[i][j] =
-        (set_tag[i][j][67:52] == (rfence[0] ? fasid        : b_satp[i][59:44]) | rfence[0] & rfence[2]) &
-         set_tag[i][j][51:0]  == (rfence[0] ? fvadd[63:12] : b_vadd[i][63:12]);
+        (set_tag[i][j][67:52] == (rfence[0] ? rasid        : b_satp[i][59:44]) | rfence[0] & rfence[2]) &
+         set_tag[i][j][51:0]  == (rfence[0] ? rvadd[63:12] : b_vadd[i][63:12]);
     always_comb begin
         fnc_vld = set_vld[0];
         for (int i = 0; i < way; i++) if (set_eql[0][i]) fnc_vld[i] = 0; // clear equal entries
@@ -94,8 +96,10 @@ module tlb #(
     end
     always_comb for (int i = 0; i < chn; i++)
         rindex[i]      = $clog2(set)'( fence[0] ? fvadd[63:12] : s_vadd[i][63:12]);
-    always_comb windex = $clog2(set)'(rfence[0] ? fvadd[63:12] : m_vadd   [63:12]);
+    always_comb windex = $clog2(set)'(rfence[0] ? rvadd[63:12] : m_vadd   [63:12]);
     always_ff @(posedge clk) if (rst) rfence <= 0; else rfence <= fence;
+    always_ff @(posedge clk) rasid <= fasid;
+    always_ff @(posedge clk) rvadd <= fvadd;
     always_ff @(posedge clk) if (rst | rfence[0] & rfence[1]) tlb_vld <= 0;
         else if (rfence[0]) // clear entry of flushed address
             tlb_vld[windex] <= fnc_vld;

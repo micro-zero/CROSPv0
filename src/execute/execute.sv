@@ -38,6 +38,8 @@ module execute #(
         reg_bundle[i].pat    = iss_bundle[i].pat;
         reg_bundle[i].patb   = iss_bundle[i].patb;
         reg_bundle[i].gh     = iss_bundle[i].gh;
+        reg_bundle[i].ghi    = iss_bundle[i].ghi;
+        reg_bundle[i].ght    = iss_bundle[i].ght;
         reg_bundle[i].fu     = iss_bundle[i].fu;
         reg_bundle[i].funct  = iss_bundle[i].funct;
         reg_bundle[i].base   = iss_bundle[i].base;

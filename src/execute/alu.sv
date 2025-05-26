@@ -103,6 +103,8 @@ module alu #(
             result[g].pat    = in.pat;
             result[g].patb   = in.patb;
             result[g].gh     = in.gh;
+            result[g].ghi    = in.ghi;
+            result[g].ght    = in.ght;
             result[g].pc     = in.pc;
             result[g].branch = in.branch;
             result[g].jal    = in.jal;
