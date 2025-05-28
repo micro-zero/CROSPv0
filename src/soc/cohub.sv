@@ -122,6 +122,7 @@ module cohub(
         else for (int i = 0; i < pn; i++) begin
             if (|s_rqst[i]) resp_mb[i] <= 1 << i;
             if (|s_resp[i]) resp_mb[i] <= 0;
+            if (|s_resp[i]) mesi_mb[i] <= 0;
             for (int j = 0; j < pn; j++) if (|rqst_sb[i] & m_resp[j] == rqst_sb[i]) begin
                 resp_mb[i][j] <= 1;
                 if (m_mesi[j] == 1) mesi_mb[i] <= m_mesi[j]; // have V state

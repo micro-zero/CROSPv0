@@ -4,9 +4,7 @@
  *   of connection of sub-modules and a page table walker.
  */
 
-module mmu #(
-    parameter init // initialize RAMs
-)(
+module mmu(
     input  logic         clk,
     input  logic         rst,
     input  logic         fnci,      // fence.i committed
@@ -117,7 +115,7 @@ module mmu #(
     logic  [7:0] it_resp_m;
     logic  [7:0] it_perm_m;
     logic [63:0] it_padd_m;
-    tlb #(.init(init), .chn(1), .set(2), .way(8)) itlb (
+    tlb #(.chn(1), .set(2), .way(8)) itlb (
         .clk(clk), .rst(rst), .flush(flush),
         .fence(fncv), .fasid(fncv_asid), .fvadd(fncv_vadd),
         .s_rqst(s_it_rqst), .m_rqst(it_rqst_m),
@@ -135,7 +133,7 @@ module mmu #(
     logic  [7:0] dt_resp_m;
     logic  [7:0] dt_perm_m;
     logic [63:0] dt_padd_m;
-    tlb #(.init(init), .chn(1), .set(2), .way(8)) dtlb (
+    tlb #(.chn(1), .set(2), .way(8)) dtlb (
         .clk(clk), .rst(rst), .flush(flush),
         .fence(fncv), .fasid(fncv_asid), .fvadd(fncv_vadd),
         .s_rqst(s_dt_rqst), .m_rqst(dt_rqst_m),
@@ -156,7 +154,7 @@ module mmu #(
     logic             st_ready;
     logic       [7:0] st_rqst_b, st_rqst_f;
     logic      [63:0] st_vadd_b, st_vadd_f;
-    tlb #(.init(init), .chn(2), .set(64), .way(4)) stlb (
+    tlb #(.chn(2), .set(64), .way(4)) stlb (
         .clk(clk), .rst(rst), .flush(flush),
         .fence(fncv), .fasid(fncv_asid), .fvadd(fncv_vadd),
         .s_rqst({dt_rqst_m, it_rqst_m}), .m_rqst(st_rqst_m),
@@ -211,7 +209,7 @@ module mmu #(
     logic             coh_takn_mb; // master coherence request taken by AXI
 
     /* instruction cache */
-    cache #(.init(init), .chn(1), .set(64), .way(4), .blk(64), .mshrsz(2)) icache (
+    cache #(.chn(1), .set(128), .way(4), .blk(64), .mshrsz(2)) icache (
         .clk(clk), .rst(rst | fnci), .rid(0), .flush(flush),
         .s_trsc(ic_trsc_s), .m_trsc(ic_trsc_m),
         .s_rqst(ic_rqst_s), .m_rqst(ic_rqst_m),
@@ -246,7 +244,7 @@ module mmu #(
 
     /* data cache */
     logic [63:0] s_dc_strb;
-    cache #(.init(init), .chn(1), .set(128), .way(4), .blk(64), .mshrsz(2)) dcache (
+    cache #(.chn(1), .set(128), .way(4), .blk(64), .mshrsz(2)) dcache (
         .clk(clk), .rst(rst), .rid(8'b0000_0010), .flush(flush),
         .s_trsc(dc_trsc_s), .m_trsc(dc_trsc_m),
         .s_rqst(dc_rqst_s), .m_rqst(dc_rqst_m),

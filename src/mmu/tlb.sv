@@ -4,7 +4,6 @@
  */
 
 module tlb #(
-    parameter init = 0,  // initialize RAMs
     parameter chn  = 1,  // request channel width
     parameter set  = 64, // number of sets
     parameter way  = 8   // number of ways
@@ -47,7 +46,7 @@ module tlb #(
     logic       [way*68-1:0] tlb_tag[set-1:0]; // TLB tag of each block, [67:52]ASID/[51:0]PADDR
     logic       [way* 8-1:0] tlb_prm[set-1:0]; // access permission of each entry
     logic [set-1:0][way-1:0] tlb_vld;          // TLB flags of each entry
-    logic  [$clog2(way)-1:0] tlb_ptr[set-1:0]; // pointers in FIFO replacement policy
+    logic [set-1:0][way-1:0] tlb_bdt;          // TLB binary decision tree
     /* R/W indices */
     logic [chn-1:0][$clog2(set)-1:0] rindex;
     logic          [$clog2(set)-1:0] windex;
@@ -59,9 +58,12 @@ module tlb #(
     logic [chn-1:0]  [way-1:0][67:0] set_tag;
     logic [chn-1:0]  [way-1:0] [7:0] set_prm;
     logic [chn-1:0]  [way-1:0]       set_vld;
+    logic [chn-1:0]  [way-1:0]       set_bdt, new_bdt;
     logic [chn-1:0]  [way-1:0]       set_hit, set_eql;
     logic [chn-1:0][$clog2(way)  :0] set_hitpos;
     logic [chn-1:0][$clog2(way)-1:0] set_ptr;
+    logic [chn-1:0][$clog2(way)-1:0] bdt_pos; // BDT position
+    logic          [$clog2(way)-1:0] bdt_cur; // BDT cursor
     /* MSHR (single) */
     logic                   miss, fill;
     logic             [7:0] mis_req;
@@ -94,6 +96,19 @@ module tlb #(
         for (int j = 0; j < way; j++) set_hit[i][j] = set_vld[i][j] & set_eql[i][j];
         set_hit[i][0] |= ~|b_satp[i][63:60]; // hit when bare
     end
+    always_comb for (int i = 0; i < chn; i++) begin
+        new_bdt[i] = set_bdt[i];
+        bdt_cur = 0;
+        for (int j = $clog2(way) - 1; j >= 0; j--) begin
+            new_bdt[i][bdt_cur] = ~set_hitpos[i][j];
+            bdt_cur = (bdt_cur << 1) + (set_hitpos[i][j] ? 2 : 1);
+        end
+        bdt_cur = 0;
+        for (int j = $clog2(way) - 1; j >= 0; j--) begin
+            bdt_pos[i][j] = tlb_bdt[rindex[i]][bdt_cur];
+            bdt_cur = (bdt_cur << 1) + (bdt_pos[i][j] ? 2 : 1);
+        end
+    end
     always_comb for (int i = 0; i < chn; i++)
         rindex[i]      = $clog2(set)'( fence[0] ? fvadd[63:12] : s_vadd[i][63:12]);
     always_comb windex = $clog2(set)'(rfence[0] ? rvadd[63:12] : m_vadd   [63:12]);
@@ -108,14 +123,19 @@ module tlb #(
             tlb_dat[windex] <= fil_dat;
             tlb_tag[windex] <= fil_tag;
             tlb_prm[windex] <= fil_prm;
-            tlb_ptr[windex] <= fil_ptr + 1;
         end
+    always_ff @(posedge clk) for (int i = 0; i < chn; i++)
+        if (~rfence[0] & |b_rqst[i] & set_hitpos[i][$clog2(way)])
+            tlb_bdt[$clog2(set)'(b_vadd[i][63:12])] <= new_bdt[i];
     always_ff @(posedge clk) for (int i = 0; i < chn; i++) begin
         set_dat[i] <= tlb_dat[rindex[i]];
         set_tag[i] <= tlb_tag[rindex[i]];
         set_prm[i] <= tlb_prm[rindex[i]];
-        set_ptr[i] <= tlb_ptr[rindex[i]];
         set_vld[i] <= tlb_vld[rindex[i]];
+        set_bdt[i] <= tlb_bdt[rindex[i]];
+        set_ptr[i] <= bdt_pos[i];
+        for (int j = way - 1; j >= 0; j--)
+            if (~tlb_vld[rindex[i]][j]) set_ptr[i] <= $clog2(way)'(j);
     end
     always_ff @(posedge clk) if (rst) fill <= 0; // also includes page fault
         else if (|m_resp) fill <= 1; else fill <= 0;
@@ -151,6 +171,4 @@ module tlb #(
             s_perm[i] = 0; // page fault from high level
         end
     end
-
-    if (init) initial for (int i = 0; i < set; i++) tlb_ptr[i] = 0;
 endmodule

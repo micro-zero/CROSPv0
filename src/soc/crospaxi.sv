@@ -24,8 +24,8 @@ module crospaxi #(
     parameter ftqsz  = 8,            // fetch target queue size
     parameter rassz  = 8,            // return address stack size
     parameter btbsz  = 512,          // BTB size
-    parameter index  = 11,           // TAGE index length
-    parameter tag    = 9,            // TAGE tag length
+    parameter index  = 9,            // TAGE index length
+    parameter tag    = 8,            // TAGE tag length
     parameter hist   = 100,          // TAGE history length
     parameter cnt    = 2,            // TAGE counter length
     parameter iqsz   = 16,           // OoO issue queue size
@@ -112,7 +112,7 @@ module crospaxi #(
     logic  [7:0] dc_resp; logic  [7:0] ic_resp;
     logic [63:0] dc_rdat; logic [63:0] ic_rdat;
     logic  [7:0] dc_miss;
-    mmu #(.init(init)) mmu_inst(
+    mmu mmu_inst(
         .clk(clk), .rst(rst), .fnci(fnci), .flush(fl_inst | fl_data),
         .fncv(fncv), .fncv_asid(fncv_asid), .fncv_vadd(fncv_vadd),
         .s_dt_rqst(dt_rqst), .s_it_rqst(it_rqst),
@@ -264,18 +264,18 @@ module crospaxi #(
     /* performance monitor */
     always_comb begin
         /* `csr_pmd` record the delta of counters within current cycle */
-        csr_pmd[0] = 0;                            // no event
-        csr_pmd[1] = 1;                            // cycle
-        csr_pmd[2] = 4'(com_inst.rob_out);         // instructions retired
-        csr_pmd[3] = 4'(fet_inst.fredir);          // frontend redirect
-        csr_pmd[4] = 4'(fet_inst.bredir);          // backend redirect
-        csr_pmd[5] = 4'(dc_resp[7:4] == 4'b1110);  // load access
-        csr_pmd[6] = 4'(dc_resp[7:4] == 4'b1111);  // store access
-        csr_pmd[7] = 4'(mmu_inst.itlb.fill);       // ITLB miss
-        csr_pmd[8] = 4'(mmu_inst.dtlb.fill);       // DTLB miss
-        csr_pmd[9] = 4'(mmu_inst.icache.mshr_out); // ICACHE miss
+        csr_pmd[0] = 0;                             // no event
+        csr_pmd[1] = 1;                             // cycle
+        csr_pmd[2] = 4'(com_inst.rob_out);          // instructions retired
+        csr_pmd[3] = 4'(fet_inst.fredir);           // frontend redirect
+        csr_pmd[4] = 4'(fet_inst.bredir);           // backend redirect
+        csr_pmd[5] = 4'(dc_resp[7:4] == 4'b1110);   // load access
+        csr_pmd[6] = 4'(dc_resp[7:4] == 4'b1111);   // store access
+        csr_pmd[7] = 4'(mmu_inst.itlb.fill);        // ITLB miss
+        csr_pmd[8] = 4'(mmu_inst.dtlb.fill);        // DTLB miss
+        csr_pmd[9] = 4'(mmu_inst.icache.mshr_out);  // ICACHE miss
         csr_pmd[10] = 4'(mmu_inst.dcache.mshr_out); // DCACHE miss
-        csr_pmd[11] = 0;
+        csr_pmd[11] = 4'(mmu_inst.stlb.fill);       // STLB miss
     end
 
     /* debug ports */

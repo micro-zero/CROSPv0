@@ -4,7 +4,6 @@
  */
 
 module cache #(
-    parameter init   = 0,  // initialize RAMs
     parameter chn    = 1,  // request channel width
     parameter set    = 64, // number of sets
     parameter way    = 8,  // number of ways
@@ -115,9 +114,9 @@ module cache #(
     /* cache entity */
     logic [set-1:0][way-1:0] valid;        // cache valid flag of each block
     logic [set-1:0][way-1:0] dirty;        // cache dirty flag of each block
+    logic [set-1:0][way-1:0] bdt;          // binary decision tree
     logic    [way*blk*8-1:0] dat[set-1:0]; // cache data
     logic       [way*64-1:0] tag[set-1:0]; // cache tag of each block
-    logic  [$clog2(way)-1:0] ptr[set-1:0]; // pointers in FIFO replacement policy
     /* selected set */
     logic [chn-1:0]      [$clog2(set)-1:0] index;       // index of input address
     logic [chn-1:0][way-1:0][blk-1:0][7:0] set_dat;     // data in selected set
@@ -127,11 +126,16 @@ module cache #(
     logic [chn-1:0]      [$clog2(way)-1:0] set_ptr;     // current pointer in selected set
     logic [chn-1:0][way-1:0]               set_valid;   // valid bits in selected set
     logic [chn-1:0][way-1:0]               set_dirty;   // dirty bits in selected set
+    logic [chn-1:0][way-1:0]               set_bdt;     // BDT bits in selected set
+    logic [chn-1:0][way-1:0]               new_bdt;     // BDT bits in selected set
     logic [chn-1:0][way-1:0]               set_hit;     // hit bits in selected set
     logic [chn-1:0]        [$clog2(way):0] set_hitpos;  // hit position in selected set
     logic [chn-1:0]         [blk-1:0][7:0] set_hitrdat; // hit data in selected set
     logic                   [blk-1:0][7:0] set_hitmask; // write mask in selected set  
     logic                   [blk-1:0][7:0] set_hitwdat; // write data in selected set
+    logic [chn-1:0]      [$clog2(way)-1:0] bdt_acc;     // BDT accessed leaf node
+    logic [chn-1:0]      [$clog2(way)-1:0] bdt_pos;     // BDT position
+    logic                [$clog2(way)-1:0] bdt_cur;     // BDT cursor
     /* cache fill */
     logic [$clog2(set):0] fill;     // fill signal and index
     logic                 fill_wea; // fill write enable
@@ -174,15 +178,35 @@ module cache #(
             new_dat[set_ptr[0]] = fill_dat;
         end else new_dat[$clog2(way)'(set_hitpos[0])] = set_hitrdat[0] & ~set_hitmask | set_hitwdat;
     end
+    always_comb for (int i = 0; i < chn; i++)
+        bdt_acc[i] = i == 0 & fill[$clog2(set)] ? set_ptr[0] : $clog2(way)'(set_hitpos[i]);
+    always_comb for (int i = 0; i < chn; i++) begin
+        new_bdt[i] = set_bdt[i];
+        bdt_cur = 0;
+        for (int j = $clog2(way) - 1; j >= 0; j--) begin
+            new_bdt[i][bdt_cur] = ~bdt_acc[i][j];
+            bdt_cur = (bdt_cur << 1) + (bdt_acc[i][j] ? 2 : 1);
+        end
+        bdt_cur = 0;
+        for (int j = $clog2(way) - 1; j >= 0; j--) begin
+            bdt_pos[i][j] = bdt[index[i]][bdt_cur];
+            bdt_cur = (bdt_cur << 1) + (bdt_pos[i][j] ? 2 : 1);
+        end
+    end
     always_comb reading = ~fill[$clog2(set)] & ~mshr_done[$clog2(mshrsz)];
     always_ff @(posedge clk) if (rst) read <= 0; else read <= reading;
+    always_ff @(posedge clk) if (rst) bdt <= 0;
+        else for (int i = 0; i < chn; i++)
+            if (i == 0 & fill[$clog2(set)])
+                bdt[$clog2(set)'(fill)] <= new_bdt[0];
+            else if (|b_rqst[i] & ~|b_trsc[0] & set_hitpos[i][$clog2(way)])
+                bdt[$clog2(set)'(b_addr[i] >> $clog2(blk))] <= new_bdt[i];
     always_ff @(posedge clk) if (rst) valid <= 0;
         else if (fill[$clog2(set)]) begin
             valid[index[0]][set_ptr[0]] <= 1;
             dirty[index[0]][set_ptr[0]] <= fill_wea;
             dat  [index[0]]             <= new_dat;
             tag  [index[0]]             <= new_tag;
-            ptr  [index[0]]             <= set_ptr[0] + 1;
         end else if (reading & read & set_hitpos[0][$clog2(way)]) // hit and reading
             if (|b_rqst[0] & b_trsc[0] == 1)
                 valid[index[0]][$clog2(way)'(set_hitpos[0])] <= 0;
@@ -193,9 +217,12 @@ module cache #(
     always_ff @(posedge clk) for (int i = 0; i < chn; i++) begin
         set_tag  [i] <= tag  [index[i]];
         set_dat  [i] <= dat  [index[i]];
-        set_ptr  [i] <= ptr  [index[i]];
         set_valid[i] <= valid[index[i]];
         set_dirty[i] <= dirty[index[i]];
+        set_bdt  [i] <= bdt  [index[i]];
+        set_ptr  [i] <= bdt_pos[i];
+        for (int j = way - 1; j >= 0; j--)
+            if (~valid[index[i]][j]) set_ptr[i] <= $clog2(way)'(j);
     end
     always_ff @(posedge clk)
         if (~rst & mshr_done[$clog2(mshrsz)] & ~fill[$clog2(set)] & ~|rep_rqst) begin
@@ -257,6 +284,4 @@ module cache #(
             s_miss[0] = 0;
         end
     end
-
-    if (init) initial for (int i = 0; i < set; i++) ptr[i] = 0;
 endmodule
