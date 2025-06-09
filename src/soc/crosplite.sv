@@ -398,7 +398,7 @@ module crosplite #(
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
             csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret,
             lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv,
-            core_clr_bsy_valid, core_clr_bsy_rob_idx, core_exe_iresp);
+            core_clr_bsy_valid, core_clr_bsy_rob_idx, core_exe_iresp, core_lxcpt_o);
     alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
         alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level);
     fpu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))

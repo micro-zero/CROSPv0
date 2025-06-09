@@ -430,10 +430,10 @@ module decoder #(
         else if (redir) brid <= $clog2(brsz)'(red_bundle.brid) + $clog2(brsz)'(red_bundle.brid[7]);
         else            brid <= brid + $clog2(brsz)'(dq_brin);
     always_ff @(posedge clk) if (rst) ldid <= 0;
-        else if (redir) ldid <= $clog2(ldsz)'(red_bundle.ldid) + $clog2(ldsz)'(red_bundle.ldid[7]);
+        else if (redir) ldid <= $clog2(ldsz)'(red_bundle.ldid);// + $clog2(ldsz)'(red_bundle.ldid[7]);
         else            ldid <= ldid + $clog2(ldsz)'(dq_ldin);
     always_ff @(posedge clk) if (rst) stid <= 0;
-        else if (redir) stid <= $clog2(stsz)'(red_bundle.stid) + $clog2(stsz)'(red_bundle.stid[7]);
+        else if (redir) stid <= $clog2(stsz)'(red_bundle.stid);// + $clog2(stsz)'(red_bundle.stid[7]);
         else            stid <= stid + $clog2(stsz)'(dq_stin);
     always_ff @(posedge clk) if (rst) opnum <= 0;
         else if (redir) opnum <= opnum - opred - opcom; else opnum <= opnum - opcom + 16'(dq_in);

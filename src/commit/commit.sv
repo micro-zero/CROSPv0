@@ -45,7 +45,8 @@ module commit #(
     output logic sfence,           // sfence.vma committed
     input  logic core_clr_bsy_valid,
     input  logic [7:0] core_clr_bsy_rob_idx,
-    input exe_unit_resp_t core_exe_iresp
+    input exe_unit_resp_t core_exe_iresp,
+    input xcpt_t core_lxcpt_o
 );
     /* pipeline redirect and rollback */
     function logic succeed(input logic [15:0] opid);
@@ -135,14 +136,14 @@ module commit #(
     /* entry modified by execution results */
     exe_bundle_t mis_first, mis_bundle, rei_bundle;       // earliest mispredicted and reinforced EXE bundle
     rob_exe_t [cwd-1:0]                 exe_rvalue;     // reading values in ROB
-    logic     [iwd:0][$clog2(opsz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
-    rob_exe_t [iwd:0]                   exe_wvalue;     // writing values in ROB
-    logic     [iwd:0]                   exe_wena;       // ROB write enable signals after EXE stage
-    mwpram #(.width($bits(rob_exe_t)), .depth(opsz), .rports(cwd), .wports(iwd+1))
+    logic     [iwd+1:0][$clog2(opsz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
+    rob_exe_t [iwd+1:0]                   exe_wvalue;     // writing values in ROB
+    logic     [iwd+1:0]                   exe_wena;       // ROB write enable signals after EXE stage
+    mwpram #(.width($bits(rob_exe_t)), .depth(opsz), .rports(cwd), .wports(iwd+2))
         rob_exe_inst(.clk(clk), .rst(rst),
             .raddr(rob_raddr), .rvalue(exe_rvalue),
             .waddr(exe_waddr), .wvalue(exe_wvalue), .wena(exe_wena));
-    always_comb for (int i = 0; i <= iwd; i++) begin
+    always_comb for (int i = 0; i <= iwd+1; i++) begin
         exe_waddr [i]       = $clog2(opsz)'(exe_bundle[i].opid);
         exe_wena  [i]       = exe_bundle[i].opid[15];
         exe_wvalue[i].cause = exe_bundle[i].cause;
@@ -155,6 +156,11 @@ module commit #(
             exe_waddr[i] = $clog2(opsz)'(core_exe_iresp.uop.rob_idx);
             exe_wena[i] = core_exe_iresp.valid;
             exe_wvalue[i] = 0;
+        end
+        if (i == iwd + 1) begin
+            exe_waddr[i] = $clog2(opsz)'(core_lxcpt_o.uop.rob_idx);
+            exe_wena[i] = core_lxcpt_o.valid;
+            exe_wvalue[i].retry = core_lxcpt_o.valid;
         end
     end
     always_comb begin
