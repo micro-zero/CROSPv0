@@ -1,0 +1,1 @@
+make -j8 && ./main -v -w  -hex ../util/code/hex/9.hex 

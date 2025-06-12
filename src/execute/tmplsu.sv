@@ -630,54 +630,52 @@ module LSU
         l_valid                          =  ldq[i].entry_valid;
         l_entryline                      =  ldq[i].entry;
         l_addr                           =  ldq[i].entry.addr; 
-        l_mask                           =  genByteMask(ldq[i].entry.addr, ldq[i].entry.uop.mem_size);
+        l_mask                           =  genByteMask(l_addr, l_entryline.uop.mem_size);
         l_is_forwarding                  =   wb_forward_valid_reg & (wb_forward_ldq_idx_reg == i);
-        l_forward_stq_idx                =   wb_forward_valid_reg & (wb_forward_ldq_idx_reg == i) ? wb_forward_stq_idx_reg : ldq[i].entry.forward_stq_idx;
-        block_addr_matches               =  (lcam_addr_wire >> blockOffBits == ldq[i].entry.addr >> blockOffBits);
-        ld_dword_addr_matches            =  ((lcam_addr_wire >> blockOffBits == ldq[i].entry.addr >> blockOffBits) & (lcam_addr_wire[blockOffBits-1 : 3] == ldq[i].entry.addr[blockOffBits-1 : 3]));
-        mask_match                       =  (genByteMask(ldq[i].entry.addr, ldq[i].entry.uop.mem_size) & lcam_mask_wire == genByteMask(ldq[i].entry.addr, ldq[i].entry.uop.mem_size));
-        mask_overlap                     =  |(genByteMask(ldq[i].entry.addr, ldq[i].entry.uop.mem_size) & lcam_mask_wire);
+        l_forward_stq_idx                =   l_is_forwarding ? wb_forward_stq_idx_reg : l_entryline.forward_stq_idx;
+        block_addr_matches               =  (lcam_addr_wire >> blockOffBits == l_addr >> blockOffBits);
+        ld_dword_addr_matches               =  (block_addr_matches & (lcam_addr_wire[blockOffBits-1 : 3] == l_addr[blockOffBits-1 : 3]));
+        mask_match                       =  (l_mask & lcam_mask_wire == l_mask);
+        mask_overlap                     =  |(l_mask & lcam_mask_wire);
         can_forward_wire                 = fired_load_incoming_reg ? 1: !ldq[lcam_ldq_idx_wire].entry.addr_is_uncacheable;
         // Searcher is a store
         if(do_release_search_wire                                                             &
-            ldq[i].entry_valid                                                                      &
-            ldq[i].entry.addr_valid                                                       &
-            (lcam_addr_wire >> blockOffBits == ldq[i].entry.addr >> blockOffBits)                                                           
+            l_valid                                                                      &
+            l_entryline.addr_valid                                                       &
+            block_addr_matches                                                           
         )begin : release_search
           // ldq[i].entry.observed = 1;
           ldq_observed_judge_wire[i]   = 1;
         end
         else if( do_st_search_wire                                                                  &
-                ldq[i].entry_valid                                                                          &
-                ldq[i].entry.addr_valid                                                           &
-                (ldq[i].entry.executed || ldq[i].entry.succeeded || wb_forward_valid_reg & (wb_forward_ldq_idx_reg == i))               &
-            //!ldq[i].entry.addr_is_virtual                                                   &
-                ldq[i].entry.st_dep_mask[lcam_stq_idx_wire]                                         &
-                ((lcam_addr_wire >> blockOffBits == ldq[i].entry.addr >> blockOffBits) & (lcam_addr_wire[blockOffBits-1 : 3] == ldq[i].entry.addr[blockOffBits-1 : 3]))                                                            &
-                |(genByteMask(ldq[i].entry.addr, ldq[i].entry.uop.mem_size) & lcam_mask_wire)
+                l_valid                                                                          &
+                l_entryline.addr_valid                                                           &
+                (l_entryline.executed || l_entryline.succeeded || l_is_forwarding)               &
+            //!l_entryline.addr_is_virtual                                                   &
+                l_entryline.st_dep_mask[lcam_stq_idx_wire]                                         &
+                ld_dword_addr_matches                                                            &
+                mask_overlap
         )begin : st_search
-          forwarded_is_older     =    ( wb_forward_valid_reg & (wb_forward_ldq_idx_reg == i) ? wb_forward_stq_idx_reg : ldq[i].entry.forward_stq_idx < lcam_stq_idx_wire) ^
-                                      ( wb_forward_valid_reg & (wb_forward_ldq_idx_reg == i) ? wb_forward_stq_idx_reg : ldq[i].entry.forward_stq_idx < ldq[i].entry.youngest_stq_idx) ^ 
-                                      (lcam_stq_idx_wire < ldq[i].entry.youngest_stq_idx);
+          forwarded_is_older     =    (l_forward_stq_idx < lcam_stq_idx_wire) ^ (l_forward_stq_idx < l_entryline.youngest_stq_idx) ^ (lcam_stq_idx_wire < l_entryline.youngest_stq_idx);
           // We are older than this load, which overlapped us.
-          if(~ldq[i].entry.forward_std_val | // If the load wasn't forwarded, it definitely failed
-            (( wb_forward_valid_reg & (wb_forward_ldq_idx_reg == i) ? wb_forward_stq_idx_reg : ldq[i].entry.forward_stq_idx != lcam_stq_idx_wire) & forwarded_is_older)
+          if(~l_entryline.forward_std_val | // If the load wasn't forwarded, it definitely failed
+            ((l_forward_stq_idx != lcam_stq_idx_wire) & forwarded_is_older)
           )begin
             failed_loads_wire[i]  =  1;
           end
         end
         else if(do_ld_search_wire                       &
-                  ldq[i].entry_valid                               &
-                  ldq[i].entry.addr_valid                &
-                  // !ldq[i].entry.addr_is_virtual       &
-                  ((lcam_addr_wire >> blockOffBits == ldq[i].entry.addr >> blockOffBits) & (lcam_addr_wire[blockOffBits-1 : 3] == ldq[i].entry.addr[blockOffBits-1 : 3]))                 &
-                  |(genByteMask(ldq[i].entry.addr, ldq[i].entry.uop.mem_size) & lcam_mask_wire) 
+                  l_valid                               &
+                  l_entryline.addr_valid                &
+                  // !l_entryline.addr_is_virtual       &
+                  ld_dword_addr_matches                 &
+                  mask_overlap 
           )begin : ld_search
             searcher_is_older =  (lcam_ldq_idx_wire < i) ^ (lcam_ldq_idx_wire < ldq_head_reg) ^ ( i < ldq_head_reg) ;
             if(searcher_is_older)begin
-              if((ldq[i].entry.executed || ldq[i].entry.succeeded || wb_forward_valid_reg & (wb_forward_ldq_idx_reg == i)) &
+              if((l_entryline.executed || l_entryline.succeeded || l_is_forwarding) &
                   ~s1_executing_loads_reg[i]  &    // If the load is proceeding in parallel we don't need to kill it
-                  ldq[i].entry.observed         // Its only a ordering failure if the cache line was observed between the younger load and us
+                  l_entryline.observed         // Its only a ordering failure if the cache line was observed between the younger load and us
               )begin
                   failed_loads_wire[i]  =  1;
               end
@@ -686,7 +684,7 @@ module LSU
                 // The load is older, and either it hasn't executed, it was nacked, or it is ignoring its response
                 // we need to kill ourselves, and prevent forwarding
               older_nacked = nacking_loads_r0_wire[i] || nacking_loads_r1_reg[i];
-              if(!(ldq[i].entry.executed || ldq[i].entry.succeeded) || older_nacked)begin
+              if(!(l_entryline.executed || l_entryline.succeeded) || older_nacked)begin
                   // s1_set_execute[lcam_ldq_idx_wire]          =        0;
                   s1_set_execute_from_ldq_wire          =        1;
                   
@@ -713,31 +711,27 @@ module LSU
 
         st_dword_addr_matches   =  (stq[i].entry.addr_valid           &
                                   //!stq[i].entry.addr_is_virtual    &&
-                                (stq[i].entry.addr[ADDR_WIDTH-1 : 3] == lcam_addr_wire[ADDR_WIDTH-1 : 3]));
-        write_mask = genByteMask(stq[i].entry.addr, stq[i].entry.uop.mem_size);
+                                (s_addr[ADDR_WIDTH-1 : 3] == lcam_addr_wire[ADDR_WIDTH-1 : 3]));
+        write_mask = genByteMask(s_addr, s_uop.mem_size);
         if(do_ld_search_wire && stq[i].entry_valid && lcam_st_dep_mask_wire[i])begin
-          if(((lcam_mask_wire & genByteMask(stq[i].entry.addr, stq[i].entry.uop.mem_size))== lcam_mask_wire) && 
-              !stq[i].entry.uop.is_fence && 
-              // !stq[i].entry.uop.is_amo && 
-                (stq[i].entry.addr_valid           &
-                                  //!stq[i].entry.addr_is_virtual    &&
-                                (stq[i].entry.addr[ADDR_WIDTH-1 : 3] == lcam_addr_wire[ADDR_WIDTH-1 : 3])) && can_forward_wire)
+          if(((lcam_mask_wire & write_mask)== lcam_mask_wire) && 
+              !s_uop.is_fence && 
+              // !s_uop.is_amo && 
+              st_dword_addr_matches && can_forward_wire)
               begin
                   ldst_addr_matches_r0_wire[i]              =        1;
-                  ldst_forward_matches_wire[i]              =        1;
-                  s1_kill_from_stq_logic_wire[i]            =        dmem_req_fire_next_reg;
+                  ldst_forward_matches_wire[i]           =        1;
+                  s1_kill_from_stq_logic_wire[i]             =        dmem_req_fire_next_reg;
                   // s1_set_execute[lcam_ldq_idx_wire]      =        0;
                   s1_set_execute_from_stq_wire      =        1;
           end
-          else if(((lcam_mask_wire & genByteMask(stq[i].entry.addr, stq[i].entry.uop.mem_size)) != 0) &&   (stq[i].entry.addr_valid           &
-                                  //!stq[i].entry.addr_is_virtual    &&
-                                (stq[i].entry.addr[ADDR_WIDTH-1 : 3] == lcam_addr_wire[ADDR_WIDTH-1 : 3])))begin
+          else if(((lcam_mask_wire & write_mask) != 0) && st_dword_addr_matches)begin
               ldst_addr_matches_r0_wire[i]              =        1;
               s1_kill_from_stq_logic_wire[i]             =        dmem_req_fire_next_reg;
               // s1_set_execute[lcam_ldq_idx_wire]      =        0;
               s1_set_execute_from_stq_wire      =        1;
           end
-          else if(stq[i].entry.uop.is_fence || stq[i].entry.uop.is_amo)begin
+          else if(s_uop.is_fence || s_uop.is_amo)begin
               ldst_addr_matches_r0_wire[i]              =        1;
               s1_kill_from_stq_logic_wire[i]             =        dmem_req_fire_next_reg;
               // s1_set_execute[lcam_ldq_idx_wire]      =        0;
