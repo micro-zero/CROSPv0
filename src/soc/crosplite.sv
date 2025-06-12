@@ -494,8 +494,13 @@ module crosplite #(
         dmem_resp_i.data = dc_rdat;
         if (s1_kill_o) dmem_resp_i = 0;
     end
-    // always_comb dmem_nack_i = |dc_miss;
-    always_comb dmem_nack_i = 0;
+    always_comb begin
+        dmem_nack_i = 0;
+        dmem_nack_i.dreq_valid = |dc_miss ? dc_resp : 0;
+        dmem_nack_i.uop = dcuop;
+        if (s1_kill_o) dmem_nack_i = 0;
+    end
+    // always_comb dmem_nack_i = 0;
     LSU lsu_inst(
         .clk(clk),
         .rst(~rst),
@@ -507,7 +512,7 @@ module crosplite #(
         .ldq_almost_full_o(ldq_full_o),
         .stq_almost_full_o(stq_full_o),
         .lsu_fencei_rdy_o(lsu_fencei_rdy_o),
-        .core_exception_i(red_bundle.opid[15]),
+        .core_exception_i(com_inst.rollback),
         .exe_req_i(exe_req_i),
         .core_exe_iresp_o(core_exe_iresp),
         .s1_kill_o(s1_kill_o),
