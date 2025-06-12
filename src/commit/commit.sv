@@ -224,6 +224,7 @@ module commit #(
             spc[$clog2(opsz)'(exe_waddr[i])] <= exe_bundle[i].specul;
         end
         if (core_clr_bsy_valid) exe[$clog2(opsz)'(core_clr_bsy_rob_idx)] <= 1;
+        if (core_lxcpt_o.valid) spc[$clog2(opsz)'(core_lxcpt_o.uop.rob_idx)] <= 1;
     end
     always_ff @(posedge clk) if (rst | exception | succeed(eid_new))  eid_last <= 0; else  eid_last <=  eid_new;
     always_ff @(posedge clk) if (rst | exception | succeed(eid_new)) tval_last <= 0; else tval_last <= tval_new;
