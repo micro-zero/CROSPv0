@@ -42,8 +42,6 @@ module LSU
     input  func_unit_resp_t                                     exe_req_i,       // 经过maddrcalc生成地址后发往LSU的执行请求
     output exe_unit_resp_t                                      core_exe_iresp_o,// load指令得到 data 发往 regfiles的请求
 
-
-
     //connect with Dcache(Memory)
     output logic                                                s1_kill_o,               // 在访存阶段发生load顺序错误或数据前递，将kill信号发往Dcache
     input  logic                                                dmem_req_ready_i,        // 在访存阶段与Dcache的握手信号，表示当前Dcache可以进行访存

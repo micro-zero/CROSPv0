@@ -95,7 +95,7 @@ module LSU
     ld_idx_t[dispatch_width-1:0]                          ld_enq_idx_wire;  
     st_idx_t                         stq_head_reg;      // 当前stq头部（clearstore时加一，比如在commit后进行访存，访存成功）
     st_idx_t                         stq_tail_reg;      
-    st_idx_t[dispatch_width-1:0]              st_enq_idx_wire;   
+    st_idx_t[dispatch_width-1:0]     st_enq_idx_wire;   
     st_idx_t                         stq_commit_head_reg;   // 下一个要提交commit的stq表项
     st_idx_t                         stq_execute_head_reg;  // 下一个要执行execute的stq表项
     logic                                        clear_store_wire;      // 是否要clearstore，即已经有store完成访存了该出队列了
@@ -314,7 +314,15 @@ module LSU
     logic[commit_width-1:0][LSUAddrSz-1 : 0]  commit_idx_wire;
     logic[numSTQEntries-1:0]                  st_exception_killed_mask;
     logic                                     spec_ld_succeed_wire;
+    always_comb begin
+      st_exception_killed_mask = 0;
+      if(core_exception_i)begin
+        for(int i = 0;i<numSTQEntries;i++)begin
+          st_exception_killed_mask[i] = !stq[i].entry.committed & !stq[i].entry.succeeded ; 
+        end
 
+      end
+    end
     
     generate
       for(genvar w = 0; w < dispatch_width; w++)begin
@@ -554,7 +562,7 @@ module LSU
                                     : 0;
     assign     mem_stq_entryline_wire  =  fired_stad_incoming_reg || fired_sta_incoming_reg ? mem_stq_incoming_entryline_r1_reg
                                     : 0;
-    assign      mem_paddr_r0_wire = dmem_req_wire.addr;
+    assign     mem_paddr_r0_wire = dmem_req_wire.addr;
 
     assign  core_clr_bsy_valid_wire     =  clr_bsy_valid_reg  &
                                     ~((core_brupdate_i.mispredict_mask & clr_bsy_brmask_reg)!=0)  && //IsKilledByBranch
@@ -1291,7 +1299,7 @@ module LSU
                     stq[i].entry_valid               <=       0;
                     stq[i].entry.addr_valid          <=       0;
                     stq[i].entry.data_valid          <=       0;
-                    st_exception_killed_mask[i]            <=       1;
+                    //st_exception_killed_mask[i]      <=       1;
                 end
               end
               for(int i = 0; i < numLDQEntries; i++)begin

@@ -489,7 +489,7 @@ module crosplite #(
     always_comb dc_wdat = dmem_req_o.data;
     always_comb begin
         dmem_resp_i = 0;
-        dmem_resp_i.dresp_valid = dc_resp;
+        dmem_resp_i.dresp_valid = dc_resp & !dc_miss;
         dmem_resp_i.uop = dcuop;
         dmem_resp_i.data = dc_rdat;
         if (s1_kill_o) dmem_resp_i = 0;
