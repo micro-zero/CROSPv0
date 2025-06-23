@@ -8,6 +8,7 @@ import types::*;
 
 module crospaxi #(
     parameter init   = 1,            // whether to initialize some RAM
+    parameter hpm    = 1,            // whether to enable hardware performance monitor
     parameter fwd    = 2,            // fetch width
     parameter dwd    = 2,            // decode width
     parameter rwd    = 2,            // rename width
@@ -230,7 +231,7 @@ module crospaxi #(
     prf #(.prnum(prnum), .rwd(rwd), .iwd(iwd), .cwd(cwd), .opsz(opsz))
         prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, red_bundle,
             iss_ready, (iwd)'(-1), busy_resp, reg_resp);
-    csr csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
+    csr #(.hpm(hpm)) csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret, frd, fflags,
         csr_excp, csr_intl, csr_intg, csr_flsh, mip_ext, mtime, csr_pmd,
         csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp, pmpcfg, pmpaddr);
@@ -264,18 +265,18 @@ module crospaxi #(
     /* performance monitor */
     always_comb begin
         /* `csr_pmd` record the delta of counters within current cycle */
-        csr_pmd[0] = 0;                             // no event
-        csr_pmd[1] = 1;                             // cycle
-        csr_pmd[2] = 4'(com_inst.rob_out);          // instructions retired
-        csr_pmd[3] = 4'(fet_inst.fredir);           // frontend redirect
-        csr_pmd[4] = 4'(fet_inst.bredir);           // backend redirect
-        csr_pmd[5] = 4'(dc_resp[7:4] == 4'b1110);   // load access
-        csr_pmd[6] = 4'(dc_resp[7:4] == 4'b1111);   // store access
-        csr_pmd[7] = 4'(mmu_inst.itlb.fill);        // ITLB miss
-        csr_pmd[8] = 4'(mmu_inst.dtlb.fill);        // DTLB miss
-        csr_pmd[9] = 4'(mmu_inst.icache.mshr_out);  // ICACHE miss
-        csr_pmd[10] = 4'(mmu_inst.dcache.mshr_out); // DCACHE miss
-        csr_pmd[11] = 4'(mmu_inst.stlb.fill);       // STLB miss
+        csr_pmd[0]  = 0;                                         // no event
+        csr_pmd[1]  = 1;                                         // cycle
+        csr_pmd[2]  = 4'(com_inst.rob_out);                      // instructions retired
+        csr_pmd[3]  = fet_inst.fredir ? 1 : 0;                   // frontend redirect
+        csr_pmd[4]  = fet_inst.bredir ? 1 : 0;                   // backend redirect
+        csr_pmd[5]  = dc_resp[7:4] == 4'b1110 ? 1 : 0;           // load access
+        csr_pmd[6]  = dc_resp[7:4] == 4'b1111 ? 1 : 0;           // store access
+        csr_pmd[7]  = mmu_inst.itlb.fill ? 1 : 0;                // ITLB miss
+        csr_pmd[8]  = mmu_inst.dtlb.fill ? 1 : 0;                // DTLB miss
+        csr_pmd[9]  = mmu_inst.icache.mshr_out ? 1 : 0;          // ICACHE miss
+        csr_pmd[10] = dc_resp[7:5] == 3'b111 & |dc_miss ? 1 : 0; // DCACHE miss
+        csr_pmd[11] = mmu_inst.stlb.fill ? 1 : 0;                // STLB miss
     end
 
     /* debug ports */

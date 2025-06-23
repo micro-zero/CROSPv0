@@ -1573,8 +1573,6 @@ void uartctl::posedge()
 {
     /* get characters from stdin */
     char ch;
-    if ((ch = nbgetchar()) != EOF)
-        txq.push_back(ch);
     if (tnum == (uint64_t)-1 && !txq.empty())
         tnum = 0;
 

@@ -457,7 +457,6 @@ int main(int argc, char *argv[])
 
         /* state check */
         vrcr >> cmts >> dels; // extract from DUT of vcore
-        // cli >> dels; // extract from DUT of cli (if necessary)
         while (cmts.size() > 1)
         {
             state_t stt; // for print
@@ -594,6 +593,14 @@ int main(int argc, char *argv[])
             exitcause = "HTIF exit call", exitcode = amem.htifexit >> 1;
         cycle++;
         emptycycle++;
+
+        /* read from stdin */
+        char ch;
+        if ((ch = nbgetchar()) != EOF)
+        {
+            uart.txq.push_back(ch);
+            amem.cin.push_back(ch);
+        }
 
         /* record checkpoint */
         if (cycle % 10000000 == 0)

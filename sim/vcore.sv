@@ -26,6 +26,7 @@ module vcore #(
     parameter ewd,
     parameter cwd,
     parameter mwd,
+    parameter hpm,
     parameter rst_pc,
     parameter clint
 )(
@@ -140,7 +141,7 @@ module vcore #(
 );
     /* instantiate core with direct memory interface */
     logic [63:0] dbg_cycle, dbg_pcir0, dbg_pcir1;
-    crospaxi #(.rst_pc(rst_pc),
+    crospaxi #(.rst_pc(rst_pc), .hpm(hpm),
         .fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd)) inst(
         clk, rst, mip_ext, mtime, dbg_cycle, dbg_pcir0, dbg_pcir1,
         s_coh_lock, s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
@@ -266,13 +267,13 @@ module vcore #(
             if (inst.com_inst.mis_bundle.jal)    jmisp  <= jmisp + 1;
             if (inst.com_inst.mis_bundle.jalr)   jrmisp <= jrmisp + 1;
         end else if (inst.fet_inst.fredir)       fmisp  <= fmisp + 1;
-    always_ff @(posedge clk) if (rst) loads  <= 0; else if (inst.dc_resp[7:4] == 4'b1110)  loads  <= loads  + 1;
-    always_ff @(posedge clk) if (rst) stores <= 0; else if (inst.dc_resp[7:4] == 4'b1111)  stores <= stores + 1;
-    always_ff @(posedge clk) if (rst) icmiss <= 0; else if (inst.mmu_inst.icache.mshr_out) icmiss <= icmiss + 1;
-    always_ff @(posedge clk) if (rst) dcmiss <= 0; else if (inst.mmu_inst.dcache.mshr_out) dcmiss <= dcmiss + 1;
-    always_ff @(posedge clk) if (rst) itmiss <= 0; else if (inst.mmu_inst.itlb.fill)       itmiss <= itmiss + 1;
-    always_ff @(posedge clk) if (rst) dtmiss <= 0; else if (inst.mmu_inst.dtlb.fill)       dtmiss <= dtmiss + 1;
-    always_ff @(posedge clk) if (rst) stmiss <= 0; else if (inst.mmu_inst.stlb.fill)       stmiss <= stmiss + 1;
+    always_ff @(posedge clk) if (rst) loads  <= 0; else loads  <= loads  + 64'(inst.csr_pmd[5]);
+    always_ff @(posedge clk) if (rst) stores <= 0; else stores <= stores + 64'(inst.csr_pmd[6]);
+    always_ff @(posedge clk) if (rst) itmiss <= 0; else itmiss <= itmiss + 64'(inst.csr_pmd[7]);
+    always_ff @(posedge clk) if (rst) dtmiss <= 0; else dtmiss <= dtmiss + 64'(inst.csr_pmd[8]);
+    always_ff @(posedge clk) if (rst) icmiss <= 0; else icmiss <= icmiss + 64'(inst.csr_pmd[9]);
+    always_ff @(posedge clk) if (rst) dcmiss <= 0; else dcmiss <= dcmiss + 64'(inst.csr_pmd[10]);
+    always_ff @(posedge clk) if (rst) stmiss <= 0; else stmiss <= stmiss + 64'(inst.csr_pmd[11]);
     always_ff @(posedge clk) if (rst) {ldck1, ldck2, ldck3} <= 0; else if (|inst.lsu_inst.ck_resp[0])
         if      (inst.lsu_inst.ck_rslt[0] == 1) ldck1 <= ldck1 + 1;
         else if (inst.lsu_inst.ck_rslt[0] == 2) ldck2 <= ldck2 + 1;

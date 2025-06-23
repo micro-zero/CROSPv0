@@ -228,8 +228,8 @@ private:
     VerilatedVcdC *vcd;       // trace pointer
     uint64_t div, rnum, tnum; // cycle division and number from start bit
     uint8_t rxq;              // receive queue (buffer)
-    std::vector<uint8_t> txq; // transmission queue
 public:
+    std::vector<uint8_t> txq; // transmission queue
     uint8_t &intr = dut.intr;
     uartctl(const char *fnvcd = 0);
     ~uartctl();

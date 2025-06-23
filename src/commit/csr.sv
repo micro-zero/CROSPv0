@@ -46,7 +46,9 @@
 |         0xf11 -> mvendorid    0xf12 -> marchid    0xf13 -> mimpid    0xf14 -> mhartid |
 \*-------------------------------------------------------------------------------------*/
 
-module csr(
+module csr #(
+    parameter hpm // whether to enable hardware performance monitor
+)(
     input  logic clk,
     input  logic rst,
     /* CSRRW request */
@@ -229,7 +231,8 @@ module csr(
         else if (we & addr == 12'hb02) minstret <= wres - (mcountinhibit[2] | ~vc ? 0 : 1); // exclude CSRRW
         else                           minstret <= minstret + (mcountinhibit[2] ? 0 : 64'(in_pmd[2]));
         for (int i = 3; i < 32; i++)
-            if      (rst)                           mhpmevent[i] <= 64'(i);
+            if      (~hpm)                          mhpmevent[i] <= 0;
+            else if (rst)                           mhpmevent[i] <= 64'(i);
             // else if (we & addr == 12'h320 + 12'(i)) mhpmevent[i] <= wres;
         for (int i = 3; i < 32; i++)
             if      (rst)                           mhpmcounter[i] <= 0;

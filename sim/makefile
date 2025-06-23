@@ -12,6 +12,7 @@ IWD     = 3
 EWD     = 2
 CWD     = 2
 MWD     = 1
+HPM     = 0
 INITRD  = be000000 # same as in DTB
 RST_PC  = 81fff000
 DTBADDR = 81ffe000 # limited to 4KB
@@ -143,7 +144,7 @@ all: main
 .vcore : $(VCORE_SV) $(VCORE_H)
 	$(RM) -r .vcore
 	verilator $(VERILATOR_FLAGS) $(VCORE_SV) -lib-create vcore -top-module vcore -Mdir .vcore \
-		-Grst_pc="32'h$(RST_PC)" -Gclint="64'h$(CLINT)" \
+		-Grst_pc="32'h$(RST_PC)" -Ghpm="$(HPM)" -Gclint="64'h$(CLINT)" \
 		-Gfwd=$(FWD) -Gdwd=$(DWD) -Grwd=$(RWD) -Giwd=$(IWD) \
 		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD)
 	$(MAKE) -C .vcore -f Vvcore.mk

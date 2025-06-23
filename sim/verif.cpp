@@ -496,6 +496,10 @@ void memory::checkpoint(const char *fn)
     }
     fwrite(&smem, sizeof(smem), 1, fp);
     fwrite(&htifexit, sizeof(htifexit), 1, fp);
+    buf = cin.size();
+    fwrite(&buf, sizeof(buf), 1, fp);
+    for (int i = 0; i < buf; i++)
+        fwrite(&cin[i], sizeof(cin[i]), 1, fp);
     fclose(fp);
 }
 
@@ -564,6 +568,15 @@ int memory::restore(const char *fn)
     if (fread(&smem, sizeof(smem), 1, fp) != 1 ||
         fread(&htifexit, sizeof(htifexit), 1, fp) != 1)
         return -1;
+    if (fread(&buf, sizeof(buf), 1, fp) != 1)
+        return -1;
+    for (int i = 0; i < buf; i++)
+    {
+        uint8_t c;
+        if (fread(&c, sizeof(c), 1, fp) != 1)
+            return -1;
+        cin.push_back(c);
+    }
     fclose(fp);
     return 0;
 }
@@ -580,7 +593,7 @@ void memory::posedge()
             mcport.lock = 1;                                              // start handling HTIF
     if (mcport.lock && scport.lock)
     {
-        htifexit = htif(*this, htifaddr, args, smem, &owner, &reqaddr);
+        htifexit = htif(*this, htifaddr, args, smem, &owner, &reqaddr, &cin);
         if (!reqaddr) // HTIF requests handled
             mcport.lock = 0;
     }
@@ -2283,6 +2296,11 @@ delta_t next(state_t &s, uint8_t *plsize, uint64_t *pladdr)
             ret.gpra = ir.range(7, 11);
             if (addr == 0xb01) // mtime
                 ret.gprv = s.mem.ui64(s.csr["mtime"]);
+            // todo: WARL fields may be better to be implemented here
+            else if (addr == 0x306 || addr == 0x320) // HPM CSRS
+                ret.gprv = 0;
+            else if (addr == 0x7a0) // tselect
+                ret.gprv = -1ul;
             else
                 ret.gprv = s.csr[csrname[addr]];
             if (ir.range(20, 31) == 0x001) // fflags
@@ -2423,10 +2441,11 @@ void apply(state_t &s, delta_t d)
  * @param pmem memory pointer that also require processing
  * @param owner owner of cache line (zero means valid)
  * @param pval pointer of invalid address
+ * @param cin character input
  * @return tohost exit call value ((code << 1) | 1)
  */
 uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, memory *pmem,
-              std::map<uint64_t, uint8_t> *owner, uint64_t *pval)
+              std::map<uint64_t, uint8_t> *owner, uint64_t *pval, std::vector<uint8_t> *cin)
 {
     /* check whether memory is up-to-date for host machine to support coherece */
     if (pval)
@@ -2582,12 +2601,12 @@ uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, 
     mem.ui64(addr.tohost) = 0;
     if (pmem)
         pmem->ui64(addr.tohost) = 0;
-    char ch; // receive character from stdin
-    if (mem.ui64(addr.fromhost) == 0 && (!pmem || pmem->ui64(addr.fromhost) == 0) && (ch = nbgetchar()) != EOF)
+    if (mem.ui64(addr.fromhost) == 0 && (!pmem || pmem->ui64(addr.fromhost) == 0) && cin && !cin->empty())
     {
-        mem.ui64(addr.fromhost) = (1ull << 56) | ch;
+        mem.ui64(addr.fromhost) = (1ull << 56) | cin->at(0);
         if (pmem)
-            pmem->ui64(addr.fromhost) = (1ull << 56) | ch;
+            pmem->ui64(addr.fromhost) = (1ull << 56) | cin->at(0);
+        cin->erase(cin->begin());
     }
     return 0;
 }

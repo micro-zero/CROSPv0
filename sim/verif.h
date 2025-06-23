@@ -126,6 +126,7 @@ public:
     std::vector<const char *> args; // program arguments
     memory *smem;                   // simulation memory pointer
     uint64_t htifexit;              // HTIF exit data
+    std::vector<uint8_t> cin;       // character input buffer
     memory();
     memory(const memory &b);
     const char *init(const char *fname, const char *dtb, const char *initrd, uint8_t ftype,
@@ -191,7 +192,7 @@ std::string disas(uint32_t ir);
 delta_t next(state_t &s, uint8_t *plsize = NULL, uint64_t *pladdr = NULL);
 void apply(state_t &s, delta_t delta);
 uint64_t htif(memory &mem, htifaddr_t &addr, std::vector<const char *> &pkargs, memory *pmem = 0,
-              std::map<uint64_t, uint8_t> *owner = 0, uint64_t *pval = 0);
+              std::map<uint64_t, uint8_t> *owner = 0, uint64_t *pval = 0, std::vector<uint8_t> *cin = 0);
 char nbgetchar();
 void print(uint64_t cycle, state_t &state, const delta_t &delta);
 void print(state_t &s, uint64_t addr = 0, uint64_t size = 0);
