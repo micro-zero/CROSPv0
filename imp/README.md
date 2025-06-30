@@ -1,44 +1,43 @@
-# Basic SoC implementation
+# SoC implementation on FPGA
 
 This directory includes an implementation of SoC with basic
-components including CROSP core, SD card bootloader, interrupt
-controller and connection with AXI bus. It is capable of
-booting and running OS with HTIF console protocol.
+components including CROSP core, interrupt controller, and
+peripherals. Currently SoC is verified on Genesys-2 board with
+Debian OS. The OS and peripheral drivers are from repository
+[vivado-risc-v](https://github.com/eugene-tarassov/vivado-risc-v.git).
+To run TCL files generated in makefile, Vivado and license for
+Genesys-2 are required.
 
-## Running buildroot
+## Running Debian OS
 
-The spike configuration can use HTIF protocol as console input
-and output, and it will cooperate with HTIF filter described in
-wrapper of CROSP core. If other console drivers are required in
-different operating systems, the related hardware drivers will
-be required to connect with current AXI connections.
+Bootloader has three steps:
 
-The default configuration of generation in simulation
-environment has initial RAM file system image at high 32M in
-the 1G memory from `0xbe000000` to `0xbfffffff`, and vmlinux
-code image at low 32M in memory from `0x80000000` to
-`0x82000000`. If the images exceeds 32M, the default
-configuration will require modification according to method of
-generating the image.
+1. Run code from ROM.
+2. Code in ROM detects SD controller and load U-boot image from
+  SD card.
+3. U-boot initializes drivers and load Linux image.
 
 Run
 ```
-make imp -j8
+make build -j32 ROM_IMG="path-to-rom-image"
 ```
 to generate Vivado project for implementation. The project will
 run implementation automatically and finally generate
 bitstream. If modification like debug is needed, we can open
 the project in Vivado GUI and use board design to modify the
-project conveniently.
+project conveniently. If auto-build is not needed, just remove
+`build` object and run
+```
+make -j32 ROM_IMG="path-to-rom-image"
+```
+to create project directory `.prj`. The project includes
+board design of SoC implementation and simulation testbench.
 
-Run
+Repository vivado-risc-v provides SD card image and ROM image.
+The SD image should be directly burned into SD card. If only
+ELF format of ROM image is found, we can use the executable in
+simulation directory `sim` to convert it into binary image
+using
 ```
-make sim -j8 SIM_IMG="..."
+./main -rom "path-to-rom-image" "path-to-rom-elf"
 ```
-to generate Vivado project for simulation with AXI verification
-IP. The project will instantiate CROSP core and interrupt
-controller, in addition with an AXI verification IP to simulate
-abstract memory model. The testbench will first load images
-from file specified in `SIM_IMG` variable. Vivado GUI is needed
-to simulate and watch waveform. Waveform auto-generation can be
-done by adding TCL script after the project is generated.
