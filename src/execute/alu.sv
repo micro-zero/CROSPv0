@@ -9,15 +9,14 @@
 import types::*;
 
 module alu #(
-    parameter iwd,  // issue width
     parameter ewd,  // execution width
     parameter opsz  // operation ID size
 )(
     input  logic clk,
     input  logic rst,
     input  red_bundle_t redir,           // redirect bundle
-    output logic ready,                  // ready for receiving at most `iwd` requests
-    input  reg_bundle_t [iwd-1:0] req,   // requests after register read
+    output logic ready,                  // ready for receiving at most `ewd` requests
+    input  iss_bundle_t [ewd-1:0] req,   // requests issued
     input  logic        [ewd-1:0] claim, // claim signals (fetch execution results)
     output exe_bundle_t [ewd-1:0] resp,  // execution results
     input  logic [1:0] level,            // privilege level
@@ -32,13 +31,13 @@ module alu #(
     endfunction
 
     /* request selector */
-    localparam eqsz = 2 * (1 << $clog2(ewd));
-    reg_bundle_t [ewd-1:0] req_alu;
+    localparam eqsz = (1 << $clog2(3 * ewd));
+    iss_bundle_t [ewd-1:0] req_alu;
     logic [$clog2(eqsz):0] num_alu;
     always_comb begin
         req_alu = 0;
         num_alu = 0;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < ewd; i++)
             if (req[i].opid[15] & req[i].fu[0]) begin // select ALU requests and flatten them
                 req_alu[num_alu] = req[i];
                 num_alu++;
@@ -49,7 +48,7 @@ module alu #(
     exe_bundle_t [ewd-1:0] result;
     for (genvar g = 0; g < ewd; g++) begin : execution_units
         /* aliases and results of g-th common execution unit */
-        reg_bundle_t in; // g-th input after register read
+        iss_bundle_t in; // g-th input after register read
         alu_funct_t f;   // ALU functional code
         logic inv;       // invalid instruction
         always_comb in = req_alu[g].opid[15] ? req_alu[g] : 0;
@@ -58,8 +57,8 @@ module alu #(
         /* assign oprands */
         logic [63:0] a, b;
         always_comb begin
-            a = in.a[64] ? in.prs[0] : in.a[63:0]; // choose from registers or immediates
-            b = in.b[64] ? in.prs[1] : in.b[63:0];
+            a = in.a[64] ? in.prsv[0] : in.a[63:0]; // choose from registers or immediates
+            b = in.b[64] ? in.prsv[1] : in.b[63:0];
             if (f.iword) a = {{32{a[31] & f.isign}}, a[31:0]}; // instructions with W suffix
             if (f.iword) b = {{32{b[31] & f.isign}}, b[31:0]};
             if (f.iword & (f.sll | f.srl | f.sra)) b[5] = 0;
@@ -88,7 +87,7 @@ module alu #(
                   {64{f.max}}  & ((f.isign ? lt : ltu) ? b : a);
             if (f.iword) res[63:0] = {{32{res[31]}}, res[31:0]};
         end
-        always_comb jpc = (in.base[64] ? in.prs[0] : in.base[63:0]) + in.offset;
+        always_comb jpc = (in.base[64] ? in.prsv[0] : in.base[63:0]) + in.offset;
         always_comb jump = f.j | |f.bmask & f.bneg != |(f.bmask & bflag);
         always_comb inv = f.inv | f.sfence & tvm | f.eret == 3'b101 & tsr;
         always_comb begin
@@ -118,8 +117,8 @@ module alu #(
             result[g].prdv   = res;
             /* for oprands of SFENCE.VMA, prdv field is vaddr, tval field is asid,
                and the MSB indicates whether source registers are zero i.e. x0 */
-            if (f.sfence) result[g].prdv = in.prs[0];
-            if (f.sfence) result[g].tval = in.prs[1];
+            if (f.sfence) result[g].prdv = in.prsv[0];
+            if (f.sfence) result[g].tval = in.prsv[1];
             /* some exception caused by instructions */
             if (f.ecall)        result[g].cause = {2'b10, 4'd2, level};
             if (f.ebreak)       result[g].cause = {2'b10, 6'd3};

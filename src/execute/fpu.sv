@@ -7,15 +7,14 @@
 import types::*;
 
 module fpu #(
-    parameter iwd,  // issue width
     parameter ewd,  // execution width
     parameter opsz  // operation ID size
 )(
     input  logic clk,
     input  logic rst,
     input  red_bundle_t redir,           // redirect bundle
-    output logic ready,                  // ready for receiving at most `iwd` requests
-    input  reg_bundle_t [iwd-1:0] req,   // requests after register read
+    output logic ready,                  // ready for receiving at most `ewd` requests
+    input  iss_bundle_t [ewd-1:0] req,   // requests after register read
     input  logic        [ewd-1:0] claim, // claim signals (fetch execution results)
     output exe_bundle_t [ewd-1:0] resp   // execution results
 );
@@ -124,22 +123,22 @@ module fpu #(
     endfunction
 
     /* register read buffer */
-    localparam eqsz = 2 * (1 << $clog2(ewd));
+    localparam eqsz = (1 << $clog2(3 * ewd));
     logic [$clog2(eqsz)-1:0] rr_front;
     logic [$clog2(eqsz):0] rr_num, rr_in, rr_out;
     logic [eqsz-1:0][15:0] rr_opid;
     logic [eqsz-1:0]       rr_bubble;
-    reg_bundle_t           rr_rvalue;
+    iss_bundle_t           rr_rvalue;
     logic        [ewd-1:0][$clog2(eqsz)-1:0] rr_waddr;
-    reg_bundle_t [ewd-1:0]                   rr_wvalue;
+    iss_bundle_t [ewd-1:0]                   rr_wvalue;
     logic        [ewd-1:0]                   rr_wena;
-    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(1), .wports(ewd))
+    mwpram #(.width($bits(iss_bundle_t)), .depth(eqsz), .rports(1), .wports(ewd))
         rr_inst(.clk(clk), .rst(rst),
             .raddr(rr_front), .rvalue(rr_rvalue),
             .waddr(rr_waddr), .wvalue(rr_wvalue), .wena(rr_wena));
     always_comb begin
         rr_in = 0; rr_wvalue = 0;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < ewd; i++)
             if (req[i].opid[15] & req[i].fu[2]) begin // select FPU requests and flatten them
                 rr_wvalue[rr_in] = req[i];
                 rr_in++;
@@ -175,15 +174,15 @@ module fpu #(
     logic stuck_pip, stuck_mul; // pipeline stuck
     logic [63:0] a, b;          // oprands of RR buffer front
     always_comb begin
-        a = rr_rvalue.prs[0];
-        b = rr_rvalue.b[64] ? rr_rvalue.prs[1] : rr_rvalue.b[63:0];
+        a = rr_rvalue.prsv[0];
+        b = rr_rvalue.b[64] ? rr_rvalue.prsv[1] : rr_rvalue.b[63:0];
         if (f.fcvtfi & ~b[1]) // 32-bit integer to 64-bit integer
             a = {b[0] ? 0 : {32{a[31]}}, a[31:0]};
     end
     always_comb f = $bits(fpu_funct_t)'(rr_rvalue.funct);
 
     /* stage 1: split */
-    reg_bundle_t [`NST:1] r_split; // buffer of register read bundle
+    iss_bundle_t [`NST:1] r_split; // buffer of register read bundle
     fpu_funct_t  [`NST:1] f_split; // buffer of functional code
     logic [`NST:1]       as_split, bs_split;
     logic [`NST:1][11:0] ae_split, be_split;
@@ -208,6 +207,8 @@ module fpu #(
         for (int i = 2; i <= `NST; i++)
             r_split[i] <= succeed(r_split[i - 1].opid) ? 0 : r_split[i - 1];
         r_split[1] <= succeed(rr_opid[rr_front]) | rr_bubble[rr_front] | ~|rr_out ? 0 : rr_rvalue;
+        if (f_split[1].fmul | f_split[1].fnmul) r_split[2].opid <= 0;
+        if (f_split[1].fdiv | f_split[1].fsqrt) r_split[2].opid <= 0;
     end
     always_ff @(posedge clk) if (~stuck_pip) f_split <= {f_split[`NST-1:1], f};
     always_ff @(posedge clk) if (~stuck_pip) begin
@@ -361,8 +362,8 @@ module fpu #(
             nv_calc[3] <= 1;
         if (f_split[2].fmvxf)
             if (~f_split[2].double)
-                rm_calc[3] <= {{32{r_split[2].prs[0][31]}}, r_split[2].prs[0][31:0]};
-            else rm_calc[3] <= r_split[2].prs[0];
+                rm_calc[3] <= {{32{r_split[2].prsv[0][31]}}, r_split[2].prsv[0][31:0]};
+            else rm_calc[3] <= r_split[2].prsv[0];
         if (f_split[2].fcvtif & r_split[2].b[1:0] == 0) // to word
             if (ae_split[2] == 4095) rm_calc[3] <= 64'h7fff_ffff;
             else if  (|ints[127:33]) rm_calc[3] <= rs ? 64'hffff_ffff_8000_0000 : 64'h7fff_ffff;
@@ -447,7 +448,7 @@ module fpu #(
             f_split[4].fmvxf | f_split[4].fcvtif | f_split[4].fclass) // integer
             r = rm_uni[4];
         else if (f_split[4].fmvfx) // fmvfx does not modify original bits
-            r = f_split[4].double ? r_split[4].prs[0] : {-32'd1, r_split[4].prs[0][31:0]};
+            r = f_split[4].double ? r_split[4].prsv[0] : {-32'd1, r_split[4].prsv[0][31:0]};
         else begin // floating-point
             r       = asm(rs_uni[4], re_uni[4], rm_uni[4], f_split[4].double, f_split[4].rm);
             nx_conv =  nx(rs_uni[4], re_uni[4], rm_uni[4], f_split[4].double, f_split[4].rm);
@@ -466,8 +467,6 @@ module fpu #(
         r_pip.prdv      <= r;
         r_pip.fflags[0] <= nx_conv     | nx_calc[4]; // NX
         r_pip.fflags[4] <= nv_align[4] | nv_calc[4]; // NV
-        if (f_split[4].fmul | f_split[4].fnmul) r_pip <= 0;
-        if (f_split[4].fdiv | f_split[4].fsqrt) r_pip <= 0;
     end
 
     /*------------------------------------ multiplier -------------------------------------*\

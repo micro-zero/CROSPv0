@@ -10,20 +10,18 @@ import types::*;
 module prf #(
     parameter prnum, // number of physical registers
     parameter rwd,   // rename width
-    parameter iwd,   // issue width
+    parameter ewd,   // execute width
     parameter cwd,   // commit width
     parameter opsz   // operation ID size
 )(
     input  logic clk,
     input  logic rst,
     input  ren_bundle_t [rwd-1:0]            ren_bundle, // for reading busy table
-    input  iss_bundle_t [iwd-1:0]            iss_bundle, // for reading registers
-    input  exe_bundle_t [iwd-1:0]            exe_bundle,
+    input  exe_bundle_t [ewd-1:0]            exe_bundle,
     input  red_bundle_t                      red_bundle,
     input  logic        [rwd-1:0]            rename,
-    input  logic        [iwd-1:0]            execute,
     output logic        [rwd-1:0][1:0]       busy_resp,
-    output logic        [iwd-1:0][1:0][63:0] reg_resp
+    output logic        [rwd-1:0][1:0][63:0] reg_resp
 );
     /* pipeline redirect */
     function logic succeed(input logic [15:0] opid);
@@ -43,7 +41,7 @@ module prf #(
         end
         if (~|ren_bundle[i].prsa[0]) busy_resp[i][0] = 0; // except zero forwarding
         if (~|ren_bundle[i].prsa[1]) busy_resp[i][1] = 0;
-        for (int j = 0; j < iwd; j++) begin // forward current write-back registers
+        for (int j = 0; j < ewd; j++) begin // forward current write-back registers
             if (ren_bundle[i].prsa[0] == exe_bundle[j].prda) busy_resp[i][0] = 0;
             if (ren_bundle[i].prsa[1] == exe_bundle[j].prda) busy_resp[i][1] = 0;
         end
@@ -55,8 +53,8 @@ module prf #(
                 if (ren_bundle[i].opid[15] & |ren_bundle[i].prda[1] & rename[i])
                     busy[32'(ren_bundle[i].prda[1])] <= 1;
             /* unset busy after execution */
-            for (int i = 0; i < iwd; i++)
-                if (exe_bundle[i].opid[15] & execute[i])
+            for (int i = 0; i < ewd; i++)
+                if (exe_bundle[i].opid[15])
                     busy[32'(exe_bundle[i].prda)] <= 0;
             /* there is no need for busy table to act with redirection because in-flight busy
                physical registers will be free and unmapped after redirection and unmapped busy
@@ -64,27 +62,26 @@ module prf #(
         end
 
     /* register file */
-    logic [iwd-1:0][1:0][$clog2(prnum)-1:0] raddr;
-    logic [iwd-1:0]     [$clog2(prnum)-1:0] waddr;
-    logic [iwd-1:0][1:0]             [63:0] rvalue;
-    logic [iwd-1:0]                  [63:0] wvalue;
-    logic [iwd-1:0]                         wena;
-    always_comb for (int i = 0; i < iwd; i++) for (int j = 0; j < 2; j++)
-        raddr[i][j] = $clog2(prnum)'(iss_bundle[i].prsa[j]);
-    always_comb for (int i = 0; i < iwd; i++) begin
+    logic [rwd-1:0][1:0][$clog2(prnum)-1:0] raddr;
+    logic [ewd-1:0]     [$clog2(prnum)-1:0] waddr;
+    logic [rwd-1:0][1:0]             [63:0] rvalue;
+    logic [ewd-1:0]                  [63:0] wvalue;
+    logic [ewd-1:0]                         wena;
+    always_comb for (int i = 0; i < rwd; i++) for (int j = 0; j < 2; j++)
+        raddr[i][j] = $clog2(prnum)'(ren_bundle[i].prsa[j]);
+    always_comb for (int i = 0; i < ewd; i++) begin
         waddr [i] = $clog2(prnum)'(exe_bundle[i].prda);
         wvalue[i] = exe_bundle[i].prdv;
         wena  [i] = exe_bundle[i].opid[15] & |waddr[i];
-        if (succeed(exe_bundle[i].opid) | red_bundle.rollback) wena[i] = 0;
     end
-    always_comb for (int i = 0; i < iwd; i++) for (int j = 0; j < 2; j++)
+    always_comb for (int i = 0; i < rwd; i++) for (int j = 0; j < 2; j++)
         if (raddr[i][j] == 0) reg_resp[i][j] = 0;
         else begin
             reg_resp[i][j] = rvalue[i][j];
-            for (int k = 0; k < iwd; k++)
+            for (int k = 0; k < ewd; k++)
                 if (wena[k] & raddr[i][j] == waddr[k]) reg_resp[i][j] = wvalue[k];
         end
-    mwpram #(.width(64), .depth(prnum), .rports(2 * iwd), .wports(iwd))
+    mwpram #(.width(64), .depth(prnum), .rports(2 * rwd), .wports(ewd))
         regfile_inst(.clk(clk), .rst(rst),
             .raddr(raddr), .rvalue(rvalue),
             .waddr(waddr), .wvalue(wvalue), .wena(wena));

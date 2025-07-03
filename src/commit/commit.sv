@@ -12,7 +12,7 @@ import types::*;
 module commit #(
     parameter dwd,   // decode width
     parameter rwd,   // rename width
-    parameter iwd,   // execute width
+    parameter ewd,   // execute width
     parameter cwd,   // commit width
     parameter mwd,   // memory access width
     parameter opsz,  // operation ID size
@@ -23,7 +23,7 @@ module commit #(
     input  logic rst,
     input  dec_bundle_t [dwd-1:0] dec_bundle, // decoder bundle
     input  ren_bundle_t [rwd-1:0] ren_bundle, // rename bundle
-    input  exe_bundle_t [iwd-1:0] exe_bundle, // execution bundle
+    input  exe_bundle_t [ewd-1:0] exe_bundle, // execution bundle
     output com_bundle_t [cwd-1:0] com_bundle, // commit bundle
     output red_bundle_t           red_bundle, // redirect bundle
     /* exception signals */
@@ -136,14 +136,14 @@ module commit #(
     /* entry modified by execution results */
     exe_bundle_t mis_first, mis_bundle, rei_bundle;       // earliest mispredicted and reinforced EXE bundle
     rob_exe_t [cwd-1:0]                   exe_rvalue;     // reading values in ROB
-    logic     [iwd-1:0][$clog2(opsz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
-    rob_exe_t [iwd-1:0]                   exe_wvalue;     // writing values in ROB
-    logic     [iwd-1:0]                   exe_wena;       // ROB write enable signals after EXE stage
-    mwpram #(.width($bits(rob_exe_t)), .depth(opsz), .rports(cwd), .wports(iwd))
+    logic     [ewd-1:0][$clog2(opsz)-1:0] exe_waddr;      // ROB write addresses after EXE stage
+    rob_exe_t [ewd-1:0]                   exe_wvalue;     // writing values in ROB
+    logic     [ewd-1:0]                   exe_wena;       // ROB write enable signals after EXE stage
+    mwpram #(.width($bits(rob_exe_t)), .depth(opsz), .rports(cwd), .wports(ewd))
         rob_exe_inst(.clk(clk), .rst(rst),
             .raddr(rob_raddr), .rvalue(exe_rvalue),
             .waddr(exe_waddr), .wvalue(exe_wvalue), .wena(exe_wena));
-    always_comb for (int i = 0; i < iwd; i++) begin
+    always_comb for (int i = 0; i < ewd; i++) begin
         exe_waddr [i]        = $clog2(opsz)'(exe_bundle[i].opid);
         exe_wena  [i]        = exe_bundle[i].opid[15];
         exe_wvalue[i].cause  = exe_bundle[i].cause;
@@ -158,7 +158,7 @@ module commit #(
     end
     always_comb begin
         mis_first = 0; // search for earliest misprediction
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < ewd; i++)
             if (exe_bundle[i].opid[15] & exe_bundle[i].misp)
                 if (~mis_first.opid[15]) // first mispredicted bundle
                     mis_first = exe_bundle[i];
@@ -171,7 +171,7 @@ module commit #(
         else mis_bundle <= 0;
     always_ff @(posedge clk) if (rst) rei_bundle <= 0; else begin
         rei_bundle <= 0;
-        for (int i = iwd - 1; i >= 0; i--)
+        for (int i = ewd - 1; i >= 0; i--)
             if (exe_bundle[i].opid[15] & ~succeed(exe_bundle[i].opid) &
                 exe_bundle[i].brid[7] & ~exe_bundle[i].misp)
                 rei_bundle <= exe_bundle[i];
@@ -192,7 +192,7 @@ module commit #(
         /* todo: if using data in ROB, this will be unnecessary */
         eid_new = eid_last;
         tval_new = tval_last;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < ewd; i++)
             if (exe_wena[i] & exe_bundle[i].cause[7] & ~exe_last.cause[7]) // exception happens
                 if (~eid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(eid_new) - rob_front) begin
                     eid_new = exe_bundle[i].opid;
@@ -203,7 +203,7 @@ module commit #(
         sid_new = sid_last;
         asid_new = asid_last;
         vadd_new = vadd_last;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < ewd; i++)
             if (exe_wena[i] & exe_bundle[i].sfence[0] & ~exe_last.sfence[0]) // sfence.vma executed
                 if (~sid_new[15] | exe_waddr[i] - rob_front < $clog2(opsz)'(sid_new) - rob_front) begin
                     sid_new = exe_bundle[i].opid;
@@ -216,7 +216,7 @@ module commit #(
         gh_new = gh_last;
         ghi_new = ghi_last;
         ght_new = ght_last;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < ewd; i++)
             if (exe_wena[i] & // global history updated
                 (exe_bundle[i].cause[7] | exe_bundle[i].eret[2] | exe_bundle[i].flush | exe_bundle[i].retry) &
                 ~(    exe_last.cause[7] |      exe_last.eret[2] |      exe_last.flush |      exe_last.retry))
@@ -230,7 +230,7 @@ module commit #(
     always_comb begin
         saf_fwd = saf;
         for (int i = 0; i < dwd; i++) if (dec_wena[i]) saf_fwd[$clog2(opsz)'(dec_waddr[i])] = dec_bundle[i].safe;
-        for (int i = 0; i < iwd; i++) if (exe_wena[i]) saf_fwd[$clog2(opsz)'(exe_waddr[i])] =
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) saf_fwd[$clog2(opsz)'(exe_waddr[i])] =
             ~exe_bundle[i].cause[7] & ~exe_bundle[i].eret[2] & ~exe_bundle[i].specul &
             ~exe_bundle[i].misp     & ~exe_bundle[i].flush   & ~exe_bundle[i].retry;
         for (int i = 0; i < 3 * mwd; i++) if (lsu_unsf[i][15]) saf_fwd[$clog2(opsz)'(lsu_unsf[i])] = 0;
@@ -246,7 +246,7 @@ module commit #(
         end
         for (int i = 0; i < rwd; i++) if (ren_wena[i]) // set renaming status
             ren[$clog2(opsz)'(ren_waddr[i])] <= 1;
-        for (int i = 0; i < iwd; i++) if (exe_wena[i]) begin // set execution status
+        for (int i = 0; i < ewd; i++) if (exe_wena[i]) begin // set execution status
             exe[$clog2(opsz)'(exe_waddr[i])] <= 1;
             spc[$clog2(opsz)'(exe_waddr[i])] <= exe_bundle[i].specul;
         end
@@ -267,6 +267,7 @@ module commit #(
     rob_exe_t exe_last;      // execution part of last commited entry
     rob_ren_t ren_last;      // renaming part of last commited entry
     logic [cwd-1:0] com_exc; // redirection of `cwd` instructions to commit
+    logic [3:0] inst_ret;    // number of instructions retired
     always_comb top_opid = {1'b1, 15'(rob_front)};
     always_comb saf_opid = {1'b1, 15'(saf_front)};
     always_comb begin
@@ -394,8 +395,10 @@ module commit #(
     always_comb sfasid = asid_last;
     always_comb sfvadd = vadd_last;
     always_comb begin
-        rob_out = 0; // release ROB entry after commiting
+        rob_out = 0;  // release ROB entry after commiting
+        inst_ret = 0; // except operations writing to temporary logical registers
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) rob_out++;
+        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & ~dec_rvalue[i].lrda[6]) inst_ret++;
     end
     always_ff @(posedge clk) if (rst) exe_last <= 0;
     else if (|rob_out) begin

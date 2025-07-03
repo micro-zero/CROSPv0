@@ -8,7 +8,6 @@ TBFREQ  = 500000
 FWD     = 2
 DWD     = 2
 RWD     = 2
-IWD     = 3
 EWD     = 2
 CWD     = 2
 MWD     = 1
@@ -29,7 +28,7 @@ BAUD	= 11520000
 # Verilator variables
 CXXFLAGS = -O2 -I/opt/verilator/include -I/opt/verilator/include/vltstd \
 	-I.vcore -DRST_PC="0x$(RST_PC)" -DDDR="0x$(DDR)" \
-		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) -DIWD=$(IWD) \
+		-DFWD=$(FWD) -DDWD=$(DWD) -DRWD=$(RWD) \
 		-DEWD=$(EWD) -DCWD=$(CWD) -DMWD=$(MWD) \
 		-DUART="0x$(UART)" -DSDC="0x$(SDC)" -DETH="0x$(ETH)" \
 	-I.clint -I.plic -DCLINT="0x$(CLINT)" -DPLIC="0x$(PLIC)" \
@@ -145,8 +144,7 @@ all: main
 	$(RM) -r .vcore
 	verilator $(VERILATOR_FLAGS) $(VCORE_SV) -lib-create vcore -top-module vcore -Mdir .vcore \
 		-Grst_pc="32'h$(RST_PC)" -Ghpm="$(HPM)" -Gclint="64'h$(CLINT)" \
-		-Gfwd=$(FWD) -Gdwd=$(DWD) -Grwd=$(RWD) -Giwd=$(IWD) \
-		-Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD)
+		-Gfwd=$(FWD) -Gdwd=$(DWD) -Grwd=$(RWD) -Gewd=$(EWD) -Gcwd=$(CWD) -Gmwd=$(MWD)
 	$(MAKE) -C .vcore -f Vvcore.mk
 
 .clint : $(CLINT_SV)

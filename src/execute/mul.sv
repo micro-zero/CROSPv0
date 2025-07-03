@@ -9,15 +9,14 @@ import types::*;
 `define MULLAT 6
 
 module mul #(
-    parameter iwd,  // issue width
     parameter ewd,  // execution width
     parameter opsz  // operation ID size
 )(
     input  logic clk,
     input  logic rst,
     input  red_bundle_t redir,           // redirect bundle
-    output logic ready,                  // ready for receiving at most `iwd` requests
-    input  reg_bundle_t [iwd-1:0] req,   // requests after register read
+    output logic ready,                  // ready for receiving at most `ewd` requests
+    input  iss_bundle_t [ewd-1:0] req,   // requests after register read
     input  logic        [ewd-1:0] claim, // claim signals (fetch execution results)
     output exe_bundle_t [ewd-1:0] resp   // execution results
 );
@@ -29,22 +28,22 @@ module mul #(
     endfunction
 
     /* register read buffer */
-    localparam eqsz = 2 * (1 << $clog2(ewd));
+    localparam eqsz = (1 << $clog2(3 * ewd));
     logic [$clog2(eqsz)-1:0] rr_front;
     logic [$clog2(eqsz):0] rr_num, rr_in, rr_out;
     logic [eqsz-1:0][15:0] rr_opid;
     logic [eqsz-1:0]       rr_bubble;
-    reg_bundle_t           rr_rvalue;
+    iss_bundle_t           rr_rvalue;
     logic        [ewd-1:0][$clog2(eqsz)-1:0] rr_waddr;
-    reg_bundle_t [ewd-1:0]                   rr_wvalue;
+    iss_bundle_t [ewd-1:0]                   rr_wvalue;
     logic        [ewd-1:0]                   rr_wena;
-    mwpram #(.width($bits(reg_bundle_t)), .depth(eqsz), .rports(1), .wports(ewd))
+    mwpram #(.width($bits(iss_bundle_t)), .depth(eqsz), .rports(1), .wports(ewd))
         rr_inst(.clk(clk), .rst(rst),
             .raddr(rr_front), .rvalue(rr_rvalue),
             .waddr(rr_waddr), .wvalue(rr_wvalue), .wena(rr_wena));
     always_comb begin
         rr_in = 0; rr_wvalue = 0;
-        for (int i = 0; i < iwd; i++)
+        for (int i = 0; i < ewd; i++)
             if (req[i].opid[15] & req[i].fu[3]) begin // select MUL requests and flatten them
                 rr_wvalue[rr_in] = req[i];
                 rr_in++;
@@ -68,8 +67,8 @@ module mul #(
     mul_funct_t f;
     always_comb begin
         f = $bits(mul_funct_t)'(rr_rvalue.funct);
-        a = 128'(rr_rvalue.prs[0]);
-        b = 128'(rr_rvalue.prs[1]);
+        a = 128'(rr_rvalue.prsv[0]);
+        b = 128'(rr_rvalue.prsv[1]);
         if (f.mul | f.mulw | f.mulh | f.mulhsu) a[127:64] = {64{a[63]}};
         if (f.mul | f.mulw | f.mulh)            b[127:64] = {64{b[63]}};
         r = a * b;

@@ -11,11 +11,11 @@ PLIC  		  = 0c000000
 ROM   		  = 00010000
 PARAM_CPUFREQ = $(CPUFREQ)000000
 PARAM_TBFREQ  = $(CPUFREQ)0000
+PARAM_NDEV    = 4
 PARAM_RSTPC   = 10040
 PARAM_FWD     = 2
 PARAM_DWD     = 2
 PARAM_RWD     = 2
-PARAM_IWD     = 3
 PARAM_EWD     = 2
 PARAM_CWD     = 2
 PARAM_MWD     = 1
@@ -93,12 +93,12 @@ define PRJ_TCL
 	set_property CONFIG.fwd {$(PARAM_FWD)} [get_bd_cells core]
 	set_property CONFIG.dwd {$(PARAM_DWD)} [get_bd_cells core]
 	set_property CONFIG.rwd {$(PARAM_RWD)} [get_bd_cells core]
-	set_property CONFIG.iwd {$(PARAM_IWD)} [get_bd_cells core]
 	set_property CONFIG.ewd {$(PARAM_EWD)} [get_bd_cells core]
 	set_property CONFIG.mwd {$(PARAM_MWD)} [get_bd_cells core]
 	set_property CONFIG.cwd {$(PARAM_CWD)} [get_bd_cells core]
 	set_property CONFIG.cpufreq {$(PARAM_CPUFREQ)} [get_bd_cells clint]
 	set_property CONFIG.tbfreq  {$(PARAM_TBFREQ)}  [get_bd_cells clint]
+	set_property CONFIG.ndev    {$(PARAM_NDEV)}    [get_bd_cells plic]
 	set_property CONFIG.cpufreq {$(PARAM_CPUFREQ)} [get_bd_cells uart]
 	# Xilinx IP
 	create_bd_cell -type ip -vlnv xilinx.com:ip:mig_7series:4.2 ddr3
@@ -110,7 +110,7 @@ define PRJ_TCL
 	set_property CONFIG.RESET_BOARD_INTERFACE {Custom} [get_bd_cells ddr3]
 	set_property CONFIG.MIG_DONT_TOUCH_PARAM {Custom} [get_bd_cells ddr3]
 	set_property CONFIG.BOARD_MIG_PARAM {ddr3_sdram} [get_bd_cells ddr3]
-	set_property CONFIG.NUM_PORTS   {8}  [get_bd_cells intcat]
+	set_property CONFIG.NUM_PORTS   {$(PARAM_NDEV)}  [get_bd_cells intcat]
 	set_property CONFIG.C_OPERATION {or} [get_bd_cells ipor]
 	set_property CONFIG.C_SIZE      {64} [get_bd_cells ipor]
 	# Connection
@@ -211,10 +211,6 @@ define PRJ_TCL
 	connect_bd_net      [get_bd_pins uart/intr]                [get_bd_pins intcat/In1]
 	connect_bd_net      [get_bd_pins sdc/intr]                 [get_bd_pins intcat/In2]
 	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In3]
-	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In4]
-	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In5]
-	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In6]
-	connect_bd_net      [get_bd_pins def/zero1]                [get_bd_pins intcat/In7]
 	connect_bd_net      [get_bd_pins intcat/dout]              [get_bd_pins plic/int_vect]
 	connect_bd_net      [get_bd_pins plic/int_pend]            [get_bd_pins ipor/Op1]
 	connect_bd_net      [get_bd_pins clint/int_pend]           [get_bd_pins ipor/Op2]

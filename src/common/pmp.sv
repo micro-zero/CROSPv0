@@ -27,7 +27,7 @@ module pmp(
         endcase
     always_comb begin
         perm = level == 2'b11 ? 3'b111 : 0;         // default value
-        for (int i = 16; i >= 0; i--) if (match[i]) // lowest match found
+        for (int i = 15; i >= 0; i--) if (match[i]) // lowest match found
             if (level == 2'b11 & ~pmpcfg[i][7])
                 perm = 3'b111;          // unlocked M mode
             else perm = pmpcfg[i][2:0]; // locked M mode or S/U mode

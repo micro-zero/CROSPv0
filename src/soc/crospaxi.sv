@@ -12,7 +12,6 @@ module crospaxi #(
     parameter fwd    = 2,            // fetch width
     parameter dwd    = 2,            // decode width
     parameter rwd    = 2,            // rename width
-    parameter iwd    = 3,            // issue width
     parameter ewd    = 2,            // execute width
     parameter cwd    = 2,            // commit width
     parameter mwd    = 1,            // memory access width
@@ -185,20 +184,18 @@ module crospaxi #(
     fet_bundle_t [fwd-1:0] fet_bundle;
     dec_bundle_t [dwd-1:0] dec_bundle;
     ren_bundle_t [rwd-1:0] ren_bundle;
-    iss_bundle_t [iwd-1:0] iss_bundle;
-    exe_bundle_t [iwd-1:0] exe_bundle;
+    iss_bundle_t [ewd-1:0] iss_bundle, lsu_bundle;
+    exe_bundle_t [ewd-1:0] exe_bundle;
     com_bundle_t [cwd-1:0] com_bundle;
     red_bundle_t           red_bundle;
     logic [fwd-1:0] dec_ready;
     logic [dwd-1:0] ren_ready;
     logic [rwd-1:0] iss_ready;
-    logic [iwd-1:0] exe_ready;
     logic [rwd-1:0][1:0] busy_resp;
-    logic [2*iwd-1:0][63:0] reg_resp;
-    reg_bundle_t      [iwd-1:0] fu_req;
+    logic [2*rwd-1:0][63:0] reg_resp;
     logic        [4:0][ewd-1:0] fu_claim;
     exe_bundle_t [4:0][ewd-1:0] fu_resp;
-    logic        [4:0]      fu_ready;
+    logic        [4:0]          fu_ready;
     logic        csr_rqst, csr_excp, csr_flsh, csr_intl;
     logic  [6:0] csr_intg;
     logic  [2:0] csr_func;
@@ -228,34 +225,32 @@ module crospaxi #(
             com_bundle, red_bundle, dec_ready, fet_bundle, ren_ready, dec_bundle);
     rename #(.dwd(dwd), .rwd(rwd), .cwd(cwd), .prnum(prnum), .brsz(brsz))
         ren_inst(clk, rst, com_bundle, red_bundle, ren_ready, dec_bundle, iss_ready, ren_bundle);
-    prf #(.prnum(prnum), .rwd(rwd), .iwd(iwd), .cwd(cwd), .opsz(opsz))
-        prf_inst(clk, rst, ren_bundle, iss_bundle, exe_bundle, red_bundle,
-            iss_ready, (iwd)'(-1), busy_resp, reg_resp);
+    prf #(.prnum(prnum), .rwd(rwd), .ewd(ewd), .cwd(cwd), .opsz(opsz))
+        prf_inst(clk, rst, ren_bundle, exe_bundle, red_bundle, iss_ready, busy_resp, reg_resp);
     csr #(.hpm(hpm)) csr_inst(clk, rst, csr_rqst, csr_func, csr_addr, csr_wdat, csr_rdat,
         exception, epc, tval, cause, eret, frd, fflags,
         csr_excp, csr_intl, csr_intg, csr_flsh, mip_ext, mtime, csr_pmd,
         csr_status, csr_tvec, csr_mepc, csr_sepc, csr_fcsr, it_satp, dt_satp, pmpcfg, pmpaddr);
-    issue #(.rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .iqsz(iqsz))
-        iss_inst(clk, rst, fu_ready, busy_resp,
-            exe_bundle, red_bundle, iss_ready, ren_bundle, (iwd)'(-1), iss_bundle);
-    execute #(.iwd(iwd), .ewd(ewd), .prnum(prnum))
-        exe_inst(clk, rst, reg_resp, iss_bundle, fu_req, (iwd)'(-1), exe_bundle, fu_resp, fu_claim);
-    commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .iwd(iwd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .cnt(cnt))
+    issue #(.rwd(rwd), .ewd(ewd), .cwd(cwd), .opsz(opsz), .iqsz(iqsz))
+        iss_inst(clk, rst, fu_ready, busy_resp, reg_resp,
+            exe_bundle, red_bundle, iss_ready, ren_bundle, iss_bundle, lsu_bundle);
+    execute #(.ewd(ewd), .opsz(opsz), .prnum(prnum)) exe_inst(clk, rst, exe_bundle, fu_resp, fu_claim);
+    commit #(.rst_pc(rst_pc), .dwd(dwd), .rwd(rwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .opsz(opsz), .cnt(cnt))
         com_inst(clk, rst, dec_bundle, ren_bundle, exe_bundle, com_bundle, red_bundle,
             csr_tvec, csr_mepc, csr_sepc, exception, epc, tval, cause, eret, frd, fflags,
             lsu_safe, lsu_unsf, top_opid, saf_opid, fnci, fncv, fncv_asid, fncv_vadd);
-    alu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
-        alu_inst(clk, rst, red_bundle, fu_ready[0], fu_req, fu_claim[0], fu_resp[0], csr_inst.level,
+    alu #(.ewd(ewd), .opsz(opsz))
+        alu_inst(clk, rst, red_bundle, fu_ready[0], iss_bundle, fu_claim[0], fu_resp[0], csr_inst.level,
             csr_inst.mstatus[20] & csr_inst.level == 2'b01, csr_inst.mstatus[22] & csr_inst.level == 2'b01);
-    fpu #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
-        fpu_inst(clk, rst, red_bundle, fu_ready[2], fu_req, fu_claim[2], fu_resp[2]);
-    mul #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
-        mul_inst(clk, rst, red_bundle, fu_ready[3], fu_req, fu_claim[3], fu_resp[3]);
-    div #(.iwd(iwd), .ewd(ewd), .opsz(opsz))
-        div_inst(clk, rst, red_bundle, fu_ready[4], fu_req, fu_claim[4], fu_resp[4]);
-    lsu #(.iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz))
+    fpu #(.ewd(ewd), .opsz(opsz))
+        fpu_inst(clk, rst, red_bundle, fu_ready[2], iss_bundle, fu_claim[2], fu_resp[2]);
+    mul #(.ewd(ewd), .opsz(opsz))
+        mul_inst(clk, rst, red_bundle, fu_ready[3], iss_bundle, fu_claim[3], fu_resp[3]);
+    div #(.ewd(ewd), .opsz(opsz))
+        div_inst(clk, rst, red_bundle, fu_ready[4], iss_bundle, fu_claim[4], fu_resp[4]);
+    lsu #(.ewd(ewd), .cwd(cwd), .mwd(mwd), .lqsz(lqsz), .sqsz(sqsz), .opsz(opsz))
         lsu_inst(clk, rst, lsu_safe, lsu_unsf, top_opid, saf_opid, red_bundle, com_bundle,
-            fu_ready[1], fu_req, fu_claim[1], fu_resp[1],
+            fu_ready[1], lsu_bundle, fu_claim[1], fu_resp[1],
             csr_rqst, csr_func, csr_addr, csr_wdat, csr_excp, csr_rdat, csr_flsh,
             csr_inst.mstatus[17] ? csr_inst.mstatus[12:11] : csr_inst.level,
             pmpcfg, pmpaddr, fl_data, fl_inst | fl_data,
@@ -267,7 +262,7 @@ module crospaxi #(
         /* `csr_pmd` record the delta of counters within current cycle */
         csr_pmd[0]  = 0;                                         // no event
         csr_pmd[1]  = 1;                                         // cycle
-        csr_pmd[2]  = 4'(com_inst.rob_out);                      // instructions retired
+        csr_pmd[2]  = 4'(com_inst.inst_ret);                     // instructions retired
         csr_pmd[3]  = fet_inst.fredir ? 1 : 0;                   // frontend redirect
         csr_pmd[4]  = fet_inst.bredir ? 1 : 0;                   // backend redirect
         csr_pmd[5]  = dc_resp[7:4] == 4'b1110 ? 1 : 0;           // load access

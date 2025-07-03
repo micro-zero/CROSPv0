@@ -90,29 +90,6 @@ typedef struct packed {
 } ren_bundle_t;
 
 typedef struct packed {
-    /* propagation of decoder bundle */
-    logic [15:0] opid;
-    logic [7:0] brid;
-    logic [7:0] ldid, stid;
-    logic [4:0] bank;
-    logic [7:0] pat, patb;
-    logic [15:0] gh;
-    logic [4:1][15:0] ghi, ght;
-    logic [63:0] pc, pnpc;
-    logic [31:0] ir;
-    logic [2:0] delta;
-    logic [4:0] fu;
-    logic [63:0] funct;
-    logic [64:0] base;
-    logic [63:0] offset;
-    logic [64:0] a, b;
-    logic [1:0][15:0] prsa;
-    logic [1:0][15:0] prda;
-    logic [1:0] prsb; // physical register busy bit
-    logic branch, jal, jalr;
-} iss_bundle_t;
-
-typedef struct packed {
     /* propagation of issue bundle */
     logic [15:0] opid;
     logic [7:0] brid;
@@ -130,10 +107,10 @@ typedef struct packed {
     logic [63:0] offset;
     logic [64:0] a, b;
     logic [1:0]       prsb;
-    logic [1:0][63:0] prs; // convert register addresses to values
+    logic [1:0][63:0] prsv;
     logic [1:0][15:0] prda;
     logic branch, jal, jalr;
-} reg_bundle_t;
+} iss_bundle_t;
 
 typedef struct packed {
     logic [15:0] opid;          // operation ID

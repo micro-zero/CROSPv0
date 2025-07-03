@@ -22,7 +22,6 @@ module vcore #(
     parameter fwd,
     parameter dwd,
     parameter rwd,
-    parameter iwd,
     parameter ewd,
     parameter cwd,
     parameter mwd,
@@ -142,7 +141,7 @@ module vcore #(
     /* instantiate core with direct memory interface */
     logic [63:0] dbg_cycle, dbg_pcir0, dbg_pcir1;
     crospaxi #(.rst_pc(rst_pc), .hpm(hpm),
-        .fwd(fwd), .dwd(dwd), .rwd(rwd), .iwd(iwd), .ewd(ewd), .cwd(cwd), .mwd(mwd)) inst(
+        .fwd(fwd), .dwd(dwd), .rwd(rwd), .ewd(ewd), .cwd(cwd), .mwd(mwd)) inst(
         clk, rst, mip_ext, mtime, dbg_cycle, dbg_pcir0, dbg_pcir1,
         s_coh_lock, s_coh_rqst, s_coh_trsc, s_coh_addr, s_coh_resp, s_coh_mesi,
         m_coh_lock, m_coh_rqst, m_coh_trsc, m_coh_addr, m_coh_resp, m_coh_mesi,
@@ -284,13 +283,14 @@ module vcore #(
         else if (inst.com_inst.exe_last.retry & inst.red_bundle.opid[15]) ldmisp <= ldmisp + 1;
 
     /* assertion */
+    /* parameters */
     always_comb assert(rwd >= cwd);
-    always_comb assert(iwd >= ewd);
     always_comb assert(inst.dec_inst.opnum <= inst.dec_inst.opsz);
     always_comb assert(inst.dec_inst.brnum <= inst.dec_inst.brsz);
+    /* free list leaking */
     int flnum;
     always_comb flnum = $countones(~inst.ren_inst.fl);
-    always_ff @(posedge clk) if (~rst) assert(flnum <= 32'(inst.com_inst.rob_num) + 65); // free list leaking
+    always_ff @(posedge clk) if (~rst) assert(flnum <= 32'(inst.com_inst.rob_num) + 65);
 endmodule
 
 /* firstk module for simulation acceleration */
