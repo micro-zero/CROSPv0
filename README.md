@@ -32,8 +32,10 @@ The modules in pipeline-stage order are
 - `execute`: read registers from physical register file and
              dispatch the operations to related function units,
              and contains 1 or more stages.
-- `writeback` : re-order the instructions and generate
-                redirection and exception.
+- `writeback` : write execution results back to ROB, PRF and
+                issue queue.
+
+![CROSP pipeline](util/fig/crosp.png)
 
 Thus an instruction will flow through at least 9 stages. In
 this directory, the sub-directories contain source code,

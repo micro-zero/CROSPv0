@@ -34,7 +34,7 @@ typedef struct packed {
 } fet_bundle_t;
 
 typedef struct packed {
-    /* common identification */
+    /* common information */
     logic [15:0] opid;          // instruction operation ID (MSB is valid bit)
     logic  [7:0] brid;          // branch ID (MSB is valid bit)
     logic  [7:0] ldid, stid;    // load ID and store ID (MSB is valid bit)

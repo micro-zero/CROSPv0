@@ -614,7 +614,7 @@ module lsu #(
 
     /* reservation set */
     logic [63:0] lr_addr; // reservation address
-    logic  [7:0] lr_strb; // reservation size, MSB is reserved bit
+    logic  [7:0] lr_strb; // reservation strobe
     always_ff @(posedge clk) if (rst | sc_succ | sc_fail) lr_strb <= 0;
         else for (int i = 0; i < cwd; i++)
             if (com_bundle[i].opid[15] & com_bundle[i].ldid[7]) // LR committed

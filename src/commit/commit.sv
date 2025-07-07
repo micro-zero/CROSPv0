@@ -189,7 +189,6 @@ module commit #(
     logic  [63:0] vadd_last, vadd_new; // virtual address of the nearest sfence.vma
     always_comb begin
         /* store earliest trap/sfence value in a single register to save space of ROB */
-        /* todo: if using data in ROB, this will be unnecessary */
         eid_new = eid_last;
         tval_new = tval_last;
         for (int i = 0; i < ewd; i++)

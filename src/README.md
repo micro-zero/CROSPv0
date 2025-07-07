@@ -96,9 +96,9 @@ makes multiplier pipelined.
 
 ### DIV
 
-Divider uses iterative substraction algorithm. It tries out
-each bit in quotient. The cycle number of an division operation
-is uncertain for the optimization of skipping leading zeros is
+Divider uses iterative subtraction algorithm. It tries out each
+bit in quotient. The cycle number of an division operation is
+uncertain for the optimization of skipping leading zeros is
 applied.
 
 ### FPU

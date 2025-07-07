@@ -530,7 +530,7 @@ module fpu #(
     |   --------------------------------------- = ---- * ---- * 2^(e1-e2)   |
     |    s2*m2[ 00---1.xx---x000 ]*2^(e2-2047)     s2     m2                |
     |         [     55.54   3210 ]                                          |
-    |  fixed-point divider uses repeated substraction (same as integer)     |
+    |  fixed-point divider uses repeated subtraction (same as integer)      |
     \*---------------------------------------------------------------------*/
     exe_bundle_t r_div;
     fpu_funct_t  f_div;

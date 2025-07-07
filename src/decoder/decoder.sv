@@ -120,7 +120,7 @@ module decoder #(
         /* decode function units and functinonal code */
         always_comb begin
             {alu_funct, lsu_funct, fpu_funct, mul_funct, div_funct} = 0;
-            /* AMO and MM require 2nd operation */
+            /* AMO and FMA require 2nd operation */
             alu_funct[1].add  = op[`AMO] & ir[31:27] == 5'b00001 | op[`AMO] & ir[31:27] == 5'b00000;
             alu_funct[1].ixor = op[`AMO] & ir[31:27] == 5'b00100;
             alu_funct[1].iand = op[`AMO] & ir[31:27] == 5'b01100;
