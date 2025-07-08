@@ -38,7 +38,7 @@ registers above 64. If oprands are from registers, in the
 bundles the MSB will be set indicating source of registers, and
 read from register file when being dispatched to issue queue.
 
-### ID generation
+### ID Generation
 
 Decoding module also has the function of generating
 identifiers. The identifiers are allocated and released in
@@ -58,7 +58,7 @@ branch instruction before it. `ldid` and `stid` are similar.
 This is designed for the convenience of redirection at
 writeback stage.
 
-## Compressed instruction converter
+## Compressed Instruction Converter
 
 The "C" extension in RISC-V defines some compressed instruction
 with 16-bit encoding. In the specification each compressed

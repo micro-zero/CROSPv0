@@ -6,7 +6,7 @@ and ROB. All the issued instructions are broadcast to all
 functional units, and functional units choose related
 instructions to operate and finally calculate execution result.
 
-## Execution module
+## Execution Module
 
 Since the register read stage is moved before issuing and
 functional units take `iss_bundle` directly from issue module,
