@@ -72,7 +72,7 @@ module prf #(
     always_comb for (int i = 0; i < ewd; i++) begin
         waddr [i] = $clog2(prnum)'(exe_bundle[i].prda);
         wvalue[i] = exe_bundle[i].prdv;
-        wena  [i] = exe_bundle[i].opid[15] & |waddr[i];
+        wena  [i] = exe_bundle[i].opid[15];
     end
     always_comb for (int i = 0; i < rwd; i++) for (int j = 0; j < 2; j++)
         if (raddr[i][j] == 0) reg_resp[i][j] = 0;

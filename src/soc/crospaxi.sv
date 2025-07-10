@@ -38,9 +38,12 @@ module crospaxi #(
     input  logic [63:0] mip_ext,
     input  logic [63:0] mtime,
     /* debug ports */
-    output logic [63:0] dbg_cycle,
-    output logic [63:0] dbg_pcir0,
-    output logic [63:0] dbg_pcir1,
+    output logic      [63:0] dbg_cycle,
+    output logic      [63:0] dbg_pcir0,
+    output logic      [63:0] dbg_pcir1,
+    output logic      [31:0] dbg_ospid,
+    output logic       [1:0] dbg_level,
+    output logic [11:0][3:0] dbg_event,
     /* coherence interface */
     input logic         s_coh_lock,
     input  logic  [7:0] s_coh_rqst,
@@ -274,10 +277,44 @@ module crospaxi #(
         csr_pmd[11] = mmu_inst.stlb.fill ? 1 : 0;                // STLB miss
     end
 
+    /* HINT instruction to get PID in OS */
+    logic                  [opsz-1:0] hint_slli;
+    logic          [$clog2(opsz)-1:0] hint_raddr;
+    logic [ewd-1:0][$clog2(opsz)-1:0] hint_waddr;
+    logic                      [63:0] hint_rvalue;
+    logic [ewd-1:0]            [63:0] hint_wvalue;
+    logic [ewd-1:0]                   hint_wena;
+    mwpram #(.width(64), .depth(opsz), .rports(1), .wports(ewd))
+        rob_hint_inst(.clk(clk), .rst(rst),
+            .raddr(hint_raddr), .rvalue(hint_rvalue),
+            .waddr(hint_waddr), .wvalue(hint_wvalue), .wena(hint_wena));
+    always_comb begin
+        hint_raddr = 0;
+        for (int i = 0; i < cwd; i++)
+            if (com_bundle[i].opid[15] & hint_slli[$clog2(opsz)'(com_bundle[i].opid)])
+                hint_raddr = $clog2(opsz)'(com_bundle[i].opid);
+    end
+    always_comb for (int i = 0; i < ewd; i++) begin
+        hint_waddr [i] = $clog2(opsz)'(iss_bundle[i].opid);
+        hint_wena  [i] = iss_bundle[i].opid[15];
+        hint_wvalue[i] = iss_bundle[i].prsv[0]; // use first oprand as HINT value
+    end
+    always_ff @(posedge clk) if (rst) hint_slli <= 0; else
+        for (int i = 0; i < dwd; i++) if (dec_bundle[i].opid[15])
+            hint_slli[$clog2(opsz)'(dec_bundle[i].opid)] <=
+                dec_bundle[i].ir[11:7]  == 5'd0   & dec_bundle[i].ir[6:0]   == 7'b0010011 &
+                dec_bundle[i].ir[14:12] == 3'b001 & dec_bundle[i].ir[31:26] == 6'd0;
+
     /* debug ports */
+    always_comb dbg_level = csr_inst.level;
+    always_comb dbg_event = csr_pmd;
     always_ff @(posedge clk) if (rst) dbg_cycle <= 0; else dbg_cycle <= dbg_cycle + 1;
     always_ff @(posedge clk) if (rst) {dbg_pcir0, dbg_pcir1} <= 0; else begin
         if (com_bundle[0].opid[15]) dbg_pcir0 <= {com_bundle[0].pc[31:0], com_bundle[0].ir};
         if (com_bundle[1].opid[15]) dbg_pcir1 <= {com_bundle[1].pc[31:0], com_bundle[1].ir};
     end
+    always_ff @(posedge clk) if (rst) dbg_ospid <= 0; else
+        for (int i = 0; i < cwd; i++)
+            if (com_bundle[i].opid[15] & hint_slli[$clog2(opsz)'(com_bundle[i].opid)])
+                dbg_ospid <= hint_rvalue[31:0];
 endmodule

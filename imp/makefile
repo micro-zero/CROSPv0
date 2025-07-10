@@ -8,10 +8,12 @@ UART  		  = 60010000
 SDC   		  = 60000000
 CLINT 		  = 02000000
 PLIC  		  = 0c000000
+PM            = 00020000
 ROM   		  = 00010000
 PARAM_CPUFREQ = $(CPUFREQ)000000
 PARAM_TBFREQ  = $(CPUFREQ)0000
 PARAM_NDEV    = 4
+PARAM_EVNUM   = 12
 PARAM_RSTPC   = 10040
 PARAM_FWD     = 2
 PARAM_DWD     = 2
@@ -47,6 +49,7 @@ CORE_SRC = \
 	$(shell realpath ../src/soc/crospaxi.sv)
 CLINT_SRC = $(shell realpath ../src/soc/clint.sv)
 PLIC_SRC  = $(shell realpath ../src/soc/plic.sv)
+PM_SRC    = $(shell realpath ../src/soc/pm.sv)
 COHUB_SRC = $(shell realpath ../src/soc/cohub.sv)
 UART_SRC  = \
 	$(shell realpath ../src/soc/axi_uart/axi_uart.sv) \
@@ -73,7 +76,7 @@ define PRJ_TCL
 	create_project .prj .prj -part xc7k325tffg900-2
 	set_property board_part digilentinc.com:genesys2:part0:1.1 [current_project]
 	set_property ip_repo_paths { \\
-		.core .rom .clint .plic .cohub .uart .sdc .def .uartintf .mdiointf .sdintf .cohintf \\
+		.core .rom .clint .plic .pm .cohub .uart .sdc .def .uartintf .mdiointf .sdintf .cohintf \\
 	} [current_project]
 	update_ip_catalog
 
@@ -84,6 +87,7 @@ define PRJ_TCL
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:ROM:0.1 rom
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:CLINT:0.1 clint
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:PLIC:0.1 plic
+	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:PM:0.1 pm
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:COHUB:0.1 cohub
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:UART:0.1 uart
 	create_bd_cell -type ip -vlnv mprc.pku.edu.cn:MPRC:SDC:0.1 sdc
@@ -99,11 +103,13 @@ define PRJ_TCL
 	set_property CONFIG.cpufreq {$(PARAM_CPUFREQ)} [get_bd_cells clint]
 	set_property CONFIG.tbfreq  {$(PARAM_TBFREQ)}  [get_bd_cells clint]
 	set_property CONFIG.ndev    {$(PARAM_NDEV)}    [get_bd_cells plic]
+	set_property CONFIG.evnum   {$(PARAM_EVNUM)}   [get_bd_cells pm]
 	set_property CONFIG.cpufreq {$(PARAM_CPUFREQ)} [get_bd_cells uart]
 	# Xilinx IP
 	create_bd_cell -type ip -vlnv xilinx.com:ip:mig_7series:4.2 ddr3
 	create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 intcat
 	create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 ipor
+	create_bd_cell -type ip -vlnv xilinx.com:ip:jtag_axi:1.2 jtag
 	apply_bd_automation -rule xilinx.com:bd_rule:mig_7series \\
 		-config {Board_Interface "ddr3_sdram"} [get_bd_cells ddr3]
 	set_property CONFIG.XML_INPUT_FILE {$(shell realpath .prj)/mig.prj} [get_bd_cells ddr3]
@@ -113,6 +119,8 @@ define PRJ_TCL
 	set_property CONFIG.NUM_PORTS   {$(PARAM_NDEV)}  [get_bd_cells intcat]
 	set_property CONFIG.C_OPERATION {or} [get_bd_cells ipor]
 	set_property CONFIG.C_SIZE      {64} [get_bd_cells ipor]
+	set_property CONFIG.M_AXI_ADDR_WIDTH {64} [get_bd_cells jtag]
+	set_property CONFIG.M_AXI_DATA_WIDTH {64} [get_bd_cells jtag]
 	# Connection
 	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
 		Clk_master {Auto}                                       \\
@@ -161,6 +169,16 @@ define PRJ_TCL
 		Clk_slave  {Auto}                                       \\
 		Clk_xbar   {Auto}                                       \\
 		Master     {/core/m_axi}                                \\
+		Slave      {/pm/s_axi}                                  \\
+		ddr_seg    {Auto}                                       \\
+		intc_ip    {New AXI SmartConnect}                       \\
+		master_apm {0}                                          \\
+	} [get_bd_intf_pins pm/s_axi]
+	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
+		Clk_master {Auto}                                       \\
+		Clk_slave  {Auto}                                       \\
+		Clk_xbar   {Auto}                                       \\
+		Master     {/core/m_axi}                                \\
 		Slave      {/sdc/s_axi}                                 \\
 		ddr_seg    {Auto}                                       \\
 		intc_ip    {New AXI SmartConnect}                       \\
@@ -200,6 +218,16 @@ define PRJ_TCL
 		intc_ip    {/axi_smc}                                   \\
 		master_apm {0}                                          \\
 	} [get_bd_intf_pins rom/s_axi]
+	apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \\
+		Clk_master {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}       \\
+		Clk_slave  {Auto}                                       \\
+		Clk_xbar   {/ddr3/ui_addn_clk_0 ($(CPUFREQ) MHz)}       \\
+		Master     {/jtag/M_AXI}                                \\
+		Slave      {/pm/s_axi}                                  \\
+		ddr_seg    {Auto}                                       \\
+		intc_ip    {/axi_smc}                                   \\
+		master_apm {0}                                          \\
+	}  [get_bd_intf_pins jtag/M_AXI]
 	create_bd_intf_port -mode Master -vlnv mprc.pku.edu.cn:MPRC:sdcard_rtl:1.0 sd
 	create_bd_intf_port -mode Master -vlnv mprc.pku.edu.cn:MPRC:uart_rtl:1.0 uart
 	set_property name ddr [get_bd_intf_ports ddr3_sdram]
@@ -214,6 +242,9 @@ define PRJ_TCL
 	connect_bd_net      [get_bd_pins intcat/dout]              [get_bd_pins plic/int_vect]
 	connect_bd_net      [get_bd_pins plic/int_pend]            [get_bd_pins ipor/Op1]
 	connect_bd_net      [get_bd_pins clint/int_pend]           [get_bd_pins ipor/Op2]
+	connect_bd_net      [get_bd_pins pm/level]                 [get_bd_pins core/dbg_level]
+	connect_bd_net      [get_bd_pins pm/pid]                   [get_bd_pins core/dbg_ospid]
+	connect_bd_net      [get_bd_pins pm/events]                [get_bd_pins core/dbg_event]
 	connect_bd_net      [get_bd_pins ipor/Res]                 [get_bd_pins core/mip_ext]
 	connect_bd_net      [get_bd_pins ddr3/init_calib_complete] [get_bd_pins rst_ddr3_$(CPUFREQ)M/aux_reset_in]
 	connect_bd_net      [get_bd_pins ddr3/init_calib_complete] [get_bd_pins rst_ddr3_200M/aux_reset_in]
@@ -229,9 +260,11 @@ define PRJ_TCL
 	assign_bd_address -offset 0x$(PLIC)  -range 64M [get_bd_addr_segs plic/s_axi/reg0]
 	assign_bd_address -offset 0x$(UART)  -range 64K [get_bd_addr_segs uart/s_axi/reg0]
 	assign_bd_address -offset 0x$(SDC)   -range 64K [get_bd_addr_segs sdc/s_axi/reg0]
+	assign_bd_address -offset 0x$(PM)    -range 64K [get_bd_addr_segs pm/s_axi/reg0]
 	assign_bd_address -offset 0x$(ROM)   -range 64K [get_bd_addr_segs rom/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs clint/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs plic/s_axi/reg0]
+	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs pm/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs rom/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs sdc/s_axi/reg0]
 	exclude_bd_addr_seg -target_address_space [get_bd_addr_spaces sdc/m_axi] [get_bd_addr_segs uart/s_axi/reg0]
@@ -299,7 +332,7 @@ define BLD_TCL
 	# set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
 	# # end of cancelling optimization
 	# # if extra timing optimization is needed, uncomment these lines
-	# set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
+	set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
 	# set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt [get_runs impl_1]
 	# set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
 	# set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE NoTimingRelaxation [get_runs impl_1]
@@ -419,6 +452,33 @@ define PLIC_TCL
 	ipx::save_core [ipx::current_core]
 endef
 export PLIC_TCL
+
+define PM_TCL
+	# Package core-local interruptor
+	ipx::infer_core .pm
+	ipx::current_core .pm/component.xml
+	set_property vendor mprc.pku.edu.cn [ipx::current_core]
+	set_property library MPRC [ipx::current_core]
+	set_property name PM [ipx::current_core]
+	set_property version 0.1 [ipx::current_core]
+	set_property display_name PMv0 [ipx::current_core]
+	set_property description {Core-Local INTerruptor} [ipx::current_core]
+	set_property vendor_display_name MPRC [ipx::current_core]
+	set_property company_url https://mprc.pku.edu.cn [ipx::current_core]
+	ipx::add_bus_parameter POLARITY [ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]
+	ipx::add_bus_parameter FREQ_HZ  [ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]
+	set_property value ACTIVE_HIGH [ipx::get_bus_parameters POLARITY -of_objects [ \\
+		ipx::get_bus_interfaces rst -of_objects [ipx::current_core]]]
+	set_property value $(PARAM_CPUFREQ) [ipx::get_bus_parameters FREQ_HZ -of_objects [ \\
+		ipx::get_bus_interfaces clk -of_objects [ipx::current_core]]]
+	set_property core_revision 2 [ipx::current_core]
+	ipx::update_source_project_archive -component [ipx::current_core]
+	ipx::create_xgui_files [ipx::current_core]
+	ipx::update_checksums [ipx::current_core]
+	ipx::check_integrity [ipx::current_core]
+	ipx::save_core [ipx::current_core]
+endef
+export PM_TCL
 
 define UART_TCL
 	# Import UART interface
@@ -1431,7 +1491,7 @@ define GS2_XDC
 endef
 export GS2_XDC
 
-project : .sdintf/ .cohintf/ .core/ .clint/ .plic/ .cohub/ .rom/ .sdc/ .uart/ .eth/ .def/
+project : .sdintf/ .cohintf/ .core/ .clint/ .plic/ .pm/ .cohub/ .rom/ .sdc/ .uart/ .eth/ .def/
 	$(RM) -r .prj/ && mkdir .prj
 	echo "$$MIG_PRJ" > .prj/mig.prj
 	echo "$$PRJ_TCL" > .prj/prj.tcl
@@ -1470,6 +1530,12 @@ build : project
 	ln -s $(PLIC_SRC) .plic/
 	echo "$$PLIC_TCL" > .plic/plic.tcl
 	vivado -mode batch -source .plic/plic.tcl >/dev/null 2>&1
+
+.pm/ : $(PM_SRC)
+	$(RM) -r .pm/ && mkdir .pm
+	ln -s $(PM_SRC) .pm/
+	echo "$$PM_TCL" > .pm/pm.tcl
+	vivado -mode batch -source .pm/pm.tcl >/dev/null 2>&1
 
 .uart/ : $(UART_SRC) .uartintf/
 	$(RM) -r .uart/ && mkdir .uart
