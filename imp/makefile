@@ -331,12 +331,12 @@ define BLD_TCL
 	# set_property STEPS.OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
 	# set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
 	# # end of cancelling optimization
-	# # if extra timing optimization is needed, uncomment these lines
+	# if extra timing optimization is needed, uncomment these lines
 	set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
-	# set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt [get_runs impl_1]
-	# set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
-	# set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE NoTimingRelaxation [get_runs impl_1]
-	# # end of extra optimization
+	set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE ExtraTimingOpt [get_runs impl_1]
+	set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
+	set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE NoTimingRelaxation [get_runs impl_1]
+	# end of extra optimization
 	launch_runs impl_1 -to_step write_bitstream -jobs 32
 endef
 export BLD_TCL

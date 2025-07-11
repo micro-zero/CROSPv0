@@ -79,7 +79,7 @@ module plic #(
                     pending[32'(index[ct]) >> 5][32'(index[ct]) & 31] <= 0;
                 end
         end
-        if (~s_axi_awready & ~s_axi_wready) begin // AW and W handshake done
+        if (~s_axi_awready & ~s_axi_wready & ~s_axi_bvalid) begin // AW and W handshake done
             s_axi_bvalid <= 1;
             if (waddr < 28'hc001000)
                 prioriti[$clog2(ndev)'(waddr >> 2)] <= wdata;

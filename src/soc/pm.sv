@@ -3,7 +3,7 @@
  *   This file includes performance monitor module with AXI as slave interface.
  */
 
-module epm #(
+module pm #(
     parameter evnum = 64 // event number
 )(
     input  logic                  clk,
@@ -35,19 +35,20 @@ module epm #(
     |    ...                                |
     | 8*(evnum-1): sample counter evnum - 1 |
     | 8* evnum:    control register         |
-    | 8*(evnum+1): sample event selector    |
-    | 8*(evnum+2): sample event comparator  |
+    | 8*(evnum+1): sample event comparator  |
     \*-------------------------------------*/
     logic [evnum-1:0][63:0] counter, sample;
-    logic            [63:0] ctrl, sel, comp;
+    logic            [63:0] ctrl, comp;
     logic            [15:0] waddr; // AXI write address
     logic            [63:0] wdata; // AXI write data
+    logic sena, iena;              // sample enable and increment enable
     always_comb s_axi_rresp = 0;
     always_comb s_axi_bresp = 0;
+    always_comb sena = ~ctrl[0] & counter[$clog2(evnum)'(ctrl[31:8])] >= comp;
+    always_comb iena = ctrl[32'(level) + 4] & pid == ctrl[63:32];
     always_ff @(posedge clk) if (rst) begin
         sample        <= 0;
-        ctrl          <= 0; // [0] data valid, [7:4] level inhibit, [63:32] pid
-        sel           <= 0;
+        ctrl          <= 0; // [0] data valid, [7:4] level enable, [31:8] sample selection, [63:32] pid
         comp          <= -64'd1;
         s_axi_arready <= 1;
         s_axi_awready <= 1;
@@ -56,7 +57,7 @@ module epm #(
         s_axi_bvalid  <= 0;
     end else begin
         /* sample */
-        if (~ctrl[0] & counter[$clog2(evnum)'(sel)] >= comp) begin
+        if (sena) begin
             sample  <= counter;
             ctrl[0] <= 1;
         end
@@ -66,14 +67,12 @@ module epm #(
             s_axi_rvalid  <= 1;
             if      (s_axi_araddr <  8 *  evnum)      s_axi_rdata <= sample[32'(s_axi_araddr) >> 3];
             else if (s_axi_araddr == 8 *  evnum)      s_axi_rdata <= ctrl;
-            else if (s_axi_araddr == 8 * (evnum + 1)) s_axi_rdata <= sel;
-            else if (s_axi_araddr == 8 * (evnum + 2)) s_axi_rdata <= comp;
+            else if (s_axi_araddr == 8 * (evnum + 1)) s_axi_rdata <= comp;
         end
-        if (~s_axi_awready & ~s_axi_wready) begin // AW and W handshake done
+        if (~s_axi_awready & ~s_axi_wready & ~s_axi_bvalid) begin // AW and W handshake done
             s_axi_bvalid <= 1;
             if      (waddr == 8 *  evnum)      ctrl <= wdata;
-            else if (waddr == 8 * (evnum + 1)) sel  <= wdata;
-            else if (waddr == 8 * (evnum + 2)) comp <= wdata;
+            else if (waddr == 8 * (evnum + 1)) comp <= wdata;
         end
         if (s_axi_rvalid  & s_axi_rready)  {s_axi_rvalid, s_axi_arready}               <= 1; // R  handshake
         if (s_axi_bvalid  & s_axi_bready)  {s_axi_bvalid, s_axi_awready, s_axi_wready} <= 3; // B  handshake
@@ -82,6 +81,5 @@ module epm #(
     end
     always_ff @(posedge clk) if (rst) counter <= 0; else
         for (int i = 0; i < evnum; i++)
-            if (~ctrl[32'(level)+4] & pid == ctrl[63:32])
-                counter[i] <= counter[i] + 64'(events[i]);
+            counter[i] <= (sena ? 0 : counter[i]) + (iena ? 64'(events[i]) : 0);
 endmodule

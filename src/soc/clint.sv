@@ -68,7 +68,7 @@ module clint #(
                 default: ;
             endcase
         end
-        if (~s_axi_awready & ~s_axi_wready) begin // AW and W handshake done
+        if (~s_axi_awready & ~s_axi_wready & ~s_axi_bvalid) begin // AW and W handshake done
             s_axi_bvalid <= 1;
             case (waddr)
                 16'h0000: msip     <= wdata[0];
