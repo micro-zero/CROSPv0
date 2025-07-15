@@ -395,9 +395,10 @@ module commit #(
     always_comb sfvadd = vadd_last;
     always_comb begin
         rob_out = 0;  // release ROB entry after commiting
-        inst_ret = 0; // except operations writing to temporary logical registers
+        inst_ret = 0; // except operations writing to temporary logical registers and exceptions
         for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15]) rob_out++;
-        for (int i = 0; i < cwd; i++) if (com_bundle[i].opid[15] & ~dec_rvalue[i].lrda[6]) inst_ret++;
+        for (int i = 0; i < cwd; i++)
+            if (com_bundle[i].opid[15] & ~dec_rvalue[i].lrda[6] & ~exe_rvalue[i].cause[7]) inst_ret++;
     end
     always_ff @(posedge clk) if (rst) exe_last <= 0;
     else if (|rob_out) begin
