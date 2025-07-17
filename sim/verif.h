@@ -15,7 +15,6 @@ extern std::vector<std::string> pmpname;
 
 typedef struct
 {
-    uint8_t arid, awid, rid, bid;
     uint8_t awvalid, awready, awburst, awlen, awsize;
     uint64_t awaddr;
     uint8_t wvalid, wready, wlast, wstrb;

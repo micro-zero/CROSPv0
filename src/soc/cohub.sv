@@ -95,8 +95,11 @@ module cohub(
     always_ff @(posedge clk) if (rst) m_lock <= 0; else begin
         /* `s_lock` as lock request from devices,
            `m_lock` as lock confirmation to devices */
-        m_lock <= 0;
-        for (int i = pn - 1; i >= 0; i--) if (s_lock[i]) m_lock <= 1 << i;
+        m_lock <= m_lock & s_lock;
+        if (~|m_lock)
+            for (int i = pn - 1; i >= 0; i--) if (s_lock[i]) m_lock <= 1 << i;
+        /* For unlocked devices i.e., `s_lock & m_lock` is zero,
+           they must response for requests in finite time */
     end
 
     /* get and buffer slave requests and master responses */
@@ -113,14 +116,15 @@ module cohub(
             addr_sb[i] <= s_addr[i];
         end
     always_ff @(posedge clk) if (rst) sent_sb <= 0; else begin
-        for (int i = 0; i < pn; i++) if (|s_rqst[i]) sent_sb[i] <= 1 << i;
+        for (int i = 0; i < pn; i++) // GetI (evict) is not broadcasted
+            if (|s_rqst[i]) sent_sb[i] <= s_trsc[i] == 0 ? -(pn)'(1) : (pn)'(1) << i;
         for (int i = 0; i < pn; i++)
             for (int j = 0; j < pn; j++) if (|rqst_sb[i] & m_rqst[j] == rqst_sb[i])
                 sent_sb[i][j] <= 1;
     end
     always_ff @(posedge clk) if (rst) resp_mb <= 0;
         else for (int i = 0; i < pn; i++) begin
-            if (|s_rqst[i]) resp_mb[i] <= 1 << i;
+            if (|s_rqst[i]) resp_mb[i] <= s_trsc[i] == 0 ? -(pn)'(1) : (pn)'(1) << i;
             if (|s_resp[i]) resp_mb[i] <= 0;
             if (|s_resp[i]) mesi_mb[i] <= 0;
             for (int j = 0; j < pn; j++) if (|rqst_sb[i] & m_resp[j] == rqst_sb[i]) begin

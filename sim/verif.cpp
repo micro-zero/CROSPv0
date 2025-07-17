@@ -372,14 +372,12 @@ axiport_t memory::s() const { return axiport; }
  */
 axidev &memory::sset(const axiport_t &ap)
 {
-    axiport.awid = ap.arid;
     axiport.awvalid = ap.awvalid;
     axiport.awaddr = ap.awaddr;
     axiport.awburst = ap.awburst;
     axiport.awlen = ap.awlen;
     axiport.awsize = ap.awsize;
     axiport.arvalid = ap.arvalid;
-    axiport.arid = ap.arid;
     axiport.araddr = ap.araddr;
     axiport.arburst = ap.arburst;
     axiport.arlen = ap.arlen;

@@ -84,7 +84,6 @@ module sdc #(
     logic            locked;
     logic [$clog2(maxb):0] index;
     logic arvalid, awvalid, arready, awready;
-    always_comb locked = m_coh_lock & s_coh_lock;
     always_comb begin
         index = 0;
         for (int i = maxb - 1; i >= 0; i--)
@@ -94,6 +93,7 @@ module sdc #(
     always_comb m_coh_rqst = index[$clog2(maxb)] & ~snt[$clog2(maxb)'(index)] ? reqid : 0;
     always_comb m_coh_addr = 64'(base) + 64'($clog2(maxb)'(index)) * blk;
     always_comb m_coh_trsc = 1; // own GetV
+    always_ff @(posedge clk) locked <= m_coh_lock & s_coh_lock;
     always_ff @(posedge clk) if (rst) {req, own, snt} <= 0; else begin
         if (m_axi_rvalid & m_axi_rready & m_axi_rlast) req <= 0;
         if (m_axi_bvalid & m_axi_bready)               req <= 0;
@@ -111,7 +111,7 @@ module sdc #(
         end
         if (m_coh_rqst == reqid) snt[$clog2(maxb)'(index)] <= 1;
         if (m_coh_resp == reqid) own[$clog2(maxb)'(index)] <= 1;
-        if (|s_coh_resp) own <= 0; // request from ports with higher priority
+        if (|s_coh_resp) own <= 0; // unlocked and getting request from other ports
     end
 
     /* coherence slave interface */

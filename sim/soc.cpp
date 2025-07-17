@@ -263,13 +263,11 @@ verifcore::~verifcore()
 axiport_t verifcore::m() const
 {
     axiport_t ap;
-    ap.awid = dut.m_axi_awid;
     ap.awvalid = dut.m_axi_awvalid;
     ap.awaddr = dut.m_axi_awaddr;
     ap.awburst = dut.m_axi_awburst;
     ap.awlen = dut.m_axi_awlen;
     ap.awsize = dut.m_axi_awsize;
-    ap.arid = dut.m_axi_arid;
     ap.arvalid = dut.m_axi_arvalid;
     ap.araddr = dut.m_axi_araddr;
     ap.arburst = dut.m_axi_arburst;
@@ -294,12 +292,10 @@ axidev &verifcore::mset(const axiport_t &ap)
     dut.m_axi_awready = ap.awready;
     dut.m_axi_arready = ap.arready;
     dut.m_axi_wready = ap.wready;
-    dut.m_axi_rid = ap.rid;
     dut.m_axi_rvalid = ap.rvalid;
     dut.m_axi_rresp = ap.rresp;
     dut.m_axi_rdata = ap.rdata;
     dut.m_axi_rlast = ap.rlast;
-    dut.m_axi_bid = ap.bid;
     dut.m_axi_bvalid = ap.bvalid;
     dut.m_axi_bresp = ap.bresp;
     return *this;
@@ -917,13 +913,11 @@ sdctl::~sdctl()
 axiport_t sdctl::m() const
 {
     axiport_t ap;
-    ap.awid = 0;
     ap.awvalid = dut.m_axi_awvalid;
     ap.awaddr = dut.m_axi_awaddr;
     ap.awburst = dut.m_axi_awburst;
     ap.awlen = dut.m_axi_awlen;
     ap.awsize = dut.m_axi_awsize;
-    ap.arid = 0;
     ap.arvalid = dut.m_axi_arvalid;
     ap.araddr = dut.m_axi_araddr;
     ap.arburst = dut.m_axi_arburst;
@@ -945,8 +939,6 @@ axiport_t sdctl::m() const
 axiport_t sdctl::s() const
 {
     axiport_t ap;
-    ap.arid = 0;
-    ap.awid = 0;
     ap.awready = dut.s_axi_awready;
     ap.arready = dut.s_axi_arready;
     ap.wready = dut.s_axi_wready;
@@ -1519,8 +1511,6 @@ uartctl::~uartctl()
 axiport_t uartctl::s() const
 {
     axiport_t ap;
-    ap.arid = 0;
-    ap.awid = 0;
     ap.awready = dut.s_axi_awready;
     ap.arready = dut.s_axi_arready;
     ap.wready = dut.s_axi_wready;
@@ -1736,13 +1726,11 @@ ethctl::~ethctl()
 axiport_t ethctl::m() const
 {
     axiport_t ap;
-    ap.awid = 0;
     ap.awvalid = dut.m_axi_awvalid;
     ap.awaddr = dut.m_axi_awaddr;
     ap.awburst = dut.m_axi_awburst;
     ap.awlen = dut.m_axi_awlen;
     ap.awsize = dut.m_axi_awsize;
-    ap.arid = 0;
     ap.arvalid = dut.m_axi_arvalid;
     ap.araddr = dut.m_axi_araddr;
     ap.arburst = dut.m_axi_arburst;
@@ -1764,8 +1752,6 @@ axiport_t ethctl::m() const
 axiport_t ethctl::s() const
 {
     axiport_t ap;
-    ap.arid = 0;
-    ap.awid = 0;
     ap.awready = dut.s_axi_awready;
     ap.arready = dut.s_axi_arready;
     ap.wready = dut.s_axi_wready;

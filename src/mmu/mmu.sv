@@ -54,15 +54,10 @@ module mmu(
     input  logic  [7:0] m_coh_mesi, // master coherence state
     /* AXI master interface */
     /* write address channel */
-    output logic  [7:0] m_axi_awid,
     output logic [63:0] m_axi_awaddr,
     output logic  [7:0] m_axi_awlen,
     output logic  [2:0] m_axi_awsize,
     output logic  [1:0] m_axi_awburst,
-    output logic        m_axi_awlock,
-    output logic  [3:0] m_axi_awcache,
-    output logic  [2:0] m_axi_awprot,
-    output logic  [3:0] m_axi_awqos,
     output logic        m_axi_awvalid,
     input  logic        m_axi_awready,
     /* write data channel */
@@ -72,24 +67,17 @@ module mmu(
     output logic        m_axi_wvalid,
     input  logic        m_axi_wready,
     /* write response channel */
-    input  logic  [7:0] m_axi_bid,
     input  logic  [1:0] m_axi_bresp,
     input  logic        m_axi_bvalid,
     output logic        m_axi_bready,
     /* read address channel */
-    output logic  [7:0] m_axi_arid,
     output logic [63:0] m_axi_araddr,
     output logic  [7:0] m_axi_arlen,
     output logic  [2:0] m_axi_arsize,
     output logic  [1:0] m_axi_arburst,
-    output logic        m_axi_arlock,
-    output logic  [3:0] m_axi_arcache,
-    output logic  [2:0] m_axi_arprot,
-    output logic  [3:0] m_axi_arqos,
     output logic        m_axi_arvalid,
     input  logic        m_axi_arready,
     /* read data channel */
-    input  logic  [7:0] m_axi_rid,
     input  logic [63:0] m_axi_rdata,
     input  logic  [1:0] m_axi_rresp,
     input  logic        m_axi_rlast,
@@ -357,14 +345,14 @@ module mmu(
                     m_axi_arlen  <= 7;
                     m_axi_arsize <= 3;
                 end else if (|coh_resp_mb & ~coh_flsh_mb & ~flush[coh_resp_mb]) begin
-                    if (coh_mesi_mb == 1) {m_axi_arvalid, axi_stt} <= {1'd1, 8'd1};
                     /* todo: some IO write should skip read transaction */
-                    else {m_axi_arvalid, axi_stt} <= {1'd0, 8'd6};
+                    axi_stt       <= 1;
                     axi_cnt       <= 0;
                     axi_req       <= coh_resp_mb;
                     axi_thr       <= 0;
                     axi_str       <= coh_strb_mb;
                     axi_buf       <= coh_wdat_mb;
+                    m_axi_arvalid <= 1;
                     m_axi_araddr  <= coh_addr_mb;
                     m_axi_arlen   <= 7;
                     m_axi_arsize  <= 3;
@@ -436,18 +424,8 @@ module mmu(
     end
     always_ff @(posedge clk) if (rst | axi_stt == 6)           axi_fls <= 0;
         else if (|axi_stt & (flush[axi_req] | flush[axi_thr])) axi_fls <= 1;
-    always_comb m_axi_arid    = 0;
-    always_comb m_axi_arburst = 'b01;  // INCR burst
-    always_comb m_axi_arlock  = 0;
-    always_comb m_axi_arcache = 0;
-    always_comb m_axi_arprot  = 0;
-    always_comb m_axi_arqos   = 0;
-    always_comb m_axi_awid    = 0;
-    always_comb m_axi_awburst = 'b01;  // INCR burst
-    always_comb m_axi_awlock  = 0;
-    always_comb m_axi_awcache = 0;
-    always_comb m_axi_awprot  = 0;
-    always_comb m_axi_awqos   = 0;
+    always_comb m_axi_arburst = 'b01; // INCR burst
+    always_comb m_axi_awburst = 'b01; // INCR burst
 
     /* data cache coherence */
     always_comb m_coh_addr = coh_addr_mb;
@@ -493,9 +471,13 @@ module mmu(
     always_ff @(posedge clk) if (rst | flush[coh_lock_sb]) coh_lock_sb <= 0;
         else if (|m_coh_resp & ~coh_flsh_mb & ~flush[m_coh_resp] & coh_trsc_mb == 1)
             coh_lock_sb <= m_coh_resp;
-        /* todo: use AXI handshake to confirm may be better than `dc_resp_s`,
-           for not all requests must have a data cache response */
-        /* todo: there is deadlock possibility */
+        /* here use `dc_resp_s` to unlock and there is deadlock possibility.
+           To use this lock properly, data path from locking to unlocking
+           must be carefully checked. Now locking is when master coherence
+           responsed with valid state, unlocking is slave cache response, so
+           the path contains AXI transaction, and maybe cache eviction. The
+           coherence request of cache eviction is not going to be broadcast
+           because of its GetI property, so deadlock is resolved */
         else if (coh_lock_sb == dc_resp_s) coh_lock_sb <= 0;
 
     /* assemble data cache request and response */

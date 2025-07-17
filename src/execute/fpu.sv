@@ -551,7 +551,7 @@ module fpu #(
                 e_div <= `EINF;
             a_div           <= am_split[1] << 6'(borrow);
             b_div           <= bm_split[1];
-            c_div           <= 55;
+            c_div           <= succeed(r_split[1].opid) ? 64 : 55;
             f_div           <= f_split[1];
             r_div.opid      <= succeed(r_split[1].opid) ? 0 : r_split[1].opid;
             r_div.brid      <= r_split[1].brid;
@@ -594,7 +594,7 @@ module fpu #(
             e_sqr           <= (ae_split[1] - 2047 >> 1) + 2047;
             a_sqr           <= ae_split[1][0] ? am_split[1] : am_split[1] << 1;
             m_sqr           <= 1 << 55;
-            c_sqr           <= 55; // next trial bit position
+            c_sqr           <= succeed(r_split[1].opid) ? 64 : 55; // next trial bit position
             n_sqr           <= 0;  // inner multiplier stage number
             f_sqr           <= f_split[1];
             rest            <= 1;
