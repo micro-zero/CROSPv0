@@ -456,7 +456,7 @@ module fpu #(
     end
     always_ff @(posedge clk) if (~stuck_pip) begin
         r_pip           <= 0;
-        r_pip.opid      <= r_split[4].opid;
+        r_pip.opid      <= succeed(r_split[4].opid) ? 0 : r_split[4].opid;
         r_pip.brid      <= r_split[4].brid;
         r_pip.ldid      <= r_split[4].ldid;
         r_pip.stid      <= r_split[4].stid;
@@ -633,7 +633,9 @@ module fpu #(
     always_comb rr_out = |rr_num & ~stuck_pip ? 1 : 0;
     always_comb begin
         resp = 0;
-        resp[0] = c_div == -7'd2 ? r_div : r_pip;
-        resp[1] = c_sqr == -7'd2 ? r_sqr : r_mul[`MST];
+        if (r_div.opid[15]) resp[0] = c_div == -7'd2 ? r_div : 0;
+        else                resp[0] = r_pip;
+        if (r_sqr.opid[15]) resp[1] = c_sqr == -7'd2 ? r_sqr : 0;
+        else                resp[1] = r_mul[`MST];
     end
 endmodule
