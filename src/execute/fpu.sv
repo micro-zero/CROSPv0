@@ -184,7 +184,7 @@ module fpu #(
     /* stage 1: split */
     iss_bundle_t [`NST:1] r_split; // buffer of register read bundle
     fpu_funct_t  [`NST:1] f_split; // buffer of functional code
-    logic [`NST:1]       as_split, bs_split;
+    logic [`NST:1]       as_split, bs_split, fl_split;
     logic [`NST:1][11:0] ae_split, be_split;
     logic [`NST:1][63:0] am_split, bm_split;
     logic [63:0] am_rev, bm_rev; // used for subnormal split
@@ -203,13 +203,13 @@ module fpu #(
     end
     always_comb ah = 63 - am_pos[5:0];
     always_comb bh = 63 - bm_pos[5:0];
+    always_comb for (int i = 1; i <= `NST; i++) fl_split[i] = succeed(r_split[i].opid);
     always_ff @(posedge clk) if (rst) r_split <= 0; else if (~stuck_pip) begin
-        for (int i = 2; i <= `NST; i++)
-            r_split[i] <= succeed(r_split[i - 1].opid) ? 0 : r_split[i - 1];
+        for (int i = 2; i <= `NST; i++) r_split[i] <= fl_split[i - 1] ? 0 : r_split[i - 1];
         r_split[1] <= succeed(rr_opid[rr_front]) | rr_bubble[rr_front] | ~|rr_out ? 0 : rr_rvalue;
         if (f_split[1].fmul | f_split[1].fnmul) r_split[2].opid <= 0;
         if (f_split[1].fdiv | f_split[1].fsqrt) r_split[2].opid <= 0;
-    end
+    end else for (int i = 1; i <= `NST; i++) if (fl_split[i]) r_split[i].opid <= 0;
     always_ff @(posedge clk) if (~stuck_pip) f_split <= {f_split[`NST-1:1], f};
     always_ff @(posedge clk) if (~stuck_pip) begin
         as_split[`NST:2] <= as_split[`NST-1:1];
@@ -467,7 +467,7 @@ module fpu #(
         r_pip.prdv      <= r;
         r_pip.fflags[0] <= nx_conv     | nx_calc[4]; // NX
         r_pip.fflags[4] <= nv_align[4] | nv_calc[4]; // NV
-    end
+    end else if (succeed(r_pip.opid)) r_pip.opid <= 0;
 
     /*------------------------------------ multiplier -------------------------------------*\
     |    s1*m1 [ 00---1.xx---x00 ]*2^(e1-2047)   *s2*m2 [ 00---1.xx---x00 ]*2^(e2-2047)     |
@@ -478,7 +478,7 @@ module fpu #(
     `define MST 5 // multiplier stage number
     exe_bundle_t [`MST:1]        r_mul;
     fpu_funct_t  [`MST:1]        f_mul;
-    logic        [`MST:1]        s_mul;
+    logic        [`MST:1]        s_mul, fl_mul;
     logic        [`MST:1] [11:0] e_mul;
     logic        [`MST:1][127:0] m_mul;
     logic   [7:0] pos_mul;
@@ -489,9 +489,10 @@ module fpu #(
     always_comb for (int i = 0; i < 128; i++) rev_mul[i] = m_mul[`MST-1][127 - i];
     always_comb rh_mul = 127 - 12'(pos_mul[6:0]);
     always_comb {srs_mulh, srs_mul} = srs128(m_mul[`MST-1], 12'(rh_mul) - 55);
+    always_comb for (int i = 1; i <= `MST; i++) fl_mul[i] = succeed(r_mul[i].opid);
     always_ff @(posedge clk) if (rst) r_mul <= 0; else if (~stuck_mul) begin
         /* uniform of [MST-1] to [MST] */
-        r_mul[`MST]      <= r_mul[`MST-1];
+        r_mul[`MST]      <= fl_mul[`MST-1] ? 0 : r_mul[`MST-1];
         if (~pos_mul[7]) r_mul[`MST].prdv <= f_mul[`MST-1].double ? 0 : 64'hffff_ffff_0000_0000;
         else             r_mul[`MST].prdv <=
             asm(s_mul[`MST-1], e_mul[`MST-1] + rh_mul, srs_mul, f_mul[`MST-1].double, f_mul[`MST-1].rm);
@@ -499,7 +500,7 @@ module fpu #(
             nx (s_mul[`MST-1], e_mul[`MST-1] + rh_mul, srs_mul, f_mul[`MST-1].double, f_mul[`MST-1].rm);
         /* shift of [1 .. MST-2] to [2 .. MST-1] */
         for (int i = 2; i < `MST; i++)
-            r_mul[i] <= succeed(r_mul[i - 1].opid) ? 0 : r_mul[i - 1];
+            r_mul[i] <= fl_mul[i - 1] ? 0 : r_mul[i - 1];
         f_mul[`MST-1:2] <= f_mul[`MST-2:1];
         s_mul[`MST-1:2] <= s_mul[`MST-2:1];
         e_mul[`MST-1:2] <= e_mul[`MST-2:1];
@@ -523,7 +524,7 @@ module fpu #(
         if (13'(ae_split[1]) + 13'(be_split[1]) < 13'd2047 + 13'd110)         e_mul[1] <= 0;     // underflow
         if (13'(ae_split[1]) + 13'(be_split[1]) > 13'd2047 + 13'd110 + `EINF) e_mul[1] <= `EINF; // overflow
         if (ae_split[1] == `EINF | be_split[1] == `EINF)                      e_mul[1] <= `EINF; // infinity
-    end
+    end else for (int i = 1; i <= `MST; i++) if (fl_mul[i]) r_mul[i].opid <= 0;
 
     /*------------------------------ divider ------------------------------*\
     |    s1*m1[ 00---1.xx---x000 ]*2^(e1-2047)     s1     m1                |

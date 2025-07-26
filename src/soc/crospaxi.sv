@@ -39,8 +39,8 @@ module crospaxi #(
     input  logic [63:0] mtime,
     /* debug ports */
     output logic      [63:0] dbg_cycle,
-    output logic      [63:0] dbg_pcir0,
-    output logic      [63:0] dbg_pcir1,
+    output logic      [95:0] dbg_pcir0,
+    output logic      [95:0] dbg_pcir1,
     output logic      [31:0] dbg_ospid,
     output logic       [1:0] dbg_level,
     output logic [11:0][3:0] dbg_event,
@@ -286,8 +286,8 @@ module crospaxi #(
     always_comb dbg_event = csr_pmd;
     always_ff @(posedge clk) if (rst) dbg_cycle <= 0; else dbg_cycle <= dbg_cycle + 1;
     always_ff @(posedge clk) if (rst) {dbg_pcir0, dbg_pcir1} <= 0; else begin
-        if (com_bundle[0].opid[15]) dbg_pcir0 <= {com_bundle[0].pc[31:0], com_bundle[0].ir};
-        if (com_bundle[1].opid[15]) dbg_pcir1 <= {com_bundle[1].pc[31:0], com_bundle[1].ir};
+        if (com_bundle[0].opid[15]) dbg_pcir0 <= {com_bundle[0].pc, com_bundle[0].ir};
+        if (com_bundle[1].opid[15]) dbg_pcir1 <= {com_bundle[1].pc, com_bundle[1].ir};
     end
     always_ff @(posedge clk) if (rst) dbg_ospid <= 0; else
         for (int i = 0; i < cwd; i++)

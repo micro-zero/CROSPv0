@@ -127,7 +127,8 @@ module vcore #(
     output logic [63:0] ldmisp   // load misprediction
 );
     /* instantiate core with direct memory interface */
-    logic      [63:0] dbg_cycle, dbg_pcir0, dbg_pcir1;
+    logic      [63:0] dbg_cycle;
+    logic      [95:0] dbg_pcir0, dbg_pcir1;
     logic      [31:0] dbg_ospid;
     logic       [1:0] dbg_level;
     logic [11:0][3:0] dbg_event;
